@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from "@nuxt/ui";
 import { ref, onMounted } from "vue";
-import { useCookie } from "nuxt/app";
 import { useToast } from "@nuxt/ui/composables/useToast";
+import { useCookieConsent } from "../composables/useCookieConsent";
 
 const toast = useToast();
+const { acceptCookies, needsConsent } = useCookieConsent();
 
 const open = ref(false);
 
@@ -29,32 +30,23 @@ const links: NavigationMenuItem[] = [
 ];
 
 onMounted(async () => {
-  const cookie = useCookie("cookie-consent");
-  if (cookie.value === "accepted") {
+  if (!needsConsent.value) {
     return;
   }
 
   toast.add({
     title:
       "We use first-party cookies to enhance your experience on our website.",
+    description:
+      "By continuing to use this site, you agree to our use of cookies.",
     duration: 0,
-    close: false,
-    actions: [
-      {
-        label: "Accept",
-        color: "neutral",
-        variant: "outline",
-        onClick: () => {
-          cookie.value = "accepted";
-        },
-      },
-      {
-        label: "Opt out",
-        color: "neutral",
-        variant: "ghost",
-      },
-    ],
+    close: true,
+    color: "primary",
   });
+
+  setTimeout(() => {
+    acceptCookies();
+  }, 100);
 });
 </script>
 

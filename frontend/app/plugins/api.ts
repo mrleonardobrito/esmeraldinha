@@ -1,49 +1,41 @@
 import { useRuntimeConfig, defineNuxtPlugin } from "nuxt/app";
+import { useApiStatus } from "../composables/useApiStatus";
 
 export default defineNuxtPlugin((_) => {
   const config = useRuntimeConfig();
-
-  // Importar o composable de status da API (será inicializado quando o app estiver pronto)
-  let apiStatus: ReturnType<typeof import('~/composables/useApiStatus').useApiStatus> | null = null
+  let apiStatus: ReturnType<typeof useApiStatus> | null = null;
 
   const api = $fetch.create({
     baseURL: (config.public.apiBaseUrl as string) ?? "http://127.0.0.1:8000",
 
-    onRequest({ request, options }) {
-      // Inicializar apiStatus se ainda não foi feito
+    onRequest() {
       if (!apiStatus) {
-        const { useApiStatus } = require('~/composables/useApiStatus')
-        apiStatus = useApiStatus()
+        apiStatus = useApiStatus();
       }
 
-      // Resetar status da API em cada nova requisição
       if (apiStatus) {
-        apiStatus.setApiAvailable()
+        apiStatus.setApiAvailable();
       }
     },
 
-    onRequestError({ request, options, error }) {
+    onRequestError({ error }) {
       if (apiStatus) {
-        apiStatus.checkConnectionError(error)
+        apiStatus.checkConnectionError(error);
       }
     },
 
-    onResponse({ request, response, options }) {
-      // Se chegou aqui, a API está funcionando
+    onResponse() {
       if (apiStatus) {
-        apiStatus.setApiAvailable()
+        apiStatus.setApiAvailable();
       }
     },
 
-    onResponseError({ request, response, options, error }) {
+    onResponseError({ error }) {
       if (apiStatus) {
-        // Verificar se é erro de conexão
-        const isConnectionError = apiStatus.checkConnectionError(error)
+        const isConnectionError = apiStatus.checkConnectionError(error);
 
-        // Se não é erro de conexão, pode ser erro da API (400, 500, etc.)
-        // Nesse caso, mantemos a API como disponível
         if (!isConnectionError) {
-          apiStatus.setApiAvailable()
+          apiStatus.setApiAvailable();
         }
       }
     },
