@@ -8,6 +8,8 @@ interface Props {
 
 const props = defineProps<Props>();
 
+const progress = computed(() => props.gradebook.progress);
+
 const emit = defineEmits<{
   edit: [gradebook: Gradebook];
   archive: [gradebook: Gradebook];
@@ -72,14 +74,14 @@ const handleDelete = () => {
       </h4>
       <div class="w-full">
         <UProgress
-          :value="gradebook.progress"
+          v-model="progress"
           :max="100"
           size="xs"
           class="w-full"
           :animated="false"
         />
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          {{ gradebook.progress }}% concluído
+          {{ progress }}% concluído
         </p>
       </div>
     </div>
@@ -89,7 +91,7 @@ const handleDelete = () => {
         :src="teacherAvatarUrl"
         :alt="`Avatar de ${gradebook.teacher.code}`"
         size="md"
-        class="flex-shrink-0"
+        class="shrink-0"
       />
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-gray-900 dark:text-white">
