@@ -6,7 +6,6 @@ export const useTeachers = () => {
   const { withErrorHandling } = useErrorToast()
   const basePath = '/api/teachers/'
 
-  // Versões com tratamento automático de erro (retornam null em caso de erro)
   const list = (params?: PaginationParams) =>
     withErrorHandling(
       () => $api<PaginatedResponse<Teacher>>(basePath, { params }),
@@ -39,7 +38,6 @@ export const useTeachers = () => {
       { title: 'Erro ao excluir professor', mode: 'toast' }
     )
 
-  // Versões sem tratamento automático (para useAsyncData, etc.)
   const listRaw = (params?: PaginationParams) =>
     $api<PaginatedResponse<Teacher>>(basePath, { params })
 
@@ -64,12 +62,10 @@ export const useTeachers = () => {
     })
 
   return {
-    // Métodos com tratamento automático
     list,
     create,
     update,
     destroy,
-    // Métodos sem tratamento automático
     listRaw,
     retrieveRaw,
     createRaw,

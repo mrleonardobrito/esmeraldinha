@@ -1,6 +1,6 @@
 import { readonly, ref } from "vue";
 import type { ApiErrorResponse } from "../types";
-import { useApiStatus } from "./useApiStatus";
+import { checkConnectionError } from "./useApiStatus";
 import { createError } from "nuxt/app";
 import { useToast } from "@nuxt/ui/composables/useToast";
 
@@ -213,8 +213,6 @@ export const useErrorToast = () => {
     try {
       return await apiCall();
     } catch (error) {
-      const { checkConnectionError } = useApiStatus();
-
       const isConnectionError = checkConnectionError(error);
 
       if (!isConnectionError) {

@@ -12,7 +12,6 @@ export const useAcademicCalendars = () => {
       { title: 'Erro ao carregar calendários acadêmicos', mode: 'toast' }
     )
 
-  // Versão sem tratamento automático (para useAsyncData, etc.)
   const listRaw = () =>
     $api<PaginatedResponse<AcademicCalendar>>(basePath)
 

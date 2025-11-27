@@ -1,4 +1,3 @@
-// composables/useGradebookApi.ts
 import type {
   Gradebook,
   GradebookCreate,
@@ -51,7 +50,6 @@ export const useGradebooks = () => {
       { title: 'Erro ao excluir caderno de notas', mode: 'toast' }
     )
 
-  // Versões sem tratamento automático (para useAsyncData, etc.)
   const listRaw = (params?: PaginationParams) =>
     $api<PaginatedResponse<Gradebook>>(basePath, { params })
 
@@ -76,13 +74,11 @@ export const useGradebooks = () => {
     })
 
   return {
-    // Métodos com tratamento automático
     list,
     retrieve,
     create,
     update,
     destroy,
-    // Métodos sem tratamento automático
     listRaw,
     retrieveRaw,
     createRaw,
