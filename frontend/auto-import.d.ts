@@ -1,0 +1,1 @@
+/// <reference path="./.nuxt/nuxt.d.ts" />
