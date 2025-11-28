@@ -13,7 +13,7 @@ const emit = defineEmits<{ close: [boolean] }>();
 
 const toast = useToast();
 const { create: createTeacher } = useTeachers();
-const { listRaw: listSchools } = useSchools();
+const { list: listSchools } = useSchools();
 
 const isSubmitting = ref(false);
 const submitError = ref<string | null>(null);
@@ -100,16 +100,16 @@ async function handleSubmit(event: Record<string, unknown>) {
   submitError.value = null;
   isSubmitting.value = true;
 
-  const payload: TeacherCreate = {
-    code: event.code as string,
-    school_id: Number(event.school_id),
-    reduction_day: event.reduction_day as ReductionDay,
-    diary_type: event.diary_type as DiaryType,
-  };
+  try {
+    const payload: TeacherCreate = {
+      code: event.code as string,
+      school_id: Number(event.school_id),
+      reduction_day: event.reduction_day as ReductionDay,
+      diary_type: event.diary_type as DiaryType,
+    };
 
-  const result = await createTeacher(payload);
+    await createTeacher(payload);
 
-  if (result) {
     toast.add({
       title: "Professor criado com sucesso!",
       color: "success",
@@ -117,9 +117,23 @@ async function handleSubmit(event: Record<string, unknown>) {
     });
 
     emit("close", true);
-  }
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Não foi possível salvar o professor.";
 
-  isSubmitting.value = false;
+    submitError.value = message;
+
+    toast.add({
+      title: "Erro ao salvar professor",
+      color: "error",
+      id: "teacher-error",
+      description: message,
+    });
+  } finally {
+    isSubmitting.value = false;
+  }
 }
 
 function handleCancel() {

@@ -24,7 +24,11 @@ const { listRaw: listCalendars } = useAcademicCalendars();
 const isSubmitting = ref(false);
 const submitError = ref<string | null>(null);
 
-const { data: teachersData } = useAsyncData<PaginatedResponse<Teacher>>(
+const {
+  data: teachersData,
+  pending: teachersPending,
+  error: teachersError,
+} = useAsyncData<PaginatedResponse<Teacher>>(
   "overlay-teachers",
   async () => await listTeachers({ page: 1, page_size: 500 }),
   {
@@ -33,57 +37,50 @@ const { data: teachersData } = useAsyncData<PaginatedResponse<Teacher>>(
   }
 );
 
-const { data: calendarsData } = useAsyncData<
-  PaginatedResponse<AcademicCalendar>
->("overlay-calendars", async () => await listCalendars(), {
-  server: false,
-  default: () => ({ count: 0, next: null, previous: null, results: [] }),
-});
-
-const teacherOptions = computed(
-  () =>
-    teachersData.value?.results.map((teacher) => ({
-      label: `${teacher.code} - ${teacher.school.name}`,
-      value: teacher.id,
-    })) ?? []
-);
-
-const calendarOptions = computed(
-  () =>
-    calendarsData.value?.results.map((calendar) => ({
-      label: `${calendar.year}`,
-      value: calendar.id,
-    })) ?? []
+const {
+  data: calendarsData,
+  pending: calendarsPending,
+  error: calendarsError,
+} = useAsyncData<PaginatedResponse<AcademicCalendar>>(
+  "overlay-calendars",
+  async () => await listCalendars(),
+  {
+    server: false,
+    default: () => ({ count: 0, next: null, previous: null, results: [] }),
+  }
 );
 
 const formSchema = gradebookFormSchema;
 
 const formFields = computed(() => [
   {
-    name: "title",
-    label: "Título da Caderneta",
-    type: "text" as const,
-    placeholder: "Digite o título da caderneta",
-    required: true,
-  },
-  {
     name: "teacher_id",
     label: "Professor",
     type: "select" as const,
-    placeholder:
-      teacherOptions.value.length === 0
-        ? "Nenhum professor cadastrado"
-        : "Selecione o professor",
+    placeholder: "Selecione o professor",
+    pending: teachersPending,
+    error: teachersError,
     required: true,
-    items: teacherOptions,
+    items:
+      teachersData.value?.results.map((teacher) => ({
+        label: `${teacher.code} - ${teacher.school.name}`,
+        value: teacher.id,
+      })) ?? [],
   },
   {
     name: "calendar_id",
     label: "Calendário",
     type: "select" as const,
     placeholder: "Selecione o calendário",
+    pending: calendarsPending,
+    error: calendarsError,
     required: true,
-    items: calendarOptions,
+    items: calendarsData.value
+      ? calendarsData.value.results.map((calendar) => ({
+          label: `${calendar.year}`,
+          value: calendar.id,
+        }))
+      : [],
   },
   {
     name: "progress",
