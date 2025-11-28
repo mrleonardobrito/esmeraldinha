@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useAsyncData } from 'nuxt/app'
-import { useToast } from '@nuxt/ui/composables/useToast'
+import { useAsyncData } from '#imports'
 import { useOverlay } from '#imports'
 
 import type { Teacher, PaginatedResponse, PaginationParams } from '../types'
@@ -9,7 +8,6 @@ import { useTeachers } from '../composables/useTeachers'
 import { LazyCreateTeacherFormModal } from '#components'
 
 const { listRaw: listTeachers } = useTeachers()
-const toast = useToast()
 const overlay = useOverlay()
 
 const teacherParams = ref<PaginationParams>({

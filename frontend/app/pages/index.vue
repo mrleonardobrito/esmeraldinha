@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useAsyncData } from 'nuxt/app'
+import { useAsyncData } from '#imports'
 import { useToast } from '@nuxt/ui/composables/useToast'
 import { useOverlay } from '#imports'
 
@@ -34,7 +34,7 @@ const {
   pending: _pending,
   error: _error,
   refresh,
-} = useAsyncData<PaginatedResponse<Gradebook>>('gradebooks', async () => {
+} = useAsyncData<PaginatedResponse<Gradebook>, PaginatedResponse<Gradebook>, PaginatedResponse<Gradebook>>('gradebooks', async () => {
   return await listGradebooks(gradebookParams.value)
 })
 

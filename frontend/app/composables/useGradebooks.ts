@@ -13,11 +13,17 @@ export const useGradebooks = () => {
   const { withErrorHandling } = useErrorToast()
   const basePath = '/api/gradebooks/'
 
-  const list = (params?: PaginationParams) =>
-    withErrorHandling(
+  const list = async (params?: PaginationParams): Promise<PaginatedResponse<Gradebook>> => {
+    const result = await withErrorHandling(
       () => $api<PaginatedResponse<Gradebook>>(basePath, { params }),
       { title: 'Erro ao carregar cadernos de notas', mode: 'toast' },
     )
+    if (!result) {
+      // Return empty response if error occurred
+      return { count: 0, next: null, previous: null, results: [] }
+    }
+    return result
+  }
 
   const retrieve = (id: number) =>
     withErrorHandling(() => $api<Gradebook>(`${basePath}${id}/`), {

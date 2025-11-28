@@ -14,10 +14,6 @@ const reloadPage = () => {
     :title="sessionError.title"
     :description="sessionError.message"
     prevent-close
-    :ui="{
-      width: 'w-full max-w-4xl',
-      height: 'h-full max-h-screen',
-    }"
   >
     <template #body>
       <div class="space-y-4">
@@ -38,7 +34,7 @@ const reloadPage = () => {
           </UButton>
 
           <UButton
-            color="gray"
+            color="neutral"
             variant="soft"
             @click="reloadPage"
           >

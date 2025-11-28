@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import type { ChipProps } from '@nuxt/ui'
-import { Container, Draggable, type DropResult } from 'vue3-smooth-dnd'
+import { Container, Draggable } from 'vue3-smooth-dnd'
+
+type DropResult = {
+  removedIndex: number | null
+  addedIndex: number | null
+  payload: unknown
+  addedToContainerId?: string
+}
 
 export interface KanbanColumn {
   id: string
@@ -40,7 +47,7 @@ const handleDrop = (dropResult: DropResult) => {
     emit('drop', {
       removedIndex: dropResult.removedIndex,
       addedIndex: dropResult.addedIndex,
-      payload: dropResult.payload,
+      payload: dropResult.payload as KanbanItem,
       columnId: dropResult.addedToContainerId || '',
     })
   }

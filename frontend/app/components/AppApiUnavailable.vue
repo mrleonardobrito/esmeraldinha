@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { navigateTo, reloadNuxtApp } from 'nuxt/app'
+import { navigateTo, reloadNuxtApp } from '#imports'
 import { useApiStatus } from '../composables/useApiStatus'
 
 const { isApiAvailable, lastConnectionError } = useApiStatus()
@@ -48,7 +48,7 @@ const { isApiAvailable, lastConnectionError } = useApiStatus()
         </UButton>
 
         <UButton
-          color="gray"
+          color="neutral"
           variant="soft"
           size="lg"
           class="w-full"

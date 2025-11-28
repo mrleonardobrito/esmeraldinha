@@ -1,4 +1,4 @@
-import { useRuntimeConfig, defineNuxtPlugin, navigateTo } from 'nuxt/app'
+import { useRuntimeConfig, defineNuxtPlugin, navigateTo } from '#imports'
 import {
   checkApiHealth,
   checkConnectionError,

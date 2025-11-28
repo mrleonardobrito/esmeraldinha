@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useAsyncData } from 'nuxt/app'
+import { useAsyncData } from '#imports'
 import { useToast } from '@nuxt/ui/composables/useToast'
 
 import type { PaginatedResponse, School, TeacherCreate } from '../types'
@@ -18,7 +18,7 @@ const { list: listSchools } = useSchools()
 const isSubmitting = ref(false)
 const submitError = ref<string | null>(null)
 
-const { data: schoolsData } = useAsyncData<PaginatedResponse<School>>(
+const { data: schoolsData } = useAsyncData<PaginatedResponse<School>, PaginatedResponse<School>, PaginatedResponse<School>>(
   'overlay-schools',
   async () => await listSchools({ page: 1, page_size: 500 }),
   {
@@ -29,7 +29,7 @@ const { data: schoolsData } = useAsyncData<PaginatedResponse<School>>(
 
 const schoolOptions = computed(
   () =>
-    schoolsData.value?.results.map(school => ({
+    schoolsData.value?.results.map((school: School) => ({
       label: school.name,
       value: school.id,
     })) ?? [],
@@ -92,20 +92,19 @@ const initialValues = {
   diary_type: DiaryType.C1,
 }
 
-const canSubmit = computed(() => schoolOptions.value.length > 0)
-
-async function handleSubmit(event: Record<string, unknown>) {
+async function handleSubmit(event: { data: Record<string, unknown> }) {
   if (isSubmitting.value) return
 
   submitError.value = null
   isSubmitting.value = true
 
   try {
+    const values = event.data
     const payload: TeacherCreate = {
-      code: event.code as string,
-      school_id: Number(event.school_id),
-      reduction_day: event.reduction_day as ReductionDay,
-      diary_type: event.diary_type as DiaryType,
+      code: values.code as string,
+      school_id: Number(values.school_id),
+      reduction_day: values.reduction_day as ReductionDay,
+      diary_type: values.diary_type as DiaryType,
     }
 
     await createTeacher(payload)
@@ -136,10 +135,6 @@ async function handleSubmit(event: Record<string, unknown>) {
   finally {
     isSubmitting.value = false
   }
-}
-
-function handleCancel() {
-  emit('close', false)
 }
 </script>
 

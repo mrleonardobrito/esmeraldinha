@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { navigateTo, reloadNuxtApp, useHead } from 'nuxt/app'
+import { navigateTo, reloadNuxtApp, useHead } from '#imports'
 import { useApiStatus } from '../composables/useApiStatus'
 
 const { lastConnectionError } = useApiStatus()
@@ -52,7 +52,7 @@ useHead({
         </UButton>
 
         <UButton
-          color="gray"
+          color="neutral"
           variant="soft"
           size="lg"
           class="w-full"

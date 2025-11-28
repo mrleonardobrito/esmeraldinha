@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useAsyncData, navigateTo } from 'nuxt/app'
+import { useAsyncData, navigateTo } from '#imports'
 import { useToast } from '@nuxt/ui/composables/useToast'
 
 import type {
@@ -56,7 +56,7 @@ const initialValues = {
   progress: 0,
 }
 
-async function handleSubmit(values: Record<string, unknown>) {
+async function handleSubmit(event: { data: Record<string, unknown> }) {
   if (isSubmitting.value) {
     return
   }
@@ -64,6 +64,7 @@ async function handleSubmit(values: Record<string, unknown>) {
   submitError.value = null
   isSubmitting.value = true
 
+  const values = event.data
   const payload: GradebookCreate = {
     title: values.title as string,
     teacher_id: Number(values.teacher_id),
@@ -87,14 +88,14 @@ async function handleSubmit(values: Record<string, unknown>) {
 }
 
 const teacherOptions = computed(() =>
-  teachersData.value?.results.map(teacher => ({
+  teachersData.value?.results.map((teacher: Teacher) => ({
     label: `${teacher.code} - ${teacher.school.name}`,
     value: teacher.id,
   })) ?? [],
 )
 
 const calendarOptions = computed(() =>
-  calendarsData.value?.results.map(calendar => ({
+  calendarsData.value?.results.map((calendar: AcademicCalendar) => ({
     label: `${calendar.year}`,
     value: calendar.id,
   })) ?? [],
@@ -163,7 +164,7 @@ function handleCreateTeacher() {
           type="select"
           placeholder="Selecione o professor"
           :items="
-            teachersData?.results.map((teacher) => ({
+            teachersData?.results.map((teacher: Teacher) => ({
               label: `${teacher.code} - ${teacher.school.name}`,
               value: teacher.id,
             })) ?? []
@@ -176,11 +177,15 @@ function handleCreateTeacher() {
             placeholder="Selecione o professor"
             class="w-full"
           >
-            <template
-              <
-              USelectMenu
-            />
-          </uselectmenu>
+            <template #leading="{ modelValue }">
+              <UAvatar
+                :src="`https://api.dicebear.com/7.x/avataaars/svg?seed=${modelValue}`"
+                :alt="`Avatar de ${modelValue}`"
+                size="xs"
+                class="shrink-0"
+              />
+            </template>
+          </USelectMenu>
         </UFormField>
         <UFormField
           name="calendar_id"
@@ -188,7 +193,7 @@ function handleCreateTeacher() {
           type="select"
           placeholder="Selecione o calendário"
           :items="
-            calendarsData?.results.map((calendar) => ({
+            calendarsData?.results.map((calendar: AcademicCalendar) => ({
               label: `${calendar.year}`,
               value: calendar.id,
             })) ?? []
