@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useAsyncData } from '#imports'
-import { useOverlay } from '#imports'
+import { useAsyncData, useOverlay } from '#imports'
 
 import type { Teacher, PaginatedResponse, PaginationParams } from '../types'
 import { useTeachers } from '../composables/useTeachers'

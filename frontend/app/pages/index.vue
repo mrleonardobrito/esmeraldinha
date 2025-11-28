@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useAsyncData } from '#imports'
+import { useAsyncData, useOverlay } from '#imports'
 import { useToast } from '@nuxt/ui/composables/useToast'
-import { useOverlay } from '#imports'
 
 import type {
   Gradebook,
