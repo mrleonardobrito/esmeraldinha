@@ -1,72 +1,79 @@
 <script setup lang="ts">
-import type { ChipProps } from "@nuxt/ui";
-import { Container, Draggable, type DropResult } from "vue3-smooth-dnd";
+import type { ChipProps } from '@nuxt/ui'
+import { Container, Draggable, type DropResult } from 'vue3-smooth-dnd'
 
 export interface KanbanColumn {
-  id: string;
-  title: string;
-  color?: ChipProps["color"];
-  description?: string;
+  id: string
+  title: string
+  color?: ChipProps['color']
+  description?: string
 }
 
 export interface KanbanItem {
-  id: number | string;
-  [key: string]: unknown;
+  id: number | string
+  [key: string]: unknown
 }
 
 interface Props {
-  columns: KanbanColumn[];
-  itemsByColumn: Record<string, unknown[]>;
-  groupName?: string;
+  columns: KanbanColumn[]
+  itemsByColumn: Record<string, unknown[]>
+  groupName?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  groupName: "kanban",
-});
+  groupName: 'kanban',
+})
 
 const emit = defineEmits<{
   drop: [
     payload: {
-      removedIndex: number | null;
-      addedIndex: number | null;
-      payload: KanbanItem;
-      columnId: string;
-    }
-  ];
-}>();
+      removedIndex: number | null
+      addedIndex: number | null
+      payload: KanbanItem
+      columnId: string
+    },
+  ]
+}>()
 
 const handleDrop = (dropResult: DropResult) => {
   if (dropResult.removedIndex !== null || dropResult.addedIndex !== null) {
-    emit("drop", {
+    emit('drop', {
       removedIndex: dropResult.removedIndex,
       addedIndex: dropResult.addedIndex,
       payload: dropResult.payload,
-      columnId: dropResult.addedToContainerId || "",
-    });
+      columnId: dropResult.addedToContainerId || '',
+    })
   }
-};
+}
 
 const getColumnItems = (columnId: string): KanbanItem[] => {
-  return (props.itemsByColumn[columnId] || []) as KanbanItem[];
-};
+  return (props.itemsByColumn[columnId] || []) as KanbanItem[]
+}
 
-const getChildPayload =
-  (columnId: string) =>
-  (index: number): KanbanItem => {
-    return getColumnItems(columnId)[index] as KanbanItem;
-  };
+const getChildPayload
+  = (columnId: string) =>
+    (index: number): KanbanItem => {
+      return getColumnItems(columnId)[index] as KanbanItem
+    }
 
 const handleContainerDrop = (dropResult: DropResult) => {
-  handleDrop(dropResult);
-};
+  handleDrop(dropResult)
+}
 </script>
 
 <template>
   <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-    <div v-for="column in columns" :key="column.id" class="min-h-96">
+    <div
+      v-for="column in columns"
+      :key="column.id"
+      class="min-h-96"
+    >
       <div class="mb-4">
         <h3 class="text-lg font-semibold flex items-center gap-2">
-          <UChip :color="column.color" size="sm">
+          <UChip
+            :color="column.color"
+            size="sm"
+          >
             {{ getColumnItems(column.id).length }}
           </UChip>
           {{ column.title }}
@@ -99,16 +106,27 @@ const handleContainerDrop = (dropResult: DropResult) => {
           :key="item.id"
           class="select-none"
         >
-          <slot :item="item" :column="column" />
+          <slot
+            :item="item"
+            :column="column"
+          />
         </Draggable>
 
         <template v-if="getColumnItems(column.id).length === 0">
-          <slot name="empty" :column="column">
+          <slot
+            name="empty"
+            :column="column"
+          >
             <div
               class="flex flex-col items-center justify-center py-8 text-gray-400"
             >
-              <UIcon name="i-lucide-inbox" class="size-8 mb-2" />
-              <p class="text-sm">Nenhum item</p>
+              <UIcon
+                name="i-lucide-inbox"
+                class="size-8 mb-2"
+              />
+              <p class="text-sm">
+                Nenhum item
+              </p>
             </div>
           </slot>
         </template>

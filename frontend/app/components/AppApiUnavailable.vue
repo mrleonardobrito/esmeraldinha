@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { navigateTo, reloadNuxtApp } from "nuxt/app";
-import { useApiStatus } from "../composables/useApiStatus";
+import { navigateTo, reloadNuxtApp } from 'nuxt/app'
+import { useApiStatus } from '../composables/useApiStatus'
 
-const { isApiAvailable, lastConnectionError } = useApiStatus();
+const { isApiAvailable, lastConnectionError } = useApiStatus()
 </script>
 
 <template>
@@ -28,7 +28,7 @@ const { isApiAvailable, lastConnectionError } = useApiStatus();
         class="mb-6 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800"
       >
         <p class="text-sm text-red-700 dark:text-red-300">
-          <strong>Detalhes do erro:</strong><br />
+          <strong>Detalhes do erro:</strong><br>
           {{ lastConnectionError }}
         </p>
       </div>
@@ -40,7 +40,10 @@ const { isApiAvailable, lastConnectionError } = useApiStatus();
           class="w-full"
           @click="reloadNuxtApp()"
         >
-          <UIcon name="i-lucide-refresh-cw" class="w-4 h-4 mr-2" />
+          <UIcon
+            name="i-lucide-refresh-cw"
+            class="w-4 h-4 mr-2"
+          />
           Tentar novamente
         </UButton>
 
@@ -51,7 +54,10 @@ const { isApiAvailable, lastConnectionError } = useApiStatus();
           class="w-full"
           @click="navigateTo('/')"
         >
-          <UIcon name="i-lucide-home" class="w-4 h-4 mr-2" />
+          <UIcon
+            name="i-lucide-home"
+            class="w-4 h-4 mr-2"
+          />
           Ir para página inicial
         </UButton>
       </div>

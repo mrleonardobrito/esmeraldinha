@@ -1,12 +1,17 @@
 export default defineNuxtConfig({
-  compatibilityDate: "2025-07-15",
+  modules: ['@nuxt/ui', '@nuxt/image', '@nuxt/eslint', '@nuxt/hints'],
   devtools: { enabled: true },
-  debug: true,
-  modules: ["@nuxt/ui", "@nuxt/image", "@nuxt/eslint", "@nuxt/hints"],
+
+  css: ['~/assets/css/main.css'],
+  compatibilityDate: '2025-07-15',
 
   typescript: {
     typeCheck: false,
   },
-
-  css: ["~/assets/css/main.css"],
-});
+  debug: true,
+  eslint: {
+    config: {
+      stylistic: true,
+    },
+  },
+})

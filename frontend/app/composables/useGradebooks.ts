@@ -6,6 +6,7 @@ import type {
   PaginatedResponse,
 } from '../types'
 import { useErrorToast } from './useErrorToast'
+import { useNuxtApp } from '#imports'
 
 export const useGradebooks = () => {
   const { $api } = useNuxtApp()
@@ -15,46 +16,48 @@ export const useGradebooks = () => {
   const list = (params?: PaginationParams) =>
     withErrorHandling(
       () => $api<PaginatedResponse<Gradebook>>(basePath, { params }),
-      { title: 'Erro ao carregar cadernos de notas', mode: 'toast' }
+      { title: 'Erro ao carregar cadernos de notas', mode: 'toast' },
     )
 
   const retrieve = (id: number) =>
-    withErrorHandling(
-      () => $api<Gradebook>(`${basePath}${id}/`),
-      { title: 'Erro ao carregar caderno de notas', mode: 'toast' }
-    )
+    withErrorHandling(() => $api<Gradebook>(`${basePath}${id}/`), {
+      title: 'Erro ao carregar caderno de notas',
+      mode: 'toast',
+    })
 
   const create = (payload: GradebookCreate) =>
     withErrorHandling(
-      () => $api<Gradebook>(basePath, {
-        method: 'POST',
-        body: payload,
-      }),
-      { title: 'Erro ao criar caderno de notas', mode: 'toast' }
+      () =>
+        $api<Gradebook>(basePath, {
+          method: 'POST',
+          body: payload,
+        }),
+      { title: 'Erro ao criar caderno de notas', mode: 'toast' },
     )
 
   const update = (id: number, payload: GradebookUpdate) =>
     withErrorHandling(
-      () => $api<Gradebook>(`${basePath}${id}/`, {
-        method: 'PATCH',
-        body: payload,
-      }),
-      { title: 'Erro ao atualizar caderno de notas', mode: 'toast' }
+      () =>
+        $api<Gradebook>(`${basePath}${id}/`, {
+          method: 'PATCH',
+          body: payload,
+        }),
+      { title: 'Erro ao atualizar caderno de notas', mode: 'toast' },
     )
 
   const destroy = (id: number) =>
     withErrorHandling(
-      () => $api<null>(`${basePath}${id}/`, {
-        method: 'DELETE',
-      }),
-      { title: 'Erro ao excluir caderno de notas', mode: 'toast' }
+      () =>
+        $api<null>(`${basePath}${id}/`, {
+          method: 'DELETE',
+        }),
+      { title: 'Erro ao excluir caderno de notas', mode: 'toast' },
     )
 
   const listRaw = (params?: PaginationParams) =>
     $api<PaginatedResponse<Gradebook>>(basePath, { params })
 
-  const retrieveRaw = (id: number) =>
-    $api<Gradebook>(`${basePath}${id}/`)
+  const retrieveRaw = (id: number) => $api<Gradebook>(`${basePath}${id}/`)
 
   const createRaw = (payload: GradebookCreate) =>
     $api<Gradebook>(basePath, {

@@ -1,4 +1,10 @@
-import type { Teacher, TeacherCreate, TeacherUpdate, PaginatedResponse, PaginationParams } from '../types'
+import type {
+  Teacher,
+  TeacherCreate,
+  TeacherUpdate,
+  PaginatedResponse,
+  PaginationParams,
+} from '../types'
 import { useErrorToast } from './useErrorToast'
 
 export const useTeachers = () => {
@@ -9,40 +15,42 @@ export const useTeachers = () => {
   const list = (params?: PaginationParams) =>
     withErrorHandling(
       () => $api<PaginatedResponse<Teacher>>(basePath, { params }),
-      { title: 'Erro ao carregar professores', mode: 'toast' }
+      { title: 'Erro ao carregar professores', mode: 'toast' },
     )
 
   const create = (payload: TeacherCreate) =>
     withErrorHandling(
-      () => $api<Teacher>(basePath, {
-        method: 'POST',
-        body: payload,
-      }),
-      { title: 'Erro ao criar professor', mode: 'toast' }
+      () =>
+        $api<Teacher>(basePath, {
+          method: 'POST',
+          body: payload,
+        }),
+      { title: 'Erro ao criar professor', mode: 'toast' },
     )
 
   const update = (id: number, payload: TeacherUpdate) =>
     withErrorHandling(
-      () => $api<Teacher>(`${basePath}${id}/`, {
-        method: 'PATCH',
-        body: payload,
-      }),
-      { title: 'Erro ao atualizar professor', mode: 'toast' }
+      () =>
+        $api<Teacher>(`${basePath}${id}/`, {
+          method: 'PATCH',
+          body: payload,
+        }),
+      { title: 'Erro ao atualizar professor', mode: 'toast' },
     )
 
   const destroy = (id: number) =>
     withErrorHandling(
-      () => $api<null>(`${basePath}${id}/`, {
-        method: 'DELETE',
-      }),
-      { title: 'Erro ao excluir professor', mode: 'toast' }
+      () =>
+        $api<null>(`${basePath}${id}/`, {
+          method: 'DELETE',
+        }),
+      { title: 'Erro ao excluir professor', mode: 'toast' },
     )
 
   const listRaw = (params?: PaginationParams) =>
     $api<PaginatedResponse<Teacher>>(basePath, { params })
 
-  const retrieveRaw = (id: number) =>
-    $api<Teacher>(`${basePath}${id}/`)
+  const retrieveRaw = (id: number) => $api<Teacher>(`${basePath}${id}/`)
 
   const createRaw = (payload: TeacherCreate) =>
     $api<Teacher>(basePath, {

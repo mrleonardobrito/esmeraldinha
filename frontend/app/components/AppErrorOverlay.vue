@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { useErrorToast } from "../composables/useErrorToast";
+import { useErrorToast } from '../composables/useErrorToast'
 
-const { sessionError, clearSessionError } = useErrorToast();
+const { sessionError, clearSessionError } = useErrorToast()
 
 const reloadPage = () => {
-  window.location.reload();
-};
+  window.location.reload()
+}
 </script>
 
 <template>
@@ -30,11 +30,18 @@ const reloadPage = () => {
         />
 
         <div class="flex gap-2">
-          <UButton color="primary" @click="clearSessionError">
+          <UButton
+            color="primary"
+            @click="clearSessionError"
+          >
             Tentar novamente
           </UButton>
 
-          <UButton color="gray" variant="soft" @click="reloadPage">
+          <UButton
+            color="gray"
+            variant="soft"
+            @click="reloadPage"
+          >
             Recarregar página
           </UButton>
         </div>

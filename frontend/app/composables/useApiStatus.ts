@@ -1,126 +1,127 @@
-import { ref, readonly } from "vue";
+import { ref, readonly } from 'vue'
 
-const DEFAULT_BASE_URL = "http://127.0.0.1:8000";
-const HEALTH_PATH = "/api/health/";
+const DEFAULT_BASE_URL = 'http://127.0.0.1:8000'
+const HEALTH_PATH = '/api/health/'
 
 const CONNECTION_ERROR_PATTERNS = [
-  "ERR_CONNECTION_REFUSED",
-  "ERR_NETWORK",
-  "ECONNREFUSED",
-  "ENOTFOUND",
-  "ECONNRESET",
-  "ETIMEDOUT",
-  "fetch failed",
-  "Failed to fetch",
-  "NetworkError",
-  "Load failed",
-] as const;
+  'ERR_CONNECTION_REFUSED',
+  'ERR_NETWORK',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'fetch failed',
+  'Failed to fetch',
+  'NetworkError',
+  'Load failed',
+] as const
 
-const isApiAvailable = ref(true);
-const lastConnectionError = ref<string | null>(null);
+const isApiAvailable = ref(true)
+const lastConnectionError = ref<string | null>(null)
 
 type ApiLikeError = {
-  message?: string;
-  code?: string | number;
-  status?: string | number;
-} & Record<string, unknown>;
+  message?: string
+  code?: string | number
+  status?: string | number
+} & Record<string, unknown>
 
-const normalizeError = (error: unknown): { message: string; code: string } => {
+const normalizeError = (error: unknown): { message: string, code: string } => {
   if (!error) {
-    return { message: "", code: "" };
+    return { message: '', code: '' }
   }
 
   if (error instanceof Error) {
-    return { message: error.message, code: "" };
+    return { message: error.message, code: '' }
   }
 
-  const errorObj = error as ApiLikeError;
-  const message =
-    (errorObj.message as string) ||
-    (typeof error === "string" ? error : "") ||
-    error.toString?.() ||
-    "";
-  const code =
-    String(errorObj.code ?? "") || String(errorObj.status ?? "") || "";
+  const errorObj = error as ApiLikeError
+  const message
+    = (errorObj.message as string)
+      || (typeof error === 'string' ? error : '')
+      || error.toString?.()
+      || ''
+  const code
+    = String(errorObj.code ?? '') || String(errorObj.status ?? '') || ''
 
-  return { message, code };
-};
+  return { message, code }
+}
 
 const hasConnectionErrorPattern = (message: string, code: string): boolean => {
-  if (!message && !code) return false;
+  if (!message && !code) return false
 
   return CONNECTION_ERROR_PATTERNS.some(
-    (pattern) => message.includes(pattern) || code.includes(pattern)
-  );
-};
+    pattern => message.includes(pattern) || code.includes(pattern),
+  )
+}
 
 export const setApiUnavailable = (errorMessage?: string) => {
-  isApiAvailable.value = false;
-  lastConnectionError.value =
-    errorMessage || "Não foi possível conectar aos servidores";
-};
+  isApiAvailable.value = false
+  lastConnectionError.value
+    = errorMessage || 'Não foi possível conectar aos servidores'
+}
 
 export const setApiAvailable = () => {
-  isApiAvailable.value = true;
-  lastConnectionError.value = null;
-};
+  isApiAvailable.value = true
+  lastConnectionError.value = null
+}
 
 export const checkConnectionError = (error: unknown): boolean => {
-  const { message, code } = normalizeError(error);
+  const { message, code } = normalizeError(error)
 
   if (!message && !code) {
-    setApiAvailable();
-    return false;
+    setApiAvailable()
+    return false
   }
 
-  const isConnectionError = hasConnectionErrorPattern(message, code);
+  const isConnectionError = hasConnectionErrorPattern(message, code)
 
   if (isConnectionError) {
-    setApiUnavailable(message || code || undefined);
-    return true;
+    setApiUnavailable(message || code || undefined)
+    return true
   }
 
-  setApiAvailable();
-  return false;
-};
+  setApiAvailable()
+  return false
+}
 
 type CheckApiHealthOptions = {
-  baseURL?: string;
-  path?: string;
-  fetchFn?: typeof fetch;
-};
+  baseURL?: string
+  path?: string
+  fetchFn?: typeof fetch
+}
 
 export const checkApiHealth = async (
-  options: CheckApiHealthOptions = {}
+  options: CheckApiHealthOptions = {},
 ): Promise<boolean> => {
   const {
     baseURL = DEFAULT_BASE_URL,
     path = HEALTH_PATH,
     fetchFn = fetch,
-  } = options;
+  } = options
 
   try {
     const response = await fetchFn(`${baseURL}${path}`, {
-      method: "GET",
+      method: 'GET',
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
-    });
+    })
 
     if (response.ok) {
-      setApiAvailable();
-      return true;
+      setApiAvailable()
+      return true
     }
 
     setApiUnavailable(
-      `Erro HTTP ${response.status}: ${response.statusText || "Desconhecido"}`
-    );
-    return false;
-  } catch (error) {
-    checkConnectionError(error);
-    return false;
+      `Erro HTTP ${response.status}: ${response.statusText || 'Desconhecido'}`,
+    )
+    return false
   }
-};
+  catch (error) {
+    checkConnectionError(error)
+    return false
+  }
+}
 
 export const useApiStatus = () => ({
   isApiAvailable: readonly(isApiAvailable),
@@ -129,4 +130,4 @@ export const useApiStatus = () => ({
   setApiAvailable,
   checkConnectionError,
   checkApiHealth,
-});
+})

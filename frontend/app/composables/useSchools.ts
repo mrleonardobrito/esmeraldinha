@@ -1,4 +1,4 @@
-import type { School, PaginatedResponse } from '../types'
+import type { School, PaginatedResponse, PaginationParams } from '../types'
 import { useErrorToast } from './useErrorToast'
 
 export const useSchools = () => {
@@ -6,17 +6,13 @@ export const useSchools = () => {
   const { withErrorHandling } = useErrorToast()
   const basePath = '/api/schools/'
 
-  const list = () =>
+  const list = (params?: PaginationParams) =>
     withErrorHandling(
-      () => $api<PaginatedResponse<School>>(basePath),
-      { title: 'Erro ao carregar escolas', mode: 'toast' }
+      () => $api<PaginatedResponse<School>>(basePath, { params }),
+      { title: 'Erro ao carregar escolas', mode: 'toast' },
     )
-
-  const listRaw = () =>
-    $api<PaginatedResponse<School>>(basePath)
 
   return {
     list,
-    listRaw,
   }
 }

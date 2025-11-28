@@ -1,104 +1,104 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { useAsyncData } from "nuxt/app";
-import { useToast } from "@nuxt/ui/composables/useToast";
+import { computed, ref } from 'vue'
+import { useAsyncData } from 'nuxt/app'
+import { useToast } from '@nuxt/ui/composables/useToast'
 
-import type { PaginatedResponse, School, TeacherCreate } from "../types";
-import { teacherFormSchema } from "../schemas/teacher";
-import { ReductionDay, DiaryType } from "../types";
-import { useTeachers } from "../composables/useTeachers";
-import { useSchools } from "../composables/useSchools";
+import type { PaginatedResponse, School, TeacherCreate } from '../types'
+import { teacherFormSchema } from '../schemas/teacher'
+import { ReductionDay, DiaryType } from '../types'
+import { useTeachers } from '../composables/useTeachers'
+import { useSchools } from '../composables/useSchools'
 
-const emit = defineEmits<{ close: [boolean] }>();
+const emit = defineEmits<{ close: [boolean] }>()
 
-const toast = useToast();
-const { create: createTeacher } = useTeachers();
-const { list: listSchools } = useSchools();
+const toast = useToast()
+const { create: createTeacher } = useTeachers()
+const { list: listSchools } = useSchools()
 
-const isSubmitting = ref(false);
-const submitError = ref<string | null>(null);
+const isSubmitting = ref(false)
+const submitError = ref<string | null>(null)
 
 const { data: schoolsData } = useAsyncData<PaginatedResponse<School>>(
-  "overlay-schools",
-  async () => await listSchools(),
+  'overlay-schools',
+  async () => await listSchools({ page: 1, page_size: 500 }),
   {
     server: false,
     default: () => ({ count: 0, next: null, previous: null, results: [] }),
-  }
-);
+  },
+)
 
 const schoolOptions = computed(
   () =>
-    schoolsData.value?.results.map((school) => ({
+    schoolsData.value?.results.map(school => ({
       label: school.name,
       value: school.id,
-    })) ?? []
-);
+    })) ?? [],
+)
 
 const reductionDayOptions = [
-  { label: "Segunda-feira", value: ReductionDay.MONDAY },
-  { label: "Terça-feira", value: ReductionDay.TUESDAY },
-  { label: "Quarta-feira", value: ReductionDay.WEDNESDAY },
-  { label: "Quinta-feira", value: ReductionDay.THURSDAY },
-  { label: "Sexta-feira", value: ReductionDay.FRIDAY },
-];
+  { label: 'Segunda-feira', value: ReductionDay.MONDAY },
+  { label: 'Terça-feira', value: ReductionDay.TUESDAY },
+  { label: 'Quarta-feira', value: ReductionDay.WEDNESDAY },
+  { label: 'Quinta-feira', value: ReductionDay.THURSDAY },
+  { label: 'Sexta-feira', value: ReductionDay.FRIDAY },
+]
 
 const diaryTypeOptions = [
-  { label: "C1", value: DiaryType.C1 },
-  { label: "C2", value: DiaryType.C2 },
-];
+  { label: 'C1', value: DiaryType.C1 },
+  { label: 'C2', value: DiaryType.C2 },
+]
 
-const formSchema = teacherFormSchema;
+const formSchema = teacherFormSchema
 
 const formFields = computed(() => [
   {
-    name: "code",
-    label: "Código do Professor",
-    type: "text" as const,
-    placeholder: "Ex: ABC123",
+    name: 'code',
+    label: 'Código do Professor',
+    type: 'text' as const,
+    placeholder: 'Ex: ABC123',
     required: true,
   },
   {
-    name: "school_id",
-    label: "Escola",
-    type: "select" as const,
+    name: 'school_id',
+    label: 'Escola',
+    type: 'select' as const,
     placeholder:
       schoolOptions.value.length === 0
-        ? "Nenhuma escola cadastrada"
-        : "Selecione a escola",
+        ? 'Nenhuma escola cadastrada'
+        : 'Selecione a escola',
     required: true,
     items: schoolOptions.value,
   },
   {
-    name: "reduction_day",
-    label: "Dia de redução",
-    type: "select" as const,
-    placeholder: "Selecione o dia de redução",
+    name: 'reduction_day',
+    label: 'Dia de redução',
+    type: 'select' as const,
+    placeholder: 'Selecione o dia de redução',
     required: true,
     items: reductionDayOptions,
   },
   {
-    name: "diary_type",
-    label: "Tipo de diário",
-    type: "select" as const,
-    placeholder: "Selecione o tipo de diário",
+    name: 'diary_type',
+    label: 'Tipo de diário',
+    type: 'select' as const,
+    placeholder: 'Selecione o tipo de diário',
     required: true,
     items: diaryTypeOptions,
   },
-]);
+])
 
 const initialValues = {
   reduction_day: ReductionDay.MONDAY,
   diary_type: DiaryType.C1,
-};
+}
 
-const canSubmit = computed(() => schoolOptions.value.length > 0);
+const canSubmit = computed(() => schoolOptions.value.length > 0)
 
 async function handleSubmit(event: Record<string, unknown>) {
-  if (isSubmitting.value) return;
+  if (isSubmitting.value) return
 
-  submitError.value = null;
-  isSubmitting.value = true;
+  submitError.value = null
+  isSubmitting.value = true
 
   try {
     const payload: TeacherCreate = {
@@ -106,38 +106,40 @@ async function handleSubmit(event: Record<string, unknown>) {
       school_id: Number(event.school_id),
       reduction_day: event.reduction_day as ReductionDay,
       diary_type: event.diary_type as DiaryType,
-    };
+    }
 
-    await createTeacher(payload);
+    await createTeacher(payload)
 
     toast.add({
-      title: "Professor criado com sucesso!",
-      color: "success",
-      id: "teacher-created",
-    });
+      title: 'Professor criado com sucesso!',
+      color: 'success',
+      id: 'teacher-created',
+    })
 
-    emit("close", true);
-  } catch (error) {
-    const message =
-      error instanceof Error
+    emit('close', true)
+  }
+  catch (error) {
+    const message
+      = error instanceof Error
         ? error.message
-        : "Não foi possível salvar o professor.";
+        : 'Não foi possível salvar o professor.'
 
-    submitError.value = message;
+    submitError.value = message
 
     toast.add({
-      title: "Erro ao salvar professor",
-      color: "error",
-      id: "teacher-error",
+      title: 'Erro ao salvar professor',
+      color: 'error',
+      id: 'teacher-error',
       description: message,
-    });
-  } finally {
-    isSubmitting.value = false;
+    })
+  }
+  finally {
+    isSubmitting.value = false
   }
 }
 
 function handleCancel() {
-  emit("close", false);
+  emit('close', false)
 }
 </script>
 
@@ -166,16 +168,49 @@ function handleCancel() {
           description="Você precisa cadastrar ao menos uma escola antes de criar professores."
         />
 
-        <AppForm
+        <UForm
           :schema="formSchema"
           :fields="formFields"
           :initial-values="initialValues"
-          submit-label="Criar professor"
-          :loading="isSubmitting"
-          :submit-disabled="!canSubmit"
           @submit="handleSubmit"
-          @cancel="handleCancel"
-        />
+        >
+          <UFormField
+            name="code"
+            label="Código do Professor"
+            type="text"
+            placeholder="Ex: ABC123"
+          />
+          <UFormField
+            name="school_id"
+            label="Escola"
+            type="select"
+            placeholder="Selecione a escola"
+            :items="schoolOptions"
+          />
+          <UFormField
+            name="reduction_day"
+            label="Dia de redução"
+            type="select"
+            placeholder="Selecione o dia de redução"
+            :items="reductionDayOptions"
+          />
+          <UFormField
+            name="diary_type"
+            label="Tipo de diário"
+            type="select"
+            placeholder="Selecione o tipo de diário"
+            :items="diaryTypeOptions"
+          />
+          <UButton
+            type="submit"
+            color="primary"
+            variant="solid"
+            :loading="isSubmitting"
+            :disabled="schoolOptions.length === 0"
+          >
+            Criar professor
+          </UButton>
+        </UForm>
       </div>
     </template>
   </UModal>

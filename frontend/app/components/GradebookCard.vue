@@ -1,67 +1,68 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { Gradebook } from "../types";
+import { computed } from 'vue'
+import type { Gradebook } from '../types'
 
 interface Props {
-  gradebook: Gradebook;
+  gradebook: Gradebook
 }
 
-const props = defineProps<Props>();
+const props = defineProps<Props>()
 
-const progress = computed(() => props.gradebook.progress);
+const progress = computed(() => props.gradebook.progress)
 
 const emit = defineEmits<{
-  edit: [gradebook: Gradebook];
-  archive: [gradebook: Gradebook];
-  delete: [gradebook: Gradebook];
-}>();
+  edit: [gradebook: Gradebook]
+  archive: [gradebook: Gradebook]
+  delete: [gradebook: Gradebook]
+}>()
 
 const teacherAvatarUrl = computed(() => {
-  const seed = props.gradebook.teacher.id.toString();
-  return `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`;
-});
+  const seed = props.gradebook.teacher.id.toString()
+  return `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`
+})
 
 const formattedDate = computed(() => {
-  if (!props.gradebook.created_at) return "";
+  if (!props.gradebook.created_at) return ''
   try {
-    const date = new Date(props.gradebook.created_at);
+    const date = new Date(props.gradebook.created_at)
     const monthNames = [
-      "Jan",
-      "Fev",
-      "Mar",
-      "Abr",
-      "Mai",
-      "Jun",
-      "Jul",
-      "Ago",
-      "Set",
-      "Out",
-      "Nov",
-      "Dez",
-    ];
-    const day = date.getDate();
-    const month = monthNames[date.getMonth()];
-    return `${month}, ${day}`;
-  } catch {
-    return "";
+      'Jan',
+      'Fev',
+      'Mar',
+      'Abr',
+      'Mai',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Set',
+      'Out',
+      'Nov',
+      'Dez',
+    ]
+    const day = date.getDate()
+    const month = monthNames[date.getMonth()]
+    return `${month}, ${day}`
   }
-});
+  catch {
+    return ''
+  }
+})
 
 const displayTitle = computed(() => {
-  return props.gradebook.title || `Caderneta ${props.gradebook.id}`;
-});
+  return props.gradebook.title || `Caderneta ${props.gradebook.id}`
+})
 
 const handleEdit = () => {
-  emit("edit", props.gradebook);
-};
+  emit('edit', props.gradebook)
+}
 
 const handleArchive = () => {
-  emit("archive", props.gradebook);
-};
+  emit('archive', props.gradebook)
+}
 
 const handleDelete = () => {
-  emit("delete", props.gradebook);
-};
+  emit('delete', props.gradebook)
+}
 </script>
 
 <template>
@@ -120,7 +121,10 @@ const handleDelete = () => {
           size="sm"
           class="no-drag"
         >
-          <UIcon name="i-lucide-more-vertical" class="size-4" />
+          <UIcon
+            name="i-lucide-more-vertical"
+            class="size-4"
+          />
         </UButton>
         <template #content>
           <div class="p-1 min-w-[120px]">
@@ -131,7 +135,10 @@ const handleDelete = () => {
               class="justify-start no-drag"
               @click="handleEdit"
             >
-              <UIcon name="i-lucide-edit" class="size-4 mr-2" />
+              <UIcon
+                name="i-lucide-edit"
+                class="size-4 mr-2"
+              />
               Editar
             </UButton>
             <UButton
@@ -141,7 +148,10 @@ const handleDelete = () => {
               class="justify-start no-drag"
               @click="handleArchive"
             >
-              <UIcon name="i-lucide-archive" class="size-4 mr-2" />
+              <UIcon
+                name="i-lucide-archive"
+                class="size-4 mr-2"
+              />
               Arquivar
             </UButton>
             <UButton
@@ -151,7 +161,10 @@ const handleDelete = () => {
               class="justify-start text-red-600 dark:text-red-400 no-drag"
               @click="handleDelete"
             >
-              <UIcon name="i-lucide-trash" class="size-4 mr-2" />
+              <UIcon
+                name="i-lucide-trash"
+                class="size-4 mr-2"
+              />
               Excluir
             </UButton>
           </div>

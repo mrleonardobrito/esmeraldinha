@@ -1,45 +1,45 @@
-import { useRuntimeConfig, defineNuxtPlugin, navigateTo } from "nuxt/app";
+import { useRuntimeConfig, defineNuxtPlugin, navigateTo } from 'nuxt/app'
 import {
   checkApiHealth,
   checkConnectionError,
   setApiAvailable,
-} from "../composables/useApiStatus";
+} from '../composables/useApiStatus'
 
 export default defineNuxtPlugin(async (_) => {
-  const config = useRuntimeConfig();
+  const config = useRuntimeConfig()
 
   const api = $fetch.create({
-    baseURL: (config.public.apiBaseUrl as string) ?? "http://127.0.0.1:8000",
+    baseURL: (config.public.apiBaseUrl as string) ?? 'http://127.0.0.1:8000',
 
     onRequestError({ error }) {
-      const isConnectionError = checkConnectionError(error);
+      const isConnectionError = checkConnectionError(error)
       if (isConnectionError) {
-        navigateTo("/server-error");
+        navigateTo('/server-error')
       }
 
-      return;
+      return
     },
 
     onResponse() {
-      setApiAvailable();
+      setApiAvailable()
     },
 
     onResponseError({ error }) {
-      const isConnectionError = checkConnectionError(error);
+      const isConnectionError = checkConnectionError(error)
 
       if (isConnectionError) {
-        navigateTo("/server-error");
+        navigateTo('/server-error')
       }
 
-      return;
+      return
     },
-  });
+  })
 
-  await checkApiHealth();
+  await checkApiHealth()
 
   return {
     provide: {
       api,
     },
-  };
-});
+  }
+})

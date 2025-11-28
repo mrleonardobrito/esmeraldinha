@@ -1,5 +1,6 @@
-import type { AcademicCalendar, PaginatedResponse } from "../types"
+import type { AcademicCalendar, PaginatedResponse } from '../types'
 import { useErrorToast } from './useErrorToast'
+import { useNuxtApp } from '#imports'
 
 export const useAcademicCalendars = () => {
   const { $api } = useNuxtApp()
@@ -9,11 +10,10 @@ export const useAcademicCalendars = () => {
   const list = () =>
     withErrorHandling(
       () => $api<PaginatedResponse<AcademicCalendar>>(basePath),
-      { title: 'Erro ao carregar calendários acadêmicos', mode: 'toast' }
+      { title: 'Erro ao carregar calendários acadêmicos', mode: 'toast' },
     )
 
-  const listRaw = () =>
-    $api<PaginatedResponse<AcademicCalendar>>(basePath)
+  const listRaw = () => $api<PaginatedResponse<AcademicCalendar>>(basePath)
 
   return {
     list,

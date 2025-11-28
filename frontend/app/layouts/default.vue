@@ -1,53 +1,53 @@
 <script setup lang="ts">
-import type { NavigationMenuItem } from "@nuxt/ui";
-import { ref, onMounted } from "vue";
-import { useToast } from "@nuxt/ui/composables/useToast";
-import { useCookieConsent } from "../composables/useCookieConsent";
+import type { NavigationMenuItem } from '@nuxt/ui'
+import { ref, onMounted } from 'vue'
+import { useToast } from '@nuxt/ui/composables/useToast'
+import { useCookieConsent } from '../composables/useCookieConsent'
 
-const toast = useToast();
-const { acceptCookies, needsConsent } = useCookieConsent();
+const toast = useToast()
+const { acceptCookies, needsConsent } = useCookieConsent()
 
-const open = ref(false);
+const open = ref(false)
 
 const links: NavigationMenuItem[] = [
   {
-    label: "Home",
-    icon: "i-lucide-house",
-    to: "/",
+    label: 'Home',
+    icon: 'i-lucide-house',
+    to: '/',
     onSelect: () => {
-      open.value = false;
+      open.value = false
     },
     defaultOpen: true,
   },
   {
-    label: "Professores",
-    icon: "i-lucide-users",
-    to: "/teachers",
+    label: 'Professores',
+    icon: 'i-lucide-users',
+    to: '/teachers',
     onSelect: () => {
-      open.value = false;
+      open.value = false
     },
   },
-];
+]
 
 onMounted(async () => {
   if (!needsConsent.value) {
-    return;
+    return
   }
 
   toast.add({
     title:
-      "We use first-party cookies to enhance your experience on our website.",
+      'We use first-party cookies to enhance your experience on our website.',
     description:
-      "By continuing to use this site, you agree to our use of cookies.",
+      'By continuing to use this site, you agree to our use of cookies.',
     duration: 0,
     close: true,
-    color: "primary",
-  });
+    color: 'primary',
+  })
 
   setTimeout(() => {
-    acceptCookies();
-  }, 100);
-});
+    acceptCookies()
+  }, 100)
+})
 </script>
 
 <template>
