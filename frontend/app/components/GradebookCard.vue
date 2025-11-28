@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Gradebook } from '../types'
+import type { Gradebook } from '@types'
 
 interface Props {
   gradebook: Gradebook

@@ -1,11 +1,10 @@
-import { useRuntimeConfig, defineNuxtPlugin, navigateTo } from '#imports'
 import {
   checkApiHealth,
   checkConnectionError,
   setApiAvailable,
-} from '../composables/useApiStatus'
+} from '@composables/useApiStatus'
 
-export default defineNuxtPlugin(async (_) => {
+export default defineNuxtPlugin(async () => {
   const config = useRuntimeConfig()
 
   const api = $fetch.create({

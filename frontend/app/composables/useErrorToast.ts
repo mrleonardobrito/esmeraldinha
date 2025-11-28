@@ -1,7 +1,7 @@
 import { readonly, ref } from 'vue'
-import type { ApiErrorResponse } from '../types'
-import { checkConnectionError } from './useApiStatus'
-import { createError } from '#imports'
+import type { ApiErrorResponse } from '@types'
+import { checkConnectionError } from '@composables/useApiStatus'
+import { createError } from 'nuxt/app'
 import { useToast } from '@nuxt/ui/composables/useToast'
 
 interface ErrorToastOptions {

@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useAsyncData } from '#imports'
+import type { PaginatedResponse, School, TeacherCreate } from '@types'
+import { teacherFormSchema } from '@schemas/teacher'
+import { ReductionDay, DiaryType } from '@types'
+import { useTeachers } from '@composables/useTeachers'
+import { useSchools } from '@composables/useSchools'
 import { useToast } from '@nuxt/ui/composables/useToast'
-
-import type { PaginatedResponse, School, TeacherCreate } from '../types'
-import { teacherFormSchema } from '../schemas/teacher'
-import { ReductionDay, DiaryType } from '../types'
-import { useTeachers } from '../composables/useTeachers'
-import { useSchools } from '../composables/useSchools'
 
 const emit = defineEmits<{ close: [boolean] }>()
 

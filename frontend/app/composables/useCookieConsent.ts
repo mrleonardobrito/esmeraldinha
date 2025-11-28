@@ -1,4 +1,4 @@
-import { useCookie } from '#imports'
+import { useCookie } from 'nuxt/app'
 import { computed } from 'vue'
 
 export const useCookieConsent = () => {

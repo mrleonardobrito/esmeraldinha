@@ -1,18 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useAsyncData, navigateTo } from '#imports'
 import { useToast } from '@nuxt/ui/composables/useToast'
+import { z } from 'zod'
 
 import type {
   PaginatedResponse,
   Teacher,
   AcademicCalendar,
   GradebookCreate,
-} from '../types'
-import { gradebookFormSchema } from '../schemas/gradebook'
-import { useGradebooks } from '../composables/useGradebooks'
-import { useTeachers } from '../composables/useTeachers'
-import { useAcademicCalendars } from '../composables/useAcademicCalendars'
+} from '@types'
+import { useGradebooks } from '@composables/useGradebooks'
+import { useTeachers } from '@composables/useTeachers'
+import { useAcademicCalendars } from '@composables/useAcademicCalendars'
 
 const emit = defineEmits<{ close: [boolean] }>()
 
@@ -21,14 +20,24 @@ const { create: createGradebook } = useGradebooks()
 const { listRaw: listTeachers } = useTeachers()
 const { listRaw: listCalendars } = useAcademicCalendars()
 
+const gradebookFormSchema = z.object({
+  title: z
+    .string()
+    .min(1, 'Título é obrigatório')
+    .max(200, 'Título muito longo'),
+  teacher_id: z.number().min(1, 'Professor é obrigatório'),
+  calendar_id: z.number().min(1, 'Calendário é obrigatório'),
+  progress: z.number().min(0).max(100).default(0),
+})
+
 const isSubmitting = ref(false)
 const submitError = ref<string | null>(null)
 
 const {
   data: teachersData,
   pending: teachersPending,
-  error: teachersError,
-} = useAsyncData<PaginatedResponse<Teacher>>(
+  execute: loadTeachers,
+} = useLazyAsyncData<PaginatedResponse<Teacher>>(
   'overlay-teachers',
   async () => await listTeachers({ page: 1, page_size: 500 }),
   {
@@ -40,8 +49,8 @@ const {
 const {
   data: calendarsData,
   pending: calendarsPending,
-  error: calendarsError,
-} = useAsyncData<PaginatedResponse<AcademicCalendar>>(
+  execute: loadCalendars,
+} = useLazyAsyncData<PaginatedResponse<AcademicCalendar>>(
   'overlay-calendars',
   async () => await listCalendars(),
   {
@@ -49,8 +58,6 @@ const {
     default: () => ({ count: 0, next: null, previous: null, results: [] }),
   },
 )
-
-const formSchema = gradebookFormSchema
 
 const initialValues = {
   progress: 0,
@@ -124,7 +131,7 @@ function handleCreateTeacher() {
       />
 
       <UAlert
-        v-else-if="teachersData?.results.length === 0"
+        v-if="teachersData && teachersData.results.length === 0"
         icon="i-lucide-user-plus"
         color="warning"
         variant="soft"
@@ -146,7 +153,7 @@ function handleCreateTeacher() {
       </UAlert>
 
       <UAlert
-        v-else-if="calendarsData?.results.length === 0"
+        v-if="calendarsData && calendarsData.results.length === 0"
         icon="i-lucide-calendar"
         color="warning"
         variant="soft"
@@ -154,8 +161,9 @@ function handleCreateTeacher() {
       />
 
       <UForm
-        :schema="formSchema"
+        :schema="gradebookFormSchema"
         :initial-values="initialValues"
+        class="space-y-4"
         @submit="handleSubmit"
       >
         <UFormField
@@ -163,12 +171,7 @@ function handleCreateTeacher() {
           label="Professor"
           type="select"
           placeholder="Selecione o professor"
-          :items="
-            teachersData?.results.map((teacher: Teacher) => ({
-              label: `${teacher.code} - ${teacher.school.name}`,
-              value: teacher.id,
-            })) ?? []
-          "
+          :items="teacherOptions"
         >
           <USelectMenu
             :items="teacherOptions"
@@ -176,6 +179,7 @@ function handleCreateTeacher() {
             icon="i-lucide-user"
             placeholder="Selecione o professor"
             class="w-full"
+            @open="loadTeachers()"
           >
             <template #leading="{ modelValue }">
               <UAvatar
@@ -192,19 +196,30 @@ function handleCreateTeacher() {
           label="Calendário"
           type="select"
           placeholder="Selecione o calendário"
-          :items="
-            calendarsData?.results.map((calendar: AcademicCalendar) => ({
-              label: `${calendar.year}`,
-              value: calendar.id,
-            })) ?? []
-          "
-        />
+        >
+          <USelectMenu
+            :items="calendarOptions"
+            :loading="calendarsPending"
+            icon="i-lucide-calendar"
+            placeholder="Selecione o calendário"
+            class="w-full"
+            @open="loadCalendars()"
+          />
+        </UFormField>
         <UFormField
           name="progress"
           label="Progresso (%)"
           type="number"
           placeholder="0"
-        />
+        >
+          <USlider
+            v-model="initialValues.progress"
+            :min="0"
+            :max="100"
+            :step="1"
+            class="w-full"
+          />
+        </UFormField>
         <UButton
           type="submit"
           color="primary"

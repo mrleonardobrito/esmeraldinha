@@ -4,9 +4,9 @@ import type {
   GradebookUpdate,
   PaginationParams,
   PaginatedResponse,
-} from '../types'
-import { useErrorToast } from './useErrorToast'
-import { useNuxtApp } from '#imports'
+} from '@types'
+import { useErrorToast } from '@composables/useErrorToast'
+import { useNuxtApp } from 'nuxt/app'
 
 export const useGradebooks = () => {
   const { $api } = useNuxtApp()
@@ -14,15 +14,11 @@ export const useGradebooks = () => {
   const basePath = '/api/gradebooks/'
 
   const list = async (params?: PaginationParams): Promise<PaginatedResponse<Gradebook>> => {
-    const result = await withErrorHandling(
+    const result = await withErrorHandling<PaginatedResponse<Gradebook>>(
       () => $api<PaginatedResponse<Gradebook>>(basePath, { params }),
       { title: 'Erro ao carregar cadernos de notas', mode: 'toast' },
     )
-    if (!result) {
-      // Return empty response if error occurred
-      return { count: 0, next: null, previous: null, results: [] }
-    }
-    return result
+    return result ?? { count: 0, next: null, previous: null, results: [] }
   }
 
   const retrieve = (id: number) =>

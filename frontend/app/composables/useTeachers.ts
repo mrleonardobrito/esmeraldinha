@@ -4,19 +4,23 @@ import type {
   TeacherUpdate,
   PaginatedResponse,
   PaginationParams,
-} from '../types'
-import { useErrorToast } from './useErrorToast'
+} from '@types'
+import { useErrorToast } from '@composables/useErrorToast'
+import { useNuxtApp } from 'nuxt/app'
 
 export const useTeachers = () => {
   const { $api } = useNuxtApp()
   const { withErrorHandling } = useErrorToast()
   const basePath = '/api/teachers/'
 
-  const list = (params?: PaginationParams) =>
-    withErrorHandling(
+  const list = async (params?: PaginationParams) => {
+    const result = await withErrorHandling<PaginatedResponse<Teacher>>(
       () => $api<PaginatedResponse<Teacher>>(basePath, { params }),
       { title: 'Erro ao carregar professores', mode: 'toast' },
     )
+
+    return result ?? { count: 0, next: null, previous: null, results: [] }
+  }
 
   const create = (payload: TeacherCreate) =>
     withErrorHandling(

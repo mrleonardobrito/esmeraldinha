@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useHead } from '#imports'
 import { useColorMode } from '@vueuse/core'
 
 const colorMode = useColorMode()

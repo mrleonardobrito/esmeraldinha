@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useAsyncData, useOverlay } from '#imports'
+import { computed, defineAsyncComponent, ref } from 'vue'
 
-import type { Teacher, PaginatedResponse, PaginationParams } from '../types'
-import { useTeachers } from '../composables/useTeachers'
-import { LazyCreateTeacherFormModal } from '#components'
+import type { Teacher, PaginatedResponse, PaginationParams } from '@types'
+import { useTeachers } from '@composables/useTeachers'
+import { useOverlay } from '@nuxt/ui/composables/useOverlay'
 
 const { listRaw: listTeachers } = useTeachers()
 const overlay = useOverlay()
+
+const LazyCreateTeacherFormModal = defineAsyncComponent(
+  () => import('@components/CreateTeacherFormModal.vue'),
+)
 
 const teacherParams = ref<PaginationParams>({
   page: 1,

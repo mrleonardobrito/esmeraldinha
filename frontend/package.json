@@ -30,6 +30,7 @@
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.75",
     "@nuxt/eslint-config": "^1.11.0",
+    "@types/node": "^24.10.1",
     "autoprefixer": "^10.4.22",
     "concurrently": "^9.2.1",
     "eslint": "^9.39.1",

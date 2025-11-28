@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useAsyncData, useOverlay } from '#imports'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables/useToast'
 
 import type {
   Gradebook,
   PaginatedResponse,
   PaginationParams,
-} from '../types/index'
-import { GradebookStatus } from '../types/index'
-import { useGradebooks } from '../composables/useGradebooks'
-import { LazyCreateGradebookFormModal } from '#components'
+} from '@types'
+import { GradebookStatus } from '@types'
+import { useGradebooks } from '@composables/useGradebooks'
+import { useOverlay } from '@nuxt/ui/composables/useOverlay'
 
 const toGradebook = (item: unknown) => item as Gradebook
 
@@ -22,6 +21,10 @@ const {
 
 const toast = useToast()
 const overlay = useOverlay()
+
+const LazyCreateGradebookFormModal = defineAsyncComponent(
+  () => import('@components/CreateGradebookFormModal.vue'),
+)
 
 const gradebookParams = ref<PaginationParams>({
   page: 1,

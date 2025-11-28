@@ -5,3 +5,9 @@ declare module '#app' {
     $api: $Fetch
   }
 }
+
+declare module 'nuxt/app' {
+  interface NuxtApp {
+    $api: $Fetch
+  }
+}

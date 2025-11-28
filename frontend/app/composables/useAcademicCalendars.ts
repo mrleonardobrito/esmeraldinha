@@ -1,6 +1,6 @@
-import type { AcademicCalendar, PaginatedResponse } from '../types'
-import { useErrorToast } from './useErrorToast'
-import { useNuxtApp } from '#imports'
+import type { AcademicCalendar, PaginatedResponse } from '@types'
+import { useErrorToast } from '@composables/useErrorToast'
+import { useNuxtApp } from 'nuxt/app'
 
 export const useAcademicCalendars = () => {
   const { $api } = useNuxtApp()

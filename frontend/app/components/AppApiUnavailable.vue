@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { navigateTo, reloadNuxtApp } from '#imports'
-import { useApiStatus } from '../composables/useApiStatus'
+import { useApiStatus } from '@composables/useApiStatus'
 
 const { isApiAvailable, lastConnectionError } = useApiStatus()
 </script>

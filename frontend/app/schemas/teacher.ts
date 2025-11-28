@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { DiaryType, ReductionDay } from '../types'
+import { DiaryType, ReductionDay } from '@types'
 
 export const teacherFormSchema = z.object({
   code: z
