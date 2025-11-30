@@ -12,6 +12,7 @@ urlpatterns = [
     path('api/health/', health_check, name='health_check'),
 
     path('api/', include('apps.academic_calendar.urls')),
+    path('api/', include('apps.classes.urls')),
     path('api/', include('apps.gradebook.urls')),
     path('api/', include('apps.school.urls')),
     path('api/', include('apps.teacher.urls')),

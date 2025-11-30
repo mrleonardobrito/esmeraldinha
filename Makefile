@@ -1,4 +1,4 @@
-.PHONY: dev install check_env check_db
+.PHONY: dev install check_env check_db clean_ports
 
 VENV_BIN = .venv/bin
 FRONTEND_DIR = ./frontend
@@ -37,6 +37,21 @@ migrate:
 	@echo "🔧 Applying migrations..."
 	@$(DJANGO) makemigrations
 	@$(DJANGO) migrate
+	@$(DJANGO) seed
+
+clean_ports:
+	@echo "🧹 Cleaning ports used by the application..."
+	@echo "🔍 Checking and killing processes on ports 8000, 3000, and 5432..."
+	@-for port in 8000 3000 5432; do \
+		if lsof -ti:$$port >/dev/null 2>&1; then \
+			echo "🛑 Killing process(es) on port $$port..."; \
+			lsof -ti:$$port | xargs kill -9 2>/dev/null || true; \
+			sleep 1; \
+		else \
+			echo "✅ Port $$port is free"; \
+		fi \
+	done
+	@echo "✨ Ports cleaned successfully!"
 
 dev: check_env check_db
 	@echo "🚀 Starting development server..."

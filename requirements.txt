@@ -32,3 +32,4 @@ redis==5.0.8
 # Production server
 gunicorn==22.0.0
 whitenoise==6.7.0
+coverage==7.12.0

@@ -8,13 +8,16 @@ class ReductionDay(models.IntegerChoices):
     WEDNESDAY = 3
     THURSDAY = 4
     FRIDAY = 5
-    
+
+
 class DiaryType(models.TextChoices):
-    C1 = 'c1' #  Creche, Pré-escola, 1º ao 5º ano, EJA - 1º SEGMENTO
-    C2 = 'c2' #  ENSINO FUNDAMENTAL - 6º ao 9º ano, EJA - 2º SEGMENTO
+    C1 = 'c1'
+    C2 = 'c2'
+
 
 class Teacher(models.Model):
-    id = models.IntegerField(unique=True, primary_key=True, auto_created=True)
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=100)
     code = models.CharField(max_length=6)
     password = models.CharField()
     reduction_day = models.IntegerField(choices=ReductionDay.choices)

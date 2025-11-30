@@ -1,6 +1,5 @@
 from django.db import models
 
-
 class School(models.Model):
     id = models.IntegerField(unique=True, primary_key=True, auto_created=True)
     name = models.CharField(max_length=100)
@@ -10,7 +9,4 @@ class School(models.Model):
         verbose_name = 'Escola'
         verbose_name_plural = 'Escolas'
         ordering = ['name']
-
-    def __str__(self):
-        return f'{self.name} (Código: {self.code})'
 

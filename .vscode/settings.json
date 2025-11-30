@@ -1,0 +1,15 @@
+{
+    "editor.formatOnSave": false,
+    "editor.codeActionsOnSave": {
+        "source.fixAll": "explicit",
+        "source.organizeImports": "explicit"
+    },
+    "eslint.useFlatConfig": true,
+    "eslint.workingDirectories": [{
+        "mode": "auto"
+    }],
+    "typescript.tsdk": "node_modules/typescript/lib",
+    "typescript.enablePromptUseWorkspaceTsdk": true,
+    "typescript.validate.enable": true,
+    "javascript.validate.enable": true
+}

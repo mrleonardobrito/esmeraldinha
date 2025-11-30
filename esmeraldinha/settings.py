@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'drf_spectacular',
     'apps.academic_calendar',
+    'apps.classes',
     'apps.gradebook',
     'apps.school',
     'apps.teacher',

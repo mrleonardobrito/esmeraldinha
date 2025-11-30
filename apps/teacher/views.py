@@ -1,27 +1,18 @@
-from django.db import models
-from rest_framework import viewsets, status
+from django.db import models, transaction
+from rest_framework import viewsets, status, serializers
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from apps.teacher.models import Teacher
 from apps.teacher.serializers import TeacherSerializer
+from apps.classes.serializers import ClassSerializer
+from apps.classes.models import Class
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
 
 @extend_schema(tags=['Professores'])
 class TeacherViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet para listar e visualizar professores.
-    Retorna dados no formato REST padrão.
-    """
-    queryset = Teacher.objects.select_related('school').all()
+    queryset = Teacher.objects.all()
     serializer_class = TeacherSerializer
-    action_to_serializer = {
-        'list': TeacherSerializer,
-        'retrieve': TeacherSerializer,
-        'create': TeacherSerializer,
-        'update': TeacherSerializer,
-        'partial_update': TeacherSerializer,
-    }
 
     @extend_schema(
         summary='Lista todos os professores',
@@ -61,7 +52,12 @@ class TeacherViewSet(viewsets.ModelViewSet):
         }
     )
     def create(self, request, *args, **kwargs):
-        return super().create(request, *args, **kwargs)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        teacher = serializer.save()
+
+        response_serializer = self.get_serializer(teacher)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
     @extend_schema(
         summary='Atualiza um professor completamente',
@@ -81,7 +77,15 @@ class TeacherViewSet(viewsets.ModelViewSet):
         }
     )
     def update(self, request, *args, **kwargs):
-        return super().update(request, *args, **kwargs)
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        teacher = serializer.save()
+
+        response_serializer = self.get_serializer(teacher)
+        return Response(response_serializer.data)
 
     @extend_schema(
         summary='Atualiza parcialmente um professor',
@@ -141,18 +145,9 @@ class TeacherViewSet(viewsets.ModelViewSet):
         }
     )
     def by_school(self, request, school_id=None):
-        """
-        Lista todos os professores de uma escola específica.
-        """
-        try:
-            teachers = self.queryset.filter(school_id=school_id)
-            serializer = self.get_serializer(teachers, many=True)
-            return Response(serializer.data)
-        except Exception as e:
-            return Response(
-                {'error': 'Erro ao buscar professores da escola'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        teachers = self.queryset.filter(school_id=school_id)
+        serializer = self.get_serializer(teachers, many=True)
+        return Response(serializer.data)
 
     @action(detail=False, methods=['get'], url_path='search')
     @extend_schema(
@@ -174,9 +169,6 @@ class TeacherViewSet(viewsets.ModelViewSet):
         }
     )
     def search(self, request):
-        """
-        Busca professores por código ou nome.
-        """
         query = request.query_params.get('q', '')
         if not query:
             return Response([])
@@ -187,3 +179,24 @@ class TeacherViewSet(viewsets.ModelViewSet):
         )
         serializer = self.get_serializer(teachers, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], url_path='classes')
+    @extend_schema(
+        summary='Lista turmas de um professor',
+        description='Retorna todas as turmas que um professor leciona',
+        responses={
+            200: OpenApiResponse(
+                response=ClassSerializer(many=True),
+                description='Turmas retornadas com sucesso'
+            ),
+            404: OpenApiResponse(
+                description='Professor não encontrado'
+            )
+        }
+    )
+    def classes(self, request, pk=None):
+        teacher = self.get_object()
+        classes = teacher.classes.all()
+        serializer = ClassSerializer(classes, many=True)
+        return Response(serializer.data)
+

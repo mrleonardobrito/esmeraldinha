@@ -31,15 +31,12 @@ def custom_exception_handler(exc, context):
     }
 
     if hasattr(response, 'data') and response.data:
-        if isinstance(response.data, dict):
-            if 'message' in response.data:
+        if 'message' in response.data:
                 custom_response_data['message'] = response.data['message']
-            if 'detail' in response.data:
-                custom_response_data['detail'] = response.data['detail']
-            elif 'non_field_errors' in response.data:
-                custom_response_data['detail'] = response.data['non_field_errors']
-            else:
-                custom_response_data['detail'] = response.data
+        if 'detail' in response.data:
+            custom_response_data['detail'] = response.data['detail']
+        elif 'non_field_errors' in response.data:
+            custom_response_data['detail'] = response.data['non_field_errors']
         else:
             custom_response_data['detail'] = response.data
 
