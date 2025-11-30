@@ -7,10 +7,13 @@ from apps.classes.serializers import ClassSerializer
 
 
 class TeacherSerializer(serializers.ModelSerializer):
-    school_id = serializers.IntegerField(write_only=True, required=False)
-    classes = ClassSerializer(many=True, read_only=True)
+    school_id = serializers.PrimaryKeyRelatedField(
+        queryset=School.objects.all(), source='school', write_only=True, required=True
+    )
     class_ids = serializers.ListField(
-        child=serializers.IntegerField(),
+        child=serializers.PrimaryKeyRelatedField(
+            queryset=Class.objects.all(), write_only=True, required=False, allow_null=True
+        ),
         write_only=True,
         required=False,
         help_text="IDs das turmas que o professor leciona"
@@ -29,7 +32,6 @@ class TeacherSerializer(serializers.ModelSerializer):
             'reduction_day',
             'diary_type',
             'school_id',
-            'classes',
             'class_ids'
         ]
         read_only_fields = ['id']
