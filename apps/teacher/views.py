@@ -122,33 +122,6 @@ class TeacherViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         return super().destroy(request, *args, **kwargs)
 
-    @action(detail=False, methods=['get'], url_path='by-school/(?P<school_id>[^/.]+)')
-    @extend_schema(
-        summary='Lista professores por escola',
-        description='Retorna todos os professores de uma escola específica',
-        parameters=[
-            {
-                'name': 'school_id',
-                'type': int,
-                'location': 'path',
-                'description': 'ID da escola'
-            }
-        ],
-        responses={
-            200: OpenApiResponse(
-                response=TeacherSerializer(many=True),
-                description='Lista de professores retornada com sucesso'
-            ),
-            404: OpenApiResponse(
-                description='Escola não encontrada'
-            )
-        }
-    )
-    def by_school(self, request, school_id=None):
-        teachers = self.queryset.filter(school_id=school_id)
-        serializer = self.get_serializer(teachers, many=True)
-        return Response(serializer.data)
-
     @action(detail=False, methods=['get'], url_path='search')
     @extend_schema(
         summary='Busca professores por código ou nome',
@@ -178,25 +151,5 @@ class TeacherViewSet(viewsets.ModelViewSet):
             models.Q(name__icontains=query)
         )
         serializer = self.get_serializer(teachers, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['get'], url_path='classes')
-    @extend_schema(
-        summary='Lista turmas de um professor',
-        description='Retorna todas as turmas que um professor leciona',
-        responses={
-            200: OpenApiResponse(
-                response=ClassSerializer(many=True),
-                description='Turmas retornadas com sucesso'
-            ),
-            404: OpenApiResponse(
-                description='Professor não encontrado'
-            )
-        }
-    )
-    def classes(self, request, pk=None):
-        teacher = self.get_object()
-        classes = teacher.classes.all()
-        serializer = ClassSerializer(classes, many=True)
         return Response(serializer.data)
 
