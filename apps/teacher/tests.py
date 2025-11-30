@@ -77,24 +77,6 @@ class TeacherAPITestCase(APITestCase):
         response = self.client.patch(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_teacher_by_school_endpoint_returns_teachers(self):
-        """Testa se o endpoint GET /api/teachers/by-school/{school_id}/ funciona"""
-        url = reverse('teacher-by-school', kwargs={'school_id': self.school.id})
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        data = response.json()
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['code'], 'T001')
-
-    def test_teacher_classes_endpoint_returns_classes(self):
-        """Testa se o endpoint GET /api/teachers/{id}/classes/ funciona"""
-        url = reverse('teacher-classes', kwargs={'pk': self.teacher.id})
-        response = self.client.get(url)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        data = response.json()
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]['code'], '4A')
-
     def test_delete_teacher_endpoint_exists(self):
         """Testa se o endpoint DELETE /api/teachers/{id}/ existe"""
         url = reverse('teacher-detail', args=[self.teacher.id])

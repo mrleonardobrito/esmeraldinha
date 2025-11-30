@@ -4,8 +4,6 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from apps.teacher.models import Teacher
 from apps.teacher.serializers import TeacherSerializer
-from apps.classes.serializers import ClassSerializer
-from apps.classes.models import Class
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
 
@@ -145,11 +143,9 @@ class TeacherViewSet(viewsets.ModelViewSet):
         query = request.query_params.get('q', '')
         if not query:
             return Response([])
-
         teachers = self.queryset.filter(
             models.Q(code__icontains=query) |
             models.Q(name__icontains=query)
         )
         serializer = self.get_serializer(teachers, many=True)
         return Response(serializer.data)
-
