@@ -2,7 +2,10 @@
   "extends": "./.nuxt/tsconfig.json",
   "compilerOptions": {
     "baseUrl": ".",
+    "strict": true,
+    "skipLibCheck": true,
     "paths": {
+      "#components": [".nuxt/components"],
       "@composables/*": ["app/composables/*"],
       "@types": ["app/types/index"],
       "@types/*": ["app/types/*"],
