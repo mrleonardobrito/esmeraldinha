@@ -1,6 +1,5 @@
-import { ref, readonly } from 'vue'
+import { readonly, ref } from 'vue'
 
-const DEFAULT_BASE_URL = 'http://127.0.0.1:8000'
 const HEALTH_PATH = '/api/health/'
 
 const CONNECTION_ERROR_PATTERNS = [
@@ -91,10 +90,11 @@ type CheckApiHealthOptions = {
 }
 
 export const checkApiHealth = async (
+  apiBaseUrl: string,
   options: CheckApiHealthOptions = {},
 ): Promise<boolean> => {
   const {
-    baseURL = DEFAULT_BASE_URL,
+    baseURL = apiBaseUrl,
     path = HEALTH_PATH,
     fetchFn = fetch,
   } = options

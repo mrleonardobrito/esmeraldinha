@@ -6,7 +6,6 @@ type DropResult = {
   removedIndex: number | null
   addedIndex: number | null
   payload: unknown
-  addedToContainerId?: string
 }
 
 export interface KanbanColumn {
@@ -18,12 +17,11 @@ export interface KanbanColumn {
 
 export interface KanbanItem {
   id: number | string
-  [key: string]: unknown
 }
 
 interface Props {
   columns: KanbanColumn[]
-  itemsByColumn: Record<string, unknown[]>
+  itemsByColumn: Record<string, KanbanItem[]>
   groupName?: string
 }
 
@@ -42,17 +40,6 @@ const emit = defineEmits<{
   ]
 }>()
 
-const handleDrop = (dropResult: DropResult) => {
-  if (dropResult.removedIndex !== null || dropResult.addedIndex !== null) {
-    emit('drop', {
-      removedIndex: dropResult.removedIndex,
-      addedIndex: dropResult.addedIndex,
-      payload: dropResult.payload as KanbanItem,
-      columnId: dropResult.addedToContainerId || '',
-    })
-  }
-}
-
 const getColumnItems = (columnId: string): KanbanItem[] => {
   return (props.itemsByColumn[columnId] || []) as KanbanItem[]
 }
@@ -63,13 +50,20 @@ const getChildPayload
       return getColumnItems(columnId)[index] as KanbanItem
     }
 
-const handleContainerDrop = (dropResult: DropResult) => {
-  handleDrop(dropResult)
+const handleDrop = (columnId: string, dropResult: DropResult) => {
+  if (dropResult.removedIndex !== null || dropResult.addedIndex !== null) {
+    emit('drop', {
+      removedIndex: dropResult.removedIndex,
+      addedIndex: dropResult.addedIndex,
+      payload: dropResult.payload as KanbanItem,
+      columnId,
+    })
+  }
 }
 </script>
 
 <template>
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
     <div
       v-for="column in columns"
       :key="column.id"
@@ -106,7 +100,7 @@ const handleContainerDrop = (dropResult: DropResult) => {
           'border-green-300 dark:border-green-600': column.color === 'success',
           'border-red-300 dark:border-red-600': column.color === 'error',
         }"
-        @drop="handleContainerDrop"
+        @drop="(dropResult: DropResult) => handleDrop(column.id, dropResult)"
       >
         <Draggable
           v-for="item in getColumnItems(column.id)"

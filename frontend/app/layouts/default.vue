@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
-import { ref, onMounted } from 'vue'
 import { useToast } from '@nuxt/ui/composables/useToast'
+import { onMounted, ref } from 'vue'
 import { useCookieConsent } from '../composables/useCookieConsent'
 
 const toast = useToast()

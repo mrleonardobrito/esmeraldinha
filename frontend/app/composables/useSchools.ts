@@ -1,19 +1,11 @@
-import type { School, PaginatedResponse, PaginationParams } from '@types'
-import { useErrorToast } from '@composables/useErrorToast'
+import type { PaginatedResponse, PaginationParams, School } from '@types'
 import { useNuxtApp } from 'nuxt/app'
 
 export const useSchools = () => {
   const { $api } = useNuxtApp()
-  const { withErrorHandling } = useErrorToast()
   const basePath = '/api/schools/'
 
-  const list = async (params?: PaginationParams): Promise<PaginatedResponse<School>> => {
-    const result = await withErrorHandling<PaginatedResponse<School>>(
-      () => $api<PaginatedResponse<School>>(basePath, { params }),
-      { title: 'Erro ao carregar escolas', mode: 'toast' },
-    )
-    return result ?? { count: 0, next: null, previous: null, results: [] }
-  }
+  const list = (params: PaginationParams = { page: 1, page_size: 100 }) => $api<PaginatedResponse<School>>(basePath, { params })
 
   return {
     list,

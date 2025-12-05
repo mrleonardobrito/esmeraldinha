@@ -1,30 +1,25 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue'
+import LazyCreateGradebookFormModal from '@components/CreateGradebookFormModal.vue'
+import { useGradebooks } from '@composables/useGradebooks'
 import { useToast } from '@nuxt/ui/composables/useToast'
-
 import type {
   Gradebook,
+  GradebookStatus,
   PaginatedResponse,
   PaginationParams,
 } from '@types'
-import { GradebookStatus } from '@types'
-import { useGradebooks } from '@composables/useGradebooks'
-import { useOverlay } from '@nuxt/ui/composables/useOverlay'
+import { gradebookStatusColumns } from '@types'
+import { computed, ref } from 'vue'
 
 const toGradebook = (item: unknown) => item as Gradebook
 
 const {
   list: listGradebooks,
   update: updateGradebook,
-  destroy: destroyGradebook,
 } = useGradebooks()
 
 const toast = useToast()
 const overlay = useOverlay()
-
-const LazyCreateGradebookFormModal = defineAsyncComponent(
-  () => import('@components/CreateGradebookFormModal.vue'),
-)
 
 const gradebookParams = ref<PaginationParams>({
   page: 1,
@@ -36,7 +31,7 @@ const {
   pending: _pending,
   error: _error,
   refresh,
-} = useAsyncData<PaginatedResponse<Gradebook>, PaginatedResponse<Gradebook>, PaginatedResponse<Gradebook>>('gradebooks', async () => {
+} = useAsyncData<PaginatedResponse<Gradebook>>('gradebooks', async () => {
   return await listGradebooks(gradebookParams.value)
 })
 
@@ -44,87 +39,24 @@ const gradebooks = computed<Gradebook[]>(
   () => gradebooksData.value?.results ?? ([] as Gradebook[]),
 )
 
-const itemsByColumn = computed(() => {
-  const grouped: Record<GradebookStatus, Gradebook[]> = {
-    [GradebookStatus.PENDING]: [],
-    [GradebookStatus.COMPLETED]: [],
-    [GradebookStatus.CANCELLED]: [],
-  }
+const itemsByColumn = computed<Record<GradebookStatus, Gradebook[]>>(() => {
+  const grouped = gradebookStatusColumns.reduce(
+    (acc, column) => {
+      acc[column.id] = []
+      return acc
+    },
+    {} as Record<GradebookStatus, Gradebook[]>,
+  )
 
   gradebooks.value.forEach((gradebook) => {
+    if (!grouped[gradebook.status]) {
+      grouped[gradebook.status] = []
+    }
     grouped[gradebook.status].push(gradebook)
   })
 
   return grouped
 })
-
-const _handleEdit = async (_gradebook: Gradebook) => {
-  toast.add({
-    title: 'Funcionalidade de edição em desenvolvimento',
-    color: 'warning',
-    id: 'edit-not-implemented',
-  })
-}
-
-const _handleArchive = async (_gradebook: Gradebook) => {
-  if (
-    !confirm(
-      `Tem certeza que deseja arquivar a caderneta "${
-        _gradebook.title || _gradebook.id
-      }"?`,
-    )
-  )
-    return
-
-  try {
-    await updateGradebook(_gradebook.id, {
-      status: GradebookStatus.CANCELLED,
-    })
-    await refresh()
-    toast.add({
-      title: 'Caderneta arquivada com sucesso!',
-      color: 'success',
-      id: 'gradebook-archived',
-    })
-  }
-  catch (error) {
-    toast.add({
-      title: 'Erro ao arquivar caderneta',
-      color: 'error',
-      id: 'archive-error',
-      description: error instanceof Error ? error.message : 'Erro desconhecido',
-    })
-  }
-}
-
-const _handleDelete = async (_gradebook: Gradebook) => {
-  if (
-    !confirm(
-      `Tem certeza que deseja excluir a caderneta "${
-        _gradebook.title || _gradebook.id
-      }"?`,
-    )
-  )
-    return
-
-  try {
-    await destroyGradebook(_gradebook.id)
-    await refresh()
-    toast.add({
-      title: 'Caderneta excluída com sucesso!',
-      color: 'success',
-      id: 'gradebook-deleted',
-    })
-  }
-  catch (error) {
-    toast.add({
-      title: 'Erro ao excluir caderneta',
-      color: 'error',
-      id: 'delete-error',
-      description: error instanceof Error ? error.message : 'Erro desconhecido',
-    })
-  }
-}
 
 const handleDrop = async (payload: {
   removedIndex: number | null
@@ -132,7 +64,7 @@ const handleDrop = async (payload: {
   payload: unknown
   columnId: string
 }) => {
-  if (!payload.addedIndex) return
+  if (payload.addedIndex === null) return
 
   const gradebook = payload.payload as Gradebook
 
@@ -140,11 +72,6 @@ const handleDrop = async (payload: {
     const newStatus = payload.columnId as GradebookStatus
     await updateGradebook(gradebook.id, { status: newStatus })
     await refresh()
-    toast.add({
-      title: 'Caderneta movida com sucesso!',
-      color: 'success',
-      id: 'gradebook-moved',
-    })
   }
   catch (error) {
     toast.add({
@@ -156,27 +83,6 @@ const handleDrop = async (payload: {
     await refresh()
   }
 }
-
-const statusColumns = [
-  {
-    id: GradebookStatus.PENDING,
-    title: 'Pendente',
-    color: 'warning' as const,
-    description: 'Gradebooks aguardando processamento',
-  },
-  {
-    id: GradebookStatus.COMPLETED,
-    title: 'Concluída',
-    color: 'success' as const,
-    description: 'Gradebooks finalizadas',
-  },
-  {
-    id: GradebookStatus.CANCELLED,
-    title: 'Cancelada',
-    color: 'error' as const,
-    description: 'Gradebooks canceladas',
-  },
-]
 
 async function open() {
   const modal = overlay.create(LazyCreateGradebookFormModal)
@@ -208,7 +114,7 @@ async function open() {
 
       <template #body>
         <AppKanban
-          :columns="statusColumns"
+          :columns="gradebookStatusColumns"
           :items-by-column="itemsByColumn"
           group-name="gradebooks"
           @drop="handleDrop"

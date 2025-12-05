@@ -1,13 +1,9 @@
-import { readonly, ref } from 'vue'
-import type { ApiErrorResponse } from '@types'
 import { checkConnectionError } from '@composables/useApiStatus'
-import { createError } from 'nuxt/app'
 import { useToast } from '@nuxt/ui/composables/useToast'
+import type { ApiErrorResponse } from '@types'
+import { createError } from 'nuxt/app'
 
-interface ErrorToastOptions {
-  duration?: number
-  close?: boolean
-}
+const toast = useToast()
 
 interface ErrorWithData {
   data?: Record<string, unknown>
@@ -17,23 +13,15 @@ interface ErrorWithData {
   detail?: unknown
 }
 
-type ErrorHandlingMode = 'toast' | 'page' | 'session'
+type ErrorHandlingMode = 'page' | 'toast'
 
-interface ErrorHandlerOptions extends ErrorToastOptions {
+interface ErrorHandlerOptions {
   mode?: ErrorHandlingMode
+  title?: string
 }
 
 const DEFAULT_ERROR_TITLE = 'Erro'
 const DEFAULT_ERROR_MESSAGE = 'Erro desconhecido'
-const DEFAULT_TOAST_DESCRIPTION = 'Clique para ver os detalhes do erro'
-const DEFAULT_TOAST_DURATION = 3000
-
-const sessionError = ref<{
-  show: boolean
-  title: string
-  message: string
-  details?: string
-} | null>(null)
 
 const isApiErrorResponse = (obj: unknown): obj is ApiErrorResponse => {
   if (!obj || typeof obj !== 'object') return false
@@ -112,31 +100,7 @@ const formatErrorMessage = (error: unknown): string => {
   return DEFAULT_ERROR_MESSAGE
 }
 
-const parseErrorParams = (
-  titleOrError: string | unknown,
-  error?: unknown,
-): { title: string, error: unknown } => {
-  if (error === undefined) {
-    const apiError = extractApiError(titleOrError)
-    return {
-      title: apiError?.message || DEFAULT_ERROR_TITLE,
-      error: titleOrError,
-    }
-  }
-
-  return {
-    title: titleOrError as string,
-    error,
-  }
-}
-
 export const useErrorToast = () => {
-  const toast = useToast()
-
-  const clearSessionError = () => {
-    sessionError.value = null
-  }
-
   const showErrorPage = (title: string, error: unknown) => {
     const errorMessage = formatErrorMessage(error)
     throw createError({
@@ -148,67 +112,18 @@ export const useErrorToast = () => {
     })
   }
 
-  const showErrorToast = (
-    title: string,
-    error: unknown,
-    description?: string,
-    options?: ErrorToastOptions,
-  ) => {
-    const apiError = extractApiError(error)
-
-    const toastDescription
-      = apiError?.message || description || DEFAULT_TOAST_DESCRIPTION
-
+  const showToastError = (title: string, error: unknown) => {
+    const errorMessage = formatErrorMessage(error)
     toast.add({
       title,
-      description: toastDescription,
       color: 'error',
-      duration: options?.duration ?? DEFAULT_TOAST_DURATION,
-      close: options?.close ?? true,
+      description: errorMessage,
     })
-  }
-
-  const showSessionError = (title: string, error: unknown) => {
-    const errorMessage = formatErrorMessage(error)
-    sessionError.value = {
-      show: true,
-      title,
-      message: errorMessage,
-      details: errorMessage,
-    }
-  }
-
-  const showError = (
-    titleOrError: string | unknown,
-    error?: unknown,
-    description?: string,
-    options?: ErrorHandlerOptions,
-  ) => {
-    const { title, error: actualError } = parseErrorParams(titleOrError, error)
-    const mode = options?.mode || 'toast'
-
-    switch (mode) {
-      case 'page':
-        showErrorPage(title, actualError)
-        break
-      case 'session':
-        showSessionError(title, actualError)
-        break
-      case 'toast':
-      default:
-        showErrorToast(title, actualError, description, options)
-        break
-    }
   }
 
   const withErrorHandling = async <T>(
     apiCall: () => Promise<T>,
-    options: {
-      mode?: ErrorHandlingMode
-      title?: string
-      description?: string
-      toastOptions?: ErrorToastOptions
-    } = {},
+    options: ErrorHandlerOptions = {},
   ): Promise<T | null> => {
     try {
       return await apiCall()
@@ -217,11 +132,15 @@ export const useErrorToast = () => {
       const isConnectionError = checkConnectionError(error)
 
       if (!isConnectionError) {
-        const title = options.title || 'Erro na operação'
-        showError(title, error, options.description, {
-          mode: options.mode || 'toast',
-          ...options.toastOptions,
-        })
+        const title = options.title || DEFAULT_ERROR_TITLE
+        const mode = options.mode || 'session'
+
+        if (mode === 'page') {
+          showErrorPage(title, error)
+        }
+        else {
+          showToastError(title, error)
+        }
       }
 
       return null
@@ -229,14 +148,8 @@ export const useErrorToast = () => {
   }
 
   return {
-    showError,
-    showErrorToast,
-    showErrorPage,
-    showSessionError,
     withErrorHandling,
-    formatErrorMessage,
-    extractApiError,
-    clearSessionError,
-    sessionError: readonly(sessionError),
+    showErrorPage,
+    showToastError,
   }
 }

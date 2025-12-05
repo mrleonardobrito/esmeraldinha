@@ -1,5 +1,4 @@
 import {
-  checkApiHealth,
   checkConnectionError,
   setApiAvailable,
 } from '@composables/useApiStatus'
@@ -34,11 +33,7 @@ export default defineNuxtPlugin(async () => {
     },
   })
 
-  await checkApiHealth()
-
   return {
-    provide: {
-      api,
-    },
+    provide: { api },
   }
 })

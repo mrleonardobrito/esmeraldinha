@@ -1,43 +1,49 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, ref } from 'vue'
 
-import type { Teacher, PaginatedResponse, PaginationParams } from '@types'
+import LazyCreateTeacherFormModal from '@components/CreateTeacherFormModal.vue'
 import { useTeachers } from '@composables/useTeachers'
-import { useOverlay } from '@nuxt/ui/composables/useOverlay'
+import type {
+  PaginatedResponse,
+  Teacher,
+} from '@types'
 
-const { listRaw: listTeachers } = useTeachers()
+const {
+  list: listTeachers,
+} = useTeachers()
+
 const overlay = useOverlay()
-
-const LazyCreateTeacherFormModal = defineAsyncComponent(
-  () => import('@components/CreateTeacherFormModal.vue'),
-)
-
-const teacherParams = ref<PaginationParams>({
-  page: 1,
-  page_size: 50,
-})
 
 const {
   data: teachersData,
-  pending,
-  error,
   refresh,
-} = useAsyncData<PaginatedResponse<Teacher>>('teachers', async () => {
-  return await listTeachers(teacherParams.value)
-})
+} = await useAsyncData<PaginatedResponse<Teacher>>('teachers', () => listTeachers())
 
-const teachers = computed<Teacher[]>(
-  () => teachersData.value?.results ?? ([] as Teacher[]),
-)
+const teachers = computed(() => teachersData.value?.results ?? [])
+
+const selectedTeacher = ref<Teacher | null>(null)
 
 async function openCreateTeacher() {
-  const modal = overlay.create(LazyCreateTeacherFormModal)
-  const instance = modal.open()
+  const createTeacherModal = overlay.create(LazyCreateTeacherFormModal)
+  const instance = createTeacherModal.open()
   const result = await instance.result
 
   if (result) {
     await refresh()
   }
+}
+
+function onTeacherSelected(teacher: Teacher) {
+  selectedTeacher.value = teacher
+}
+
+async function onTeacherDeleted() {
+  selectedTeacher.value = null
+  await refresh()
+}
+
+async function onTeacherUpdated() {
+  await refresh()
 }
 </script>
 
@@ -58,69 +64,47 @@ async function openCreateTeacher() {
       </template>
 
       <template #body>
-        <div
-          v-if="pending"
-          class="flex justify-center py-8"
-        >
-          <UIcon
-            name="i-lucide-loader-2"
-            class="size-8 animate-spin"
-          />
-        </div>
-
-        <div
-          v-else-if="error"
-          class="flex flex-col items-center justify-center py-12"
-        >
-          <UIcon
-            name="i-lucide-alert-circle"
-            class="size-8 text-error mb-2"
-          />
-          <p class="text-sm text-gray-500 mb-4">
-            {{ error }}
-          </p>
-          <UButton
-            color="primary"
-            variant="outline"
-            @click="refresh()"
-          >
-            Tentar novamente
-          </UButton>
-        </div>
-
-        <div
-          v-else
-          class="space-y-3"
-        >
+        <div class="relative flex gap-4 overflow-hidden">
           <div
-            v-for="teacher in teachers"
-            :key="teacher.id"
-            class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border"
+            class="flex flex-1 flex-wrap overflow-auto content-start gap-4"
           >
-            <div class="flex items-center justify-between">
-              <div>
-                <h4 class="font-medium text-gray-900 dark:text-white">
-                  {{ teacher.code }}
-                </h4>
-                <p class="text-sm text-gray-600 dark:text-gray-400">
-                  {{ teacher.school.name }}
-                </p>
-              </div>
-              <!-- ações futuras (editar, remover etc) -->
+            <div
+              v-for="teacher in teachers"
+              :key="teacher.id"
+              class="flex-1 min-w-full sm:min-w-80 lg:max-w-1/2 xl:max-w-1/3"
+              :class="[selectedTeacher ? 'lg:min-w-full 2xl:min-w-80 2xl:max-w-1/3' : '']"
+            >
+              <TeacherCard
+                :teacher="teacher"
+                :selected="selectedTeacher?.id === teacher.id"
+                @select="onTeacherSelected"
+              />
             </div>
+          </div>
+          <div
+            v-if="selectedTeacher"
+            class="hidden xl:block xl:w-[420px] 2xl:w-[480px] shrink-0"
+          >
+            <TeacherDetail
+              :teacher="selectedTeacher"
+              @teacher-deleted="onTeacherDeleted"
+              @teacher-updated="onTeacherUpdated"
+              @selection-cleared="selectedTeacher = null"
+            />
           </div>
 
           <div
-            v-if="teachers.length === 0"
-            class="flex flex-col items-center justify-center py-8 text-gray-400"
+            v-if="selectedTeacher"
+            class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 xl:hidden"
           >
-            <UIcon
-              name="i-lucide-inbox"
-              class="size-8 mb-2"
-            />
-            <p class="text-sm">
-              Nenhum professor cadastrado ainda
-            </p>
+            <div class="w-full max-w-md">
+              <TeacherDetail
+                :teacher="selectedTeacher"
+                @teacher-deleted="onTeacherDeleted"
+                @teacher-updated="onTeacherUpdated"
+                @selection-cleared="selectedTeacher = null"
+              />
+            </div>
           </div>
         </div>
       </template>
