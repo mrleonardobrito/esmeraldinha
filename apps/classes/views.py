@@ -1,19 +1,35 @@
 from rest_framework import viewsets
 from .models import Class
 from .serializers import ClassSerializer
-from drf_spectacular.utils import extend_schema, OpenApiResponse
+from .filters import ClassFilterSet
+from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
+from django_filters.rest_framework import DjangoFilterBackend
 
 
 @extend_schema(tags=['Turmas'])
 class ClassViewSet(viewsets.ModelViewSet):
+    queryset = Class.objects.prefetch_related('teachers').select_related('school')
     serializer_class = ClassSerializer
-
-    def get_queryset(self):
-        return Class.objects.all()
-
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = ClassFilterSet
+    
     @extend_schema(
         summary='Lista todas as turmas',
         description='Retorna uma lista paginada de todas as turmas cadastradas. Use os parâmetros ?page=N para navegar entre páginas.',
+        parameters=[
+            OpenApiParameter(
+                name='school_id',
+                type=int,
+                location='query',
+                description='ID da escola'
+            ),
+            OpenApiParameter(
+                name='teacher_id',
+                type=int,
+                location='query',
+                description='ID do professor'
+            ),
+        ]
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)

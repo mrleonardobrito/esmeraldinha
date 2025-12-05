@@ -1,0 +1,31 @@
+from django.db import models
+from apps.teachers.models import Teacher
+from apps.academic_calendars.models import AcademicCalendar
+from apps.schools.models import School
+from apps.classes.models import Class
+
+
+class GradebookStatus(models.TextChoices):
+    PENDING = 'pending'
+    IN_PROGRESS = 'in_progress'
+    COMPLETED = 'completed'
+    CANCELLED = 'cancelled'
+
+
+class Gradebook(models.Model):
+    teacher = models.ForeignKey(
+        Teacher, related_name='gradebooks', on_delete=models.CASCADE)
+    calendar = models.ForeignKey(
+        AcademicCalendar, related_name='gradebooks', on_delete=models.CASCADE)
+    academic_class = models.ForeignKey(
+        Class, related_name='gradebooks', on_delete=models.CASCADE)
+    content_registry = models.JSONField()
+    status = models.CharField(
+        max_length=20, choices=GradebookStatus.choices, default=GradebookStatus.PENDING)
+    title = models.CharField(max_length=200, blank=True, default='')
+    progress = models.IntegerField(
+        default=0, help_text='Progresso da caderneta (0-100)')
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+
+    class Meta:
+        ordering = ['status', 'teacher__code']

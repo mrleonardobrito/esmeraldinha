@@ -2,7 +2,7 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 from django.urls import reverse
 
-from apps.school.models import School
+from apps.schools.models import School
 from apps.classes.models import Class
 from django.test import SimpleTestCase
 from rest_framework.test import APIRequestFactory

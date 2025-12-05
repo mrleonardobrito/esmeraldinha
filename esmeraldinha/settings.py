@@ -42,12 +42,13 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'corsheaders',
     'rest_framework',
+    'django_filters',
     'drf_spectacular',
-    'apps.academic_calendar',
+    'apps.academic_calendars',
     'apps.classes',
-    'apps.gradebook',
-    'apps.school',
-    'apps.teacher',
+    'apps.gradebooks',
+    'apps.schools',
+    'apps.teachers',
 ]
 
 REST_FRAMEWORK = {
@@ -55,6 +56,7 @@ REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'esmeraldinha.exceptions.custom_exception_handler',
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
 }
 
 SPECTACULAR_SETTINGS = {
