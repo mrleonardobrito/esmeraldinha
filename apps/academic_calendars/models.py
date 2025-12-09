@@ -29,7 +29,7 @@ class AcademicCalendarImage(models.Model):
 
 
 class AcademicCalendar(models.Model):
-    year = models.IntegerField()
+    year = models.IntegerField(unique=True)
     source_image = models.OneToOneField(
         AcademicCalendarImage,
         on_delete=models.SET_NULL,

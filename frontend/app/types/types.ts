@@ -208,7 +208,7 @@ export const mapTeacherUpdate = <K extends keyof TeacherUpdate>(
 export interface AcademicCalendar {
   readonly id: number
   readonly year: number
-  readonly calendar_data: Record<string, unknown>
+  readonly calendar_data: CalendarData
   readonly processed_at: string
 }
 

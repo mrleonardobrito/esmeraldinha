@@ -50,7 +50,7 @@ const legendLabel = (type: DayType): string => DAY_TYPE_LABELS[type] || type
 const getDayType = (date: Date): DayType => {
   const iso = formatDateToISO(date)
   const day = dayMap.value[iso]
-  return day?.type || 'letivo'
+  return day?.type || 'nao_letivo'
 }
 
 const getCurrentColorWrapper = (type: DayType) => getCurrentColor(type, legendItems.value)
@@ -185,26 +185,31 @@ const calendarAttributes = computed(() => {
           </template>
 
           <template #day-content="{ day }">
-            <div
-              class="day-popover-container flex flex-col items-center justify-center gap-0.5 w-full h-full cursor-pointer hover:opacity-80 transition-opacity relative"
-              @click.stop="openDayEditor($event, day)"
+            <UTooltip
+              :text="legendLabel(getDayType(day.date))"
+              :delay-duration="0"
             >
-              <span class="text-[10px] font-medium text-slate-900 dark:text-slate-100 leading-none relative z-10">
-                {{ day.day }}
-              </span>
               <div
-                v-if="dayLabels(day.date)"
-                class="flex flex-wrap justify-center gap-0.5 relative z-10"
+                class="day-popover-container flex flex-col items-center justify-center gap-0.5 w-full h-full cursor-pointer hover:opacity-80 transition-opacity relative"
+                @click.stop="openDayEditor($event, day)"
               >
-                <UTooltip
-                  v-for="label in dayLabels(day.date)"
-                  :key="label"
-                  :text="label"
+                <span class="text-[10px] font-medium text-slate-900 dark:text-slate-100 leading-none relative z-10">
+                  {{ day.day }}
+                </span>
+                <div
+                  v-if="dayLabels(day.date)"
+                  class="flex flex-wrap justify-center gap-0.5 relative z-10"
                 >
-                  <span class="inline-flex h-1.5 w-6 rounded-full bg-slate-600 dark:bg-slate-300" />
-                </UTooltip>
+                  <UTooltip
+                    v-for="label in dayLabels(day.date)"
+                    :key="label"
+                    :text="label"
+                  >
+                    <span class="inline-flex h-1.5 w-6 rounded-full bg-slate-600 dark:bg-slate-300" />
+                  </UTooltip>
+                </div>
               </div>
-            </div>
+            </UTooltip>
           </template>
         </VCalendar>
       </div>

@@ -5,7 +5,7 @@
     "fields": {
       "type": "letivo",
       "description": "Dia letivo normal",
-      "color_hex": "#FFFFFF"
+      "color_hex": "#00FF88"
     }
   },
   {
@@ -14,7 +14,7 @@
     "fields": {
       "type": "feriado_nacional",
       "description": "Feriado nacional",
-      "color_hex": "#FF0000"
+      "color_hex": "#FF3333"
     }
   },
   {
@@ -23,7 +23,7 @@
     "fields": {
       "type": "feriado_municipal",
       "description": "Feriado municipal",
-      "color_hex": "#FFA500"
+      "color_hex": "#FF6600"
     }
   },
   {
@@ -32,7 +32,7 @@
     "fields": {
       "type": "ponto_facultativo",
       "description": "Ponto facultativo",
-      "color_hex": "#FFFF00"
+      "color_hex": "#FFD700"
     }
   },
   {
@@ -41,7 +41,7 @@
     "fields": {
       "type": "ferias",
       "description": "Período de férias",
-      "color_hex": "#00FF00"
+      "color_hex": "#00BFFF"
     }
   },
   {
@@ -50,7 +50,7 @@
     "fields": {
       "type": "recesso",
       "description": "Período de recesso",
-      "color_hex": "#008000"
+      "color_hex": "#AA00FF"
     }
   },
   {
@@ -59,7 +59,7 @@
     "fields": {
       "type": "planejamento",
       "description": "Dia de planejamento pedagógico",
-      "color_hex": "#0000FF"
+      "color_hex": "#0066FF"
     }
   },
   {
@@ -68,7 +68,7 @@
     "fields": {
       "type": "avaliacao_recuperacao",
       "description": "Avaliação de recuperação",
-      "color_hex": "#800080"
+      "color_hex": "#FF8800"
     }
   },
   {
@@ -77,7 +77,7 @@
     "fields": {
       "type": "evento",
       "description": "Evento escolar",
-      "color_hex": "#FFC0CB"
+      "color_hex": "#00FFAA"
     }
   },
   {
@@ -86,7 +86,7 @@
     "fields": {
       "type": "nao_letivo",
       "description": "Dia não letivo",
-      "color_hex": "#C0C0C0"
+      "color_hex": "#9CA3AF"
     }
   }
 ]

@@ -118,7 +118,9 @@ async function onSubmit() {
       id: 'processing-start',
     })
 
+    const targetYear = new Date().getFullYear()
     calendarData.value = await processCalendar(
+      targetYear,
       formState.calendarFile,
       formState.selectedLegendType,
     )
@@ -264,28 +266,31 @@ function onClose(data: CalendarData | null = null) {
                   </UTooltip>
                 </div>
               </template>
-              <div
-                class="grid gap-2"
-                aria-label="Opções de legenda padrão"
-              >
-                <div
-                  v-for="option in legendOptions"
-                  :key="option.value"
-                  role="button"
-                  tabindex="0"
-                  class="flex items-center gap-3 px-3 py-2 rounded-lg border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  :class="{
-                    'border-primary bg-primary/10 text-primary': formState.selectedLegendType === option.value,
-                    'border-neutral-700 hover:border-neutral-500': formState.selectedLegendType !== option.value,
-                  }"
-                  @click="formState.selectedLegendType = option.value"
-                  @keyup.enter="formState.selectedLegendType = option.value"
-                >
-                  <span
-                    class="w-4 h-4 rounded-full border"
-                    :style="{ backgroundColor: option.color ?? '#FFFFFF' }"
-                  />
-                  <span>{{ option.label }}</span>
+              <div class="space-y-3">
+                <USelect
+                  v-model="formState.selectedLegendType"
+                  :options="legendOptions"
+                  placeholder="Selecione a legenda padrão"
+                  option-attribute="label"
+                />
+
+                <div class="space-y-2 rounded-lg border border-neutral-700 bg-neutral-900/40 p-3">
+                  <p class="text-sm text-neutral-200">
+                    Itens da legenda
+                  </p>
+                  <ul class="space-y-2">
+                    <li
+                      v-for="option in legendOptions"
+                      :key="option.value"
+                      class="flex items-center gap-3 text-sm text-neutral-100"
+                    >
+                      <span
+                        class="w-3 h-3 rounded-full border"
+                        :style="{ backgroundColor: option.color ?? '#FFFFFF' }"
+                      />
+                      <span>{{ option.label }}</span>
+                    </li>
+                  </ul>
                 </div>
               </div>
             </UFormField>

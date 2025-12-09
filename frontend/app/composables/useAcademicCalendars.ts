@@ -7,42 +7,41 @@ export const useAcademicCalendars = () => {
   const basePath = '/api/academic-calendars/'
 
   const list = () => $api<PaginatedResponse<AcademicCalendar>>(basePath)
-  const upload = (file: File) => {
-    const formData = new FormData()
-    formData.append('calendar_file', file)
-    return $api<AcademicCalendar>(basePath, {
-      method: 'POST',
-      body: formData,
-    })
-  }
 
-  // Buscar legendas do backend Django
-  const listLegends = async () => {
-    const response = await $api<PaginatedResponse<LegendItem>>('/api/legends/')
+  const getByYear = (year: number) =>
+    $api<AcademicCalendar>(`${basePath}${year}/`)
+
+  const saveCalendar = (year: number, calendarData: CalendarData) =>
+    $api<AcademicCalendar>(`${basePath}${year}/`, {
+      method: 'PUT',
+      body: {
+        year,
+        calendar_data: calendarData,
+      },
+    })
+
+  const listLegends = async (year?: number) => {
+    const query = year ? `?year=${year}` : ''
+    const response = await $api<PaginatedResponse<LegendItem>>(`/api/legends/${query}`)
     return response.results
   }
 
-  // Processar calendário via endpoint do Django
-  // Rota: POST /api/academic-calendars/process/
-  // Mescla dados do PDF processado com fixtures do banco de dados
-  const processCalendar = async (file: File, selectedLegendType?: string) => {
+  const processCalendar = async (year: number, file: File, selectedLegendType?: string) => {
     const formData = new FormData()
     formData.append('calendar_file', file)
     if (selectedLegendType) {
       formData.append('default_legend_type', selectedLegendType)
     }
 
-    // Chamada para o endpoint do Django que processa o PDF e mescla com fixtures
-    // O backend busca dias específicos das fixtures e mescla com os dias processados do PDF
-    // Prioridade: PDF processado > Fixtures > Tipo padrão
-    return $api<CalendarData>(`${basePath}process/`, {
+    return $api<CalendarData>(`${basePath}${year}/process-pdf/`, {
       method: 'POST',
       body: formData,
     })
   }
   return {
     list,
-    upload,
+    getByYear,
+    saveCalendar,
     listLegends,
     processCalendar,
     generateCalendarAttributes,
