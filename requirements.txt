@@ -1,6 +1,10 @@
+annotated-types==0.7.0
 asgiref==3.11.0
 attrs==25.4.0
+cffi==2.0.0
+charset-normalizer==3.4.4
 coverage==7.12.0
+cryptography==46.0.3
 Django==5.2.8
 django-cors-headers==4.6.0
 django-filter==25.2
@@ -17,6 +21,11 @@ pandas==2.3.3
 pillow==12.0.0
 psycopg2-binary==2.9.9
 pyclean==3.4.0
+pycparser==2.23
+pydantic==2.10.3
+pydantic_core==2.27.1
+PyMuPDF==1.26.6
+pypdfium2==5.1.0
 python-dateutil==2.9.0.post0
 python-decouple==3.8
 pytz==2025.2

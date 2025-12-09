@@ -170,3 +170,11 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.SUCCESS(f'\n{total_linked} vínculos ManyToMany criados.')
             )
+
+
+
+
+
+
+
+

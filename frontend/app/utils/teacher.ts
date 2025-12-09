@@ -14,7 +14,7 @@ const defaultReductionDayLabel = 'Não informado'
 
 export const getReductionDayLabel = (value: number): string => {
   if (Object.values(ReductionDay).includes(value)) {
-    return reductionDayLabels[value as ReductionDay]
+    return reductionDayLabels[value as ReductionDay] || defaultReductionDayLabel
   }
 
   console.error('Invalid reduction day value', { value })
@@ -39,7 +39,7 @@ const defaultDiaryTypeLabel = 'Não informado'
 
 export const getDiaryTypeLabel = (value: string): string => {
   if (Object.values(DiaryType).includes(value as DiaryType)) {
-    return diaryTypeLabels[value as DiaryType]
+    return diaryTypeLabels[value as DiaryType] || defaultDiaryTypeLabel
   }
 
   console.error('Invalid diary type value', { value })

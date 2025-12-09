@@ -33,22 +33,31 @@ const viteAliases = Object.entries(nuxtAliases).map(([find, replacement]) => ({
 
 export default defineNuxtConfig({
   modules: [
+    '@nuxt/icon',
     '@nuxt/eslint',
     '@nuxt/ui',
-    '@nuxt/icon',
     '@nuxt/image',
     '@nuxt/hints',
   ],
   devtools: { enabled: true },
 
   css: ['~/assets/css/main.css'],
-  alias: nuxtAliases,
-  compatibilityDate: '2025-07-15',
 
   vite: {
     plugins: [tsconfigPaths()],
     resolve: {
       alias: viteAliases,
+    },
+  },
+  alias: nuxtAliases,
+  compatibilityDate: '2025-07-15',
+
+  nitro: {
+    devProxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 

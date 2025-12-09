@@ -1,0 +1,93 @@
+[
+  {
+    "model": "academic_calendars.legend",
+    "pk": 1,
+    "fields": {
+      "type": "letivo",
+      "description": "Dia letivo normal",
+      "color_hex": "#FFFFFF"
+    }
+  },
+  {
+    "model": "academic_calendars.legend",
+    "pk": 2,
+    "fields": {
+      "type": "feriado_nacional",
+      "description": "Feriado nacional",
+      "color_hex": "#FF0000"
+    }
+  },
+  {
+    "model": "academic_calendars.legend",
+    "pk": 3,
+    "fields": {
+      "type": "feriado_municipal",
+      "description": "Feriado municipal",
+      "color_hex": "#FFA500"
+    }
+  },
+  {
+    "model": "academic_calendars.legend",
+    "pk": 4,
+    "fields": {
+      "type": "ponto_facultativo",
+      "description": "Ponto facultativo",
+      "color_hex": "#FFFF00"
+    }
+  },
+  {
+    "model": "academic_calendars.legend",
+    "pk": 5,
+    "fields": {
+      "type": "ferias",
+      "description": "Período de férias",
+      "color_hex": "#00FF00"
+    }
+  },
+  {
+    "model": "academic_calendars.legend",
+    "pk": 6,
+    "fields": {
+      "type": "recesso",
+      "description": "Período de recesso",
+      "color_hex": "#008000"
+    }
+  },
+  {
+    "model": "academic_calendars.legend",
+    "pk": 7,
+    "fields": {
+      "type": "planejamento",
+      "description": "Dia de planejamento pedagógico",
+      "color_hex": "#0000FF"
+    }
+  },
+  {
+    "model": "academic_calendars.legend",
+    "pk": 8,
+    "fields": {
+      "type": "avaliacao_recuperacao",
+      "description": "Avaliação de recuperação",
+      "color_hex": "#800080"
+    }
+  },
+  {
+    "model": "academic_calendars.legend",
+    "pk": 9,
+    "fields": {
+      "type": "evento",
+      "description": "Evento escolar",
+      "color_hex": "#FFC0CB"
+    }
+  },
+  {
+    "model": "academic_calendars.legend",
+    "pk": 10,
+    "fields": {
+      "type": "nao_letivo",
+      "description": "Dia não letivo",
+      "color_hex": "#C0C0C0"
+    }
+  }
+]
+

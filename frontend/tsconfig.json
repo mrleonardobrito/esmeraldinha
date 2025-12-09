@@ -18,7 +18,6 @@
       "@plugins/*": ["app/plugins/*"],
       "@schemas": ["app/schemas"],
       "@schemas/*": ["app/schemas/*"],
-      "@app": ["app"],
       "@app/*": ["app/*"]
     }
   }

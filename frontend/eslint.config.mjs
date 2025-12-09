@@ -6,5 +6,6 @@ export default createConfigForNuxt({
   },
   rules: {
     'no-undef': 'error',
+    'semantic-release/semantic-release': 'error',
   },
 })

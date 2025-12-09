@@ -27,6 +27,14 @@ const links: NavigationMenuItem[] = [
       open.value = false
     },
   },
+  {
+    label: 'Calendário Acadêmico',
+    icon: 'i-lucide-calendar',
+    to: '/academic-calendar',
+    onSelect: () => {
+      open.value = false
+    },
+  },
 ]
 
 onMounted(async () => {

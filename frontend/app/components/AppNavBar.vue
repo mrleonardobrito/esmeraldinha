@@ -9,10 +9,12 @@
 
     <template #right>
       <UButton
-        v-bind="rightButton"
-        @click="rightButton.onClick"
+        v-for="(button, index) in buttons"
+        :key="index"
+        v-bind="button"
+        @click="button.onClick"
       >
-        {{ rightButton.label }}
+        {{ button.label }}
       </UButton>
       <UTooltip
         text="Notifications"
@@ -44,9 +46,10 @@ import type { ButtonProps } from '@nuxt/ui'
 interface Props {
   title?: string
   rightButton?: ButtonProps
+  rightButtons?: ButtonProps[]
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   title: 'Home',
   rightButton: () => ({
     color: 'primary',
@@ -55,5 +58,10 @@ withDefaults(defineProps<Props>(), {
     label: '',
     onClick: () => {},
   }),
+  rightButtons: () => [],
+})
+
+const buttons = computed(() => {
+  return props.rightButtons.length > 0 ? props.rightButtons : [props.rightButton]
 })
 </script>

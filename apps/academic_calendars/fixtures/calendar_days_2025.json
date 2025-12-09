@@ -1,0 +1,443 @@
+[
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 1,
+    "fields": {
+      "date": "2025-01-01",
+      "type": "feriado_nacional",
+      "labels": ["Ano Novo"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 2,
+    "fields": {
+      "date": "2025-01-02",
+      "type": "letivo",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 3,
+    "fields": {
+      "date": "2025-01-03",
+      "type": "letivo",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 4,
+    "fields": {
+      "date": "2025-02-11",
+      "type": "planejamento",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 5,
+    "fields": {
+      "date": "2025-02-12",
+      "type": "planejamento",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 6,
+    "fields": {
+      "date": "2025-02-13",
+      "type": "planejamento",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 7,
+    "fields": {
+      "date": "2025-02-14",
+      "type": "planejamento",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 8,
+    "fields": {
+      "date": "2025-03-03",
+      "type": "feriado_nacional",
+      "labels": ["Carnaval"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 9,
+    "fields": {
+      "date": "2025-03-04",
+      "type": "feriado_nacional",
+      "labels": ["Carnaval"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 10,
+    "fields": {
+      "date": "2025-03-05",
+      "type": "ponto_facultativo",
+      "labels": ["Ponto Facultativo"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 11,
+    "fields": {
+      "date": "2025-04-17",
+      "type": "ponto_facultativo",
+      "labels": ["Sexta-feira Santa"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 12,
+    "fields": {
+      "date": "2025-04-21",
+      "type": "feriado_nacional",
+      "labels": ["Dia de Tiradentes"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 13,
+    "fields": {
+      "date": "2025-05-01",
+      "type": "feriado_nacional",
+      "labels": ["Dia do Trabalhador"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 14,
+    "fields": {
+      "date": "2025-06-19",
+      "type": "feriado_nacional",
+      "labels": ["Corpus Christi"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 15,
+    "fields": {
+      "date": "2025-07-01",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 16,
+    "fields": {
+      "date": "2025-07-02",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 17,
+    "fields": {
+      "date": "2025-07-03",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 18,
+    "fields": {
+      "date": "2025-07-04",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 19,
+    "fields": {
+      "date": "2025-07-05",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 20,
+    "fields": {
+      "date": "2025-07-06",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 21,
+    "fields": {
+      "date": "2025-07-07",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 22,
+    "fields": {
+      "date": "2025-07-08",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 23,
+    "fields": {
+      "date": "2025-07-09",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 24,
+    "fields": {
+      "date": "2025-07-10",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 25,
+    "fields": {
+      "date": "2025-07-11",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 26,
+    "fields": {
+      "date": "2025-07-12",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 27,
+    "fields": {
+      "date": "2025-07-13",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 28,
+    "fields": {
+      "date": "2025-07-14",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 29,
+    "fields": {
+      "date": "2025-07-15",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 30,
+    "fields": {
+      "date": "2025-07-16",
+      "type": "recesso",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 31,
+    "fields": {
+      "date": "2025-07-31",
+      "type": "feriado_municipal",
+      "labels": ["Feriado Municipal"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 32,
+    "fields": {
+      "date": "2025-08-17",
+      "type": "evento",
+      "labels": ["Festival de Férias"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 33,
+    "fields": {
+      "date": "2025-08-18",
+      "type": "evento",
+      "labels": ["Festival de Férias"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 34,
+    "fields": {
+      "date": "2025-09-07",
+      "type": "feriado_nacional",
+      "labels": ["Independência do Brasil"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 35,
+    "fields": {
+      "date": "2025-10-12",
+      "type": "feriado_nacional",
+      "labels": ["Nossa Senhora Aparecida"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 36,
+    "fields": {
+      "date": "2025-11-02",
+      "type": "feriado_nacional",
+      "labels": ["Finados"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 37,
+    "fields": {
+      "date": "2025-11-15",
+      "type": "feriado_nacional",
+      "labels": ["Proclamação da República"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 38,
+    "fields": {
+      "date": "2025-11-20",
+      "type": "feriado_nacional",
+      "labels": ["Consciência Negra"],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 39,
+    "fields": {
+      "date": "2025-12-15",
+      "type": "avaliacao_recuperacao",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 40,
+    "fields": {
+      "date": "2025-12-16",
+      "type": "avaliacao_recuperacao",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 41,
+    "fields": {
+      "date": "2025-12-17",
+      "type": "avaliacao_recuperacao",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 42,
+    "fields": {
+      "date": "2025-12-18",
+      "type": "avaliacao_recuperacao",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 43,
+    "fields": {
+      "date": "2025-12-19",
+      "type": "avaliacao_recuperacao",
+      "labels": [],
+      "year": 2025
+    }
+  },
+  {
+    "model": "academic_calendars.calendarday",
+    "pk": 44,
+    "fields": {
+      "date": "2025-12-25",
+      "type": "feriado_nacional",
+      "labels": ["Natal"],
+      "year": 2025
+    }
+  }
+]
+
