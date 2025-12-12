@@ -68,3 +68,4 @@ export const CALENDAR_CONFIG = {
   HIGHLIGHT_OPACITY: '60', // 37% opacidade
   CIRCLE_OPACITY: '50' // 31% opacidade
 } as const
+

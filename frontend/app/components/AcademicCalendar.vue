@@ -175,7 +175,7 @@ const calendarAttributes = computed(() => {
           :attributes="calendarAttributes"
           transparent
           borderless
-          expanded
+          expandedmkjghjh,jhoihujokljerydf
           class="calendar-widget bg-transparent h-full"
         >
           <template #header-title="{ title }">

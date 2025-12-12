@@ -4,7 +4,7 @@
     "pk": 1,
     "fields": {
       "type": "letivo",
-      "description": "Dia letivo normal",
+      "description": "2025 com sábados letivos",
       "color_hex": "#00FF88"
     }
   },

@@ -1,46 +1,64 @@
 <script setup lang="ts">
-import type { CalendarData } from '@types'
+import type { AcademicCalendarSummary, CalendarData, PaginatedResponse } from '@types'
 
-import LazyAcademicCalendarFormModal from '@components/AcademicCalendarFormModal.vue'
-import AcademicCalendar from '@components/AcademicCalendar.vue'
-import { onMounted, ref, watch } from 'vue'
+import LazyCreateAcademicCalendarFormModal from '@components/CreateAcademicCalendarFormModal.vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAcademicCalendars } from '@composables/useAcademicCalendars'
 import { useToast } from '@nuxt/ui/composables/useToast'
 
 const overlay = useOverlay()
 const toast = useToast()
-const { getByYear, saveCalendar, listLegends } = useAcademicCalendars()
+const { getByYear, saveCalendar, listLegends, list: listCalendars } = useAcademicCalendars()
 
 const currentYear = new Date().getFullYear()
+const selectedCalendar = ref<number | undefined>(undefined)
 const calendarData = ref<CalendarData | null>(null)
-const isLoading = ref(false)
-const loadError = ref<string | null>(null)
 const isDirty = ref(false)
 const isSaving = ref(false)
 const legendOptions = ref<CalendarData['legend']>([])
 const isLoadingLegend = ref(false)
 const legendLoadError = ref<string | null>(null)
+const AUTOSAVE_DELAY_MS = 1200
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null
 
+const {
+  data: calendarsData,
+  pending: calendarsPending,
+} = await useAsyncData<PaginatedResponse<AcademicCalendarSummary>>(
+  'calendars',
+  () => listCalendars(),
+  {
+    server: false,
+    immediate: true,
+  },
+)
+
+const calendarOptions = computed(() => calendarsData.value?.results.map((calendar: AcademicCalendarSummary) => ({
+  label: `${calendar.year}`,
+  value: calendar.year,
+})) ?? [])
+
+const initialOption = computed(() => ({
+  label: calendarsData.value?.results[0] ? `${calendarsData.value.results[0].year}` : `${currentYear}`,
+  value: calendarsData.value?.results[0]?.year ?? undefined,
+}))
+
+const loadingCalendar = ref(false)
+const calendarLoadError = ref<string | null>(null)
 const loadCalendar = async () => {
-  isLoading.value = true
-  loadError.value = null
+  if (!selectedCalendar.value) return
+  loadingCalendar.value = true
   try {
-    const response = await getByYear(currentYear)
+    const response = await getByYear(selectedCalendar.value)
     calendarData.value = response.calendar_data
-    isDirty.value = false
-
-    // Se vier sem legendas, tentar carregar legendas compatíveis do backend
-    if (!calendarData.value?.legend?.length) {
-      await loadLegendOptions()
-    }
   }
   catch (error) {
     console.error(error)
-    loadError.value = 'Não foi possível carregar o calendário.'
+    calendarLoadError.value = 'Não foi possível carregar o calendário.'
     calendarData.value = null
   }
   finally {
-    isLoading.value = false
+    loadingCalendar.value = false
   }
 }
 
@@ -48,7 +66,7 @@ const loadLegendOptions = async () => {
   isLoadingLegend.value = true
   legendLoadError.value = null
   try {
-    legendOptions.value = await listLegends(currentYear)
+    legendOptions.value = await listLegends()
   }
   catch (error) {
     console.error(error)
@@ -59,17 +77,10 @@ const loadLegendOptions = async () => {
   }
 }
 
-async function openAcademicCalendar() {
-  const modal = overlay.create(LazyAcademicCalendarFormModal)
+async function openCreateAcademicCalendar() {
+  const modal = overlay.create(LazyCreateAcademicCalendarFormModal)
   const instance = modal.open()
-  const result = await instance.result
-
-  if (result) {
-    isLoading.value = true
-    calendarData.value = result
-    isDirty.value = false
-    isLoading.value = false
-  }
+  await instance.result
 }
 
 const applyLegendSet = () => {
@@ -82,17 +93,19 @@ const applyLegendSet = () => {
   isDirty.value = true
 }
 
-const persistCalendar = async () => {
+const persistCalendar = async (silent = false) => {
   if (!calendarData.value) return
   isSaving.value = true
   try {
-    await saveCalendar(currentYear, calendarData.value)
+    await saveCalendar(selectedCalendar.value ?? currentYear, calendarData.value)
     isDirty.value = false
-    toast.add({
-      title: 'Calendário salvo',
-      description: 'Alterações aplicadas com sucesso.',
-      color: 'success',
-    })
+    if (!silent) {
+      toast.add({
+        title: 'Calendário salvo',
+        description: 'Alterações aplicadas com sucesso.',
+        color: 'success',
+      })
+    }
   }
   catch (error) {
     console.error(error)
@@ -108,13 +121,36 @@ const persistCalendar = async () => {
 }
 
 watch(calendarData, () => {
-  if (!isLoading.value) {
-    isDirty.value = true
+  if (loadingCalendar.value) return
+  isDirty.value = true
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
   }
+  autosaveTimer = setTimeout(() => persistCalendar(true), AUTOSAVE_DELAY_MS)
 }, { deep: true })
 
 onMounted(() => {
+  loadLegendOptions()
+})
+
+onBeforeUnmount(() => {
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+  }
+})
+
+watch(calendarsData, (value) => {
+  const firstCalendar = value?.results?.[0]
+  if (!firstCalendar) return
+
+  if (!selectedCalendar.value || selectedCalendar.value !== firstCalendar.year) {
+    selectedCalendar.value = firstCalendar.year
+  }
+}, { immediate: true })
+
+watch(selectedCalendar, () => {
   loadCalendar()
+  loadLegendOptions()
 })
 </script>
 
@@ -128,16 +164,41 @@ onMounted(() => {
             color: 'primary',
             variant: 'solid',
             icon: 'i-lucide-calendar',
-            label: calendarData ? 'Novo Calendário' : 'Configurar Calendário',
-            onClick: openAcademicCalendar,
+            label: 'Novo Calendário',
+            onClick: openCreateAcademicCalendar,
           }"
-        />
+        >
+          <template #right-prepend>
+            <div class="flex items-center gap-2">
+              <span class="text-xs uppercase text-gray-400">Ano</span>
+              <USelectMenu
+                v-if="!calendarsPending"
+                v-model:value="selectedCalendar"
+                :options="calendarOptions"
+                placeholder="Escolha o calendário"
+                size="sm"
+                class="w-32"
+                :clearable="false"
+                :default-value="initialOption.value"
+              />
+              <div
+                v-else
+                class="flex items-center justify-center w-32 h-8"
+              >
+                <UIcon
+                  name="i-lucide-loader-2"
+                  class="w-5 h-5 animate-spin text-primary"
+                />
+              </div>
+            </div>
+          </template>
+        </AppNavBar>
       </template>
 
       <template #body>
         <div class="relative h-full flex flex-col">
           <div
-            v-if="isLoading"
+            v-if="loadingCalendar"
             class="flex flex-1 flex-col items-center justify-center"
           >
             <UIcon
@@ -145,12 +206,12 @@ onMounted(() => {
               class="w-10 h-10 animate-spin text-primary mb-3"
             />
             <p class="text-gray-500">
-              Carregando calendário {{ currentYear }}...
+              Carregando calendário {{ selectedCalendar ?? currentYear }}...
             </p>
           </div>
 
           <div
-            v-else-if="loadError"
+            v-else-if="calendarLoadError"
             class="flex flex-1 flex-col items-center justify-center"
           >
             <UIcon
@@ -158,7 +219,7 @@ onMounted(() => {
               class="w-32 h-32 mx-auto mb-4 opacity-50"
             />
             <p class="text-gray-500 mb-4 text-center">
-              {{ loadError }}
+              {{ calendarLoadError }}
             </p>
             <UButton
               color="primary"
@@ -183,9 +244,9 @@ onMounted(() => {
             <UButton
               color="primary"
               variant="solid"
-              @click="openAcademicCalendar"
+              @click="openCreateAcademicCalendar"
             >
-              Configurar Calendário
+              Criar Calendário
             </UButton>
           </div>
 
@@ -258,21 +319,24 @@ onMounted(() => {
           >
             <div class="flex items-center justify-between px-1">
               <div class="text-sm text-gray-600">
-                {{ isDirty ? 'Alterações não salvas' : 'Calendário atualizado' }}
+                <template v-if="isSaving">
+                  Salvando automaticamente...
+                </template>
+                <template v-else-if="isDirty">
+                  Alterações não salvas
+                </template>
+                <template v-else>
+                  Calendário atualizado
+                </template>
               </div>
-              <UButton
-                color="primary"
-                variant="solid"
-                size="sm"
-                :loading="isSaving"
-                :disabled="!isDirty || isSaving"
-                icon="i-heroicons-arrow-up-tray"
-                @click="persistCalendar"
-              >
-                Salvar alterações
-              </UButton>
+              <div class="text-xs text-gray-400 flex items-center gap-1">
+                <UIcon
+                  name="i-lucide-rotate-ccw"
+                  class="w-4 h-4"
+                />
+                Auto-save
+              </div>
             </div>
-            <!-- Usar v-model para permitir que o componente filho atualize o calendarData (cores, tipos de dia, etc.) -->
             <AcademicCalendar v-model:calendar-data="calendarData" />
           </div>
         </div>

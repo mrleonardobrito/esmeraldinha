@@ -205,6 +205,12 @@ export const mapTeacherUpdate = <K extends keyof TeacherUpdate>(
   return mapper(value)
 }
 
+export interface AcademicCalendarSummary {
+  readonly id: number
+  readonly year: number
+  readonly processed_at: string
+}
+
 export interface AcademicCalendar {
   readonly id: number
   readonly year: number

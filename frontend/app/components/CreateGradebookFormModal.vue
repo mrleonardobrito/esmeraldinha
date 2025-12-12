@@ -9,7 +9,7 @@ import { useGradebooks } from '@composables/useGradebooks'
 import { useTeachers } from '@composables/useTeachers'
 import type { SelectMenuItem } from '@nuxt/ui'
 import type {
-  AcademicCalendar,
+  AcademicCalendarSummary,
   ClassResumed,
   GradebookCreate,
   PaginatedResponse,
@@ -130,7 +130,7 @@ const hasTeacherOptions = computed(() => {
 const {
   data: calendarsData,
   pending: calendarsPending,
-} = await useAsyncData<PaginatedResponse<AcademicCalendar>>(
+} = await useAsyncData<PaginatedResponse<AcademicCalendarSummary>>(
   'calendars',
   () => listCalendars(),
   {
@@ -144,7 +144,7 @@ const calendarsDataExists = computed(() => {
 
 const calendarOptions = computed(
   () =>
-    calendarsData.value?.results.map((calendar: AcademicCalendar) => ({
+    calendarsData.value?.results.map((calendar: AcademicCalendarSummary) => ({
       label: `${calendar.year}`,
       value: calendar.id,
     })) ?? [],

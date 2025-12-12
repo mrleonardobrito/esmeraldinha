@@ -8,6 +8,7 @@
     </template>
 
     <template #right>
+      <slot name="right-prepend" />
       <UButton
         v-for="(button, index) in buttons"
         :key="index"

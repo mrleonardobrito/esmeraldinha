@@ -1,4 +1,4 @@
-import type { AcademicCalendar, PaginatedResponse, CalendarData, LegendItem } from '@types'
+import type { AcademicCalendar, PaginatedResponse, CalendarData, LegendItem, AcademicCalendarSummary } from '@types'
 import { useNuxtApp } from 'nuxt/app'
 import { generateCalendarAttributes, getLegendByType, getLegendOptions } from '@app/utils/academic-calendar'
 
@@ -6,10 +6,18 @@ export const useAcademicCalendars = () => {
   const { $api } = useNuxtApp()
   const basePath = '/api/academic-calendars/'
 
-  const list = () => $api<PaginatedResponse<AcademicCalendar>>(basePath)
+  const list = () => $api<PaginatedResponse<AcademicCalendarSummary>>(basePath)
 
   const getByYear = (year: number) =>
     $api<AcademicCalendar>(`${basePath}${year}/`)
+
+  const initializeCalendar = (year: number, defaultLegendType?: string) =>
+    $api<AcademicCalendar>(`${basePath}${year}/initialize/`, {
+      method: 'POST',
+      body: {
+        default_legend_type: defaultLegendType,
+      },
+    })
 
   const saveCalendar = (year: number, calendarData: CalendarData) =>
     $api<AcademicCalendar>(`${basePath}${year}/`, {
@@ -20,9 +28,8 @@ export const useAcademicCalendars = () => {
       },
     })
 
-  const listLegends = async (year?: number) => {
-    const query = year ? `?year=${year}` : ''
-    const response = await $api<PaginatedResponse<LegendItem>>(`/api/legends/${query}`)
+  const listLegends = async () => {
+    const response = await $api<PaginatedResponse<LegendItem>>(`/api/legends/`)
     return response.results
   }
 
@@ -33,7 +40,7 @@ export const useAcademicCalendars = () => {
       formData.append('default_legend_type', selectedLegendType)
     }
 
-    return $api<CalendarData>(`${basePath}${year}/process-pdf/`, {
+    return $api<AcademicCalendar>(`${basePath}${year}/process-pdf/`, {
       method: 'POST',
       body: formData,
     })
@@ -41,6 +48,7 @@ export const useAcademicCalendars = () => {
   return {
     list,
     getByYear,
+    initializeCalendar,
     saveCalendar,
     listLegends,
     processCalendar,
