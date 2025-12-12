@@ -93,13 +93,6 @@ class AcademicCalendarPDFProcessor:
             )
             mat = fitz.Matrix(2.0, 2.0)
             pix = page.get_pixmap(matrix=mat, clip=table_rect)
-            cwd = os.getcwd()
-            image_path = os.path.join(
-                cwd, "images", f"{year}_{month}.png")
-            os.makedirs(os.path.dirname(image_path), exist_ok=True)
-            with open(image_path, "wb") as f:
-                f.write(pix.tobytes("png"))
-
         return CalendarData(year=year,
                             stages=stages,
                             days=[],

@@ -41,11 +41,14 @@ class ProcessedCalendarSerializer(serializers.Serializer):
 
 class AcademicCalendarCreateSerializer(serializers.Serializer):
     calendar_file = serializers.FileField(
-        required=True,
-        help_text="Arquivo do calendário acadêmico (PDF)",
+        required=False,
+        allow_null=True,
+        help_text="Arquivo do calendário acadêmico (PDF) (opcional)",
     )
 
     def validate_calendar_file(self, value):
+        if value is None:
+            return value
         if value.size > 1024 * 1024 * 5:
             raise serializers.ValidationError(
                 "O tamanho do arquivo deve ser menor que 5MB")
@@ -56,6 +59,17 @@ class AcademicCalendarCreateSerializer(serializers.Serializer):
                 "A extensão do arquivo deve ser PNG, JPEG ou PDF")
 
         return value
+
+
+class AcademicCalendarSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AcademicCalendar
+        fields = [
+            'id',
+            'year',
+            'processed_at',
+        ]
+        read_only_fields = ['id', 'year', 'processed_at']
 
 
 class AcademicCalendarSerializer(serializers.ModelSerializer):

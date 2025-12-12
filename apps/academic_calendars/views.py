@@ -5,11 +5,13 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from apps.academic_calendars.services import AcademicCalendarPDFProcessor
 from apps.academic_calendars.models import AcademicCalendar, Legend, CalendarDay
-from apps.academic_calendars.serializers import AcademicCalendarSerializer, AcademicCalendarCreateSerializer, LegendSerializer
+from apps.academic_calendars.serializers import AcademicCalendarSerializer, AcademicCalendarCreateSerializer, LegendSerializer, AcademicCalendarSummarySerializer
 from apps.academic_calendars.schemas import CalendarData, Day, DayType, LegendItem
 from drf_spectacular.utils import extend_schema, OpenApiResponse, extend_schema_view
 from datetime import date, timedelta
 from typing import List
+from pathlib import Path
+import json
 
 
 @extend_schema_view(
@@ -26,6 +28,17 @@ class AcademicCalendarViewSet(viewsets.ModelViewSet):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     lookup_field = 'year'
     lookup_value_regex = r'\d{4}'
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return AcademicCalendarSummarySerializer
+        return super().get_serializer_class()
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.action == 'list':
+            return qs.only('id', 'year', 'processed_at')
+        return qs
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -99,6 +112,171 @@ class AcademicCalendarViewSet(viewsets.ModelViewSet):
                 continue
         return result
 
+    def _ensure_fixtures_loaded(self, year: int):
+        """Garante que fixtures de dias e legendas estejam carregadas no banco."""
+        fixtures_dir = Path(__file__).resolve().parent / "fixtures"
+
+        legend_fixture = fixtures_dir / "legends.json"
+        if legend_fixture.exists():
+            with open(legend_fixture, "r", encoding="utf-8") as f:
+                legend_data = json.load(f)
+            for entry in legend_data:
+                fields = entry.get("fields", {})
+                Legend.objects.update_or_create(
+                    type=fields.get("type"),
+                    defaults={
+                        "description": fields.get("description", ""),
+                        "color_hex": fields.get("color_hex"),
+                    },
+                )
+
+        days_fixture = fixtures_dir / f"calendar_days_{year}.json"
+        if not days_fixture.exists():
+            return
+
+        existing_dates = set(
+            CalendarDay.objects.filter(
+                year=year).values_list("date", flat=True)
+        )
+        with open(days_fixture, "r", encoding="utf-8") as f:
+            days_data = json.load(f)
+
+        for entry in days_data:
+            fields = entry.get("fields", {})
+            date_value = fields.get("date")
+            if not date_value:
+                continue
+            try:
+                date_obj = date.fromisoformat(date_value)
+            except ValueError:
+                continue
+            if date_obj in existing_dates:
+                continue
+            CalendarDay.objects.update_or_create(
+                date=date_obj,
+                year=fields.get("year", year),
+                defaults={
+                    "type": fields.get("type"),
+                    "labels": fields.get("labels", []),
+                },
+            )
+
+    def _get_fixture_days(self, year: int) -> List[Day]:
+        """Retorna dias de fixture convertidos para o schema."""
+        fixture_days: List[Day] = []
+        qs = CalendarDay.objects.filter(year=year).order_by("date")
+        for item in qs:
+            try:
+                day_type = DayType(item.type)
+            except ValueError:
+                continue
+            fixture_days.append(Day(
+                date=item.date.isoformat(),
+                type=day_type,
+                labels=item.labels or []
+            ))
+        return fixture_days
+
+    def _build_result(
+        self,
+        year: int,
+        default_legend_type: str,
+        processed_days: List[Day],
+        stages: List = None,
+        monthly_meta=None,
+    ) -> CalendarData:
+        all_days = self._generate_all_days_of_year(
+            year,
+            default_legend_type
+        )
+
+        fixture_days = self._get_fixture_days(year)
+        fixture_days_dict = {
+            day.date: day for day in fixture_days
+        }
+
+        processed_days_dict = {
+            day.date: day for day in processed_days
+        }
+
+        calendar_days = []
+        for day in all_days:
+            if day.date in processed_days_dict:
+                calendar_days.append(processed_days_dict[day.date])
+            elif day.date in fixture_days_dict:
+                calendar_days.append(fixture_days_dict[day.date])
+            else:
+                calendar_days.append(day)
+
+        used_types = {d.type for d in calendar_days}
+        legends = self._get_legends_from_db(list(used_types))
+
+        return CalendarData(
+            year=year,
+            stages=stages or [],
+            days=calendar_days,
+            legend=legends,
+            monthly_meta=monthly_meta,
+        )
+
+    @extend_schema(
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'default_legend_type': {
+                        'type': 'string',
+                        'description': 'Tipo de legenda padrão para dias não especificados (ex: letivo, nao_letivo)',
+                    },
+                },
+            },
+        },
+        responses={
+            status.HTTP_200_OK: OpenApiResponse(
+                response=CalendarData,
+                description='Calendário inicializado com sucesso',
+            ),
+            status.HTTP_400_BAD_REQUEST: OpenApiResponse(
+                description='Erro ao inicializar o calendário',
+            ),
+        },
+        tags=['Calendário Acadêmico'],
+    )
+    @action(detail=True, methods=['post'], url_path='initialize', parser_classes=[JSONParser])
+    def initialize_calendar(self, request, year=None):
+        """Cria ou reseta o calendário de um ano com todos os dias não letivos, aplicando fixtures."""
+        target_year = int(year) if year is not None else None
+        if target_year is None:
+            return Response({'error': 'Ano não informado na URL.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        default_legend_type = request.data.get(
+            'default_legend_type', 'nao_letivo')
+        try:
+            DayType(default_legend_type)
+        except ValueError:
+            return Response(
+                {'error': f'Tipo de legenda padrão inválido: {default_legend_type}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        self._ensure_fixtures_loaded(target_year)
+
+        result = self._build_result(
+            year=target_year,
+            default_legend_type=default_legend_type,
+            processed_days=[],
+            stages=[],
+            monthly_meta=None,
+        )
+
+        instance, _ = AcademicCalendar.objects.update_or_create(
+            year=target_year,
+            defaults={'calendar_data': result.model_dump(mode="json")}
+        )
+
+        output_serializer = self.get_serializer(instance)
+        return Response(output_serializer.data, status=status.HTTP_200_OK)
+
     @extend_schema(
         request={
             'multipart/form-data': {
@@ -134,7 +312,7 @@ class AcademicCalendarViewSet(viewsets.ModelViewSet):
         if not create_serializer.is_valid():
             return Response(create_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        pdf_file = create_serializer.validated_data['calendar_file']
+        pdf_file = create_serializer.validated_data.get('calendar_file')
         default_legend_type = request.data.get(
             'default_legend_type', 'nao_letivo')
 
@@ -146,15 +324,35 @@ class AcademicCalendarViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        pdf_file.seek(0)
-        pdf_bytes = pdf_file.read()
-
         try:
+            if pdf_file is None:
+                return Response(
+                    {'error': 'Arquivo PDF é obrigatório para processamento.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            target_year = int(year) if year is not None else None
+            if target_year is None:
+                return Response(
+                    {'error': 'Ano não informado na URL.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Garante que o calendário já existe; caso contrário, retorna 404
+            try:
+                instance = self.get_object()
+            except Exception:
+                return Response(
+                    {'error': f'Calendário {target_year} não encontrado. Crie primeiro e depois processe o PDF.'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            pdf_file.seek(0)
+            pdf_bytes = pdf_file.read()
+
             processor = AcademicCalendarPDFProcessor()
             processed_data: CalendarData = processor.process_pdf(pdf_bytes)
 
-            target_year = int(
-                year) if year is not None else processed_data.year
             processed_year = processed_data.year or target_year
 
             if processed_year != target_year:
@@ -162,46 +360,20 @@ class AcademicCalendarViewSet(viewsets.ModelViewSet):
 
             self._ensure_fixtures_loaded(processed_year)
 
-            all_days = self._generate_all_days_of_year(
-                processed_year,
-                default_legend_type
-            )
-
-            fixture_days = self._get_fixture_days(processed_year)
-            fixture_days_dict = {
-                day.date: day for day in fixture_days
-            }
-
-            processed_days_dict = {
-                day.date: day for day in processed_data.days
-            }
-
-            calendar_days = []
-            for day in all_days:
-                if day.date in processed_days_dict:
-                    calendar_days.append(processed_days_dict[day.date])
-                elif day.date in fixture_days_dict:
-                    calendar_days.append(fixture_days_dict[day.date])
-                else:
-                    calendar_days.append(day)
-
-            used_types = {d.type for d in calendar_days}
-            legends = self._get_legends_from_db(list(used_types))
-
-            result = CalendarData(
+            result = self._build_result(
                 year=processed_year,
-                stages=processed_data.stages,
-                days=calendar_days,
-                legend=legends,
-                monthly_meta=getattr(processed_data, 'monthly_meta', None)
+                default_legend_type=default_legend_type,
+                processed_days=list(getattr(processed_data, 'days', [])),
+                stages=getattr(processed_data, 'stages', []),
+                monthly_meta=getattr(processed_data, 'monthly_meta', None),
             )
 
-            AcademicCalendar.objects.update_or_create(
-                year=processed_year,
-                defaults={'calendar_data': result.model_dump()}
-            )
+            instance.calendar_data = result.model_dump(mode="json")
+            instance.save(update_fields=["calendar_data"])
 
-            return Response(result.model_dump(), status=status.HTTP_200_OK)
+            output_serializer = self.get_serializer(instance)
+
+            return Response(output_serializer.data, status=status.HTTP_200_OK)
 
         except Exception as e:
             return Response(
