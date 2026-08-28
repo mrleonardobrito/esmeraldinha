@@ -1,3 +1,5 @@
+import { NavLink } from "react-router"
+
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -23,10 +25,14 @@ export function NavMain({
         <SidebarMenu>
           {items.map((item) => (
             <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton tooltip={item.title}>
-                {item.icon}
-                <span>{item.title}</span>
-              </SidebarMenuButton>
+              <NavLink to={item.url}>
+                {({ isActive }) => (
+                  <SidebarMenuButton tooltip={item.title} isActive={isActive}>
+                    {item.icon}
+                    <span>{item.title}</span>
+                  </SidebarMenuButton>
+                )}
+              </NavLink>
             </SidebarMenuItem>
           ))}
         </SidebarMenu>

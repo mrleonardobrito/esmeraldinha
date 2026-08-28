@@ -1,0 +1,47 @@
+appId: com.mrleonardobrito.esmeraldinha
+productName: Esmeraldinha
+copyright: Copyright © 2026 mrleonardobrito
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+
+# O Chromium do Playwright é grande demais para o asar e precisa ser executável
+# em disco. `pnpm playwright:install` o baixa para cá antes do empacotamento.
+extraResources:
+  - from: pw-browsers
+    to: pw-browsers
+
+# O Playwright lê arquivos próprios (drivers, browsers.json) em tempo de execução.
+asarUnpack:
+  - '**/node_modules/playwright/**'
+  - '**/node_modules/playwright-core/**'
+  - '**/node_modules/@playwright/**'
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-${version}-windows-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Esmeraldinha
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  category: Education
+  synopsis: Cadernetas do portal do professor
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}

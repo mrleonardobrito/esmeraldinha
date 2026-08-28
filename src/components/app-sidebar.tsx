@@ -13,7 +13,8 @@ import {
   IconCamera,
   IconFileDescription,
   IconFileAi,
-  IconChalkboardTeacher
+  IconChalkboardTeacher,
+  IconBook2
 } from "@tabler/icons-react";
 
 const data = {
@@ -25,14 +26,14 @@ const data = {
   navMain: [
     {
       title: "Professores",
-      url: "#",
+      url: "/professores",
       icon: <IconChalkboardTeacher />,
     },
-    // {
-    //   title: "Cadernetas",
-    //   url: "#",
-    //   icon: <IconBook2 />,
-    // },
+    {
+      title: "Cadernetas",
+      url: "/cadernetas",
+      icon: <IconBook2 />,
+    },
   ],
   navClouds: [
     {

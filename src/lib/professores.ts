@@ -18,6 +18,14 @@ export function formatCpf(value: string) {
     .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/, "$1.$2.$3-$4");
 }
 
+/** Esconde o final do CPF, deixando visíveis só os primeiros dígitos. */
+export function maskCpf(value: string) {
+  const formatted = formatCpf(value);
+  return (
+    formatted.slice(0, 5) + formatted.slice(5).replace(/\d/g, "*")
+  );
+}
+
 export function isValidCpf(value: string) {
   const cpf = onlyDigits(value);
   if (cpf.length !== 11) return false;
