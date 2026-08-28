@@ -13,8 +13,7 @@ import {
   IconCamera,
   IconFileDescription,
   IconFileAi,
-  IconChalkboardTeacher,
-  IconBook2,
+  IconChalkboardTeacher
 } from "@tabler/icons-react";
 
 const data = {
@@ -24,11 +23,11 @@ const data = {
     avatar: "/esmeralda-light.jpg",
   },
   navMain: [
-    // {
-    //   title: "Professores",
-    //   url: "#",
-    //   icon: <IconChalkboardTeacher />,
-    // },
+    {
+      title: "Professores",
+      url: "#",
+      icon: <IconChalkboardTeacher />,
+    },
     // {
     //   title: "Cadernetas",
     //   url: "#",
