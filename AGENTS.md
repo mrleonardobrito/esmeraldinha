@@ -1,9 +1,15 @@
-<!-- BEGIN:nextjs-agent-rules -->
+# Esmeraldinha
 
-# This is NOT the Next.js you know
+SPA React 19 + TypeScript servida pelo Vite 7. Não há SSR, rotas de servidor nem
+Next.js — não use `next/*`, `"use client"` ou APIs de servidor.
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+- Alias `@/*` aponta para `src/*`.
+- Estilo: Tailwind CSS v4 via `@tailwindcss/vite` (sem `tailwind.config`); tokens
+  de tema e variáveis de fonte ficam em `src/globals.css`.
+- Componentes de UI vêm do shadcn/ui em `src/components/ui` (`components.json`
+  já aponta para `src/globals.css`, `rsc: false`).
+- Tema claro/escuro via `next-themes` (funciona em React puro) no `src/App.tsx`.
+- Fontes carregadas por `<link>` no `index.html`, não por `next/font`.
+- Só existe uma rota; se precisar de mais, adicione um router (ex.: react-router).
 
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
+Verifique alterações com `pnpm build` (roda `tsc -b`) e `pnpm lint`.
