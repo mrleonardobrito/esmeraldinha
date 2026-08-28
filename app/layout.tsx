@@ -2,10 +2,18 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, DM_Sans, Nunito_Sans } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/app-sidebar";
+import { TooltipProvider } from "radix-ui/tooltip";
+import { SiteHeader } from "@/components/site-header";
+import { ThemeProvider } from "@/components/theme-provider";
 
-const nunitoSansHeading = Nunito_Sans({subsets:['latin'],variable:'--font-heading'});
+const nunitoSansHeading = Nunito_Sans({
+  subsets: ["latin"],
+  variable: "--font-heading",
+});
 
-const dmSans = DM_Sans({subsets:['latin'],variable:'--font-sans'});
+const dmSans = DM_Sans({ subsets: ["latin"], variable: "--font-sans" });
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,9 +34,35 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, "font-sans", dmSans.variable, nunitoSansHeading.variable)}
+      className={cn(
+        "h-full",
+        "antialiased",
+        geistSans.variable,
+        geistMono.variable,
+        "font-sans",
+        dmSans.variable,
+        nunitoSansHeading.variable,
+      )}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <SidebarProvider>
+            <TooltipProvider>
+              <AppSidebar />
+              <main className="flex min-h-full flex-1 flex-col">
+                <SiteHeader />
+                {children}
+              </main>
+            </TooltipProvider>
+          </SidebarProvider>
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
