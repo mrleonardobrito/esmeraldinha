@@ -50,7 +50,7 @@ export function Cadernetas() {
     setErrorMessage(null);
 
     try {
-      const opened = await openPortalSession(professor);
+      const opened = await openPortalSession(professor.id);
       setSession(opened);
       setStatus("connected");
       toast.success(`Conectado ao portal como ${professor.nome}.`);

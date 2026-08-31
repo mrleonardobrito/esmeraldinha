@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 import type { EncryptionPort } from '../encryption';
 import type { ProfessorInput } from '../../shared/professor';
+import type { ProfessorCredenciais } from '../scrape/types';
 
 /** A professor as returned by the API: never carries the senha. */
 export interface Professor {
@@ -97,5 +98,37 @@ export async function createProfessor(
     escola: input.escola,
     imagem: input.imagem ?? null,
     createdAt,
+  };
+}
+
+interface CredenciaisRow {
+  login: string;
+  senha_encrypted: Uint8Array;
+  escola: string;
+}
+
+/**
+ * Resolves and decrypts the credenciais do professor identified by `id`,
+ * ready to hand to `openSession`. Returns `undefined` when no professor
+ * with that id is cadastrado — distinct from a portal rejection, which
+ * only happens once credentials actually reach the portal.
+ */
+export async function getProfessorCredenciais(
+  db: DatabaseSync,
+  encryption: EncryptionPort,
+  id: string,
+): Promise<ProfessorCredenciais | undefined> {
+  const row = db
+    .prepare('SELECT login, senha_encrypted, escola FROM professores WHERE id = ?')
+    .get(id) as unknown as CredenciaisRow | undefined;
+
+  if (!row) return undefined;
+
+  const senha = await encryption.decrypt(Buffer.from(row.senha_encrypted));
+
+  return {
+    login: row.login,
+    senha,
+    escola: row.escola,
   };
 }
