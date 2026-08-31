@@ -15,6 +15,11 @@ export default defineConfig({
       },
     },
   },
+  test: {
+    // Agent worktrees live under .claude/, so their copies of every test
+    // file would otherwise be discovered and run alongside the real ones.
+    exclude: ["**/node_modules/**", "**/dist/**", ".claude/**"],
+  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),
