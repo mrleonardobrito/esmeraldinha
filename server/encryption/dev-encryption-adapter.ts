@@ -27,7 +27,7 @@ function isPackagedElectronBuild(): boolean {
 }
 
 /**
- * Development adapter: keys off `DEV_ENCRYPTION_KEY` instead of the OS
+ * Development adapter: keys off `ESMERALDINHA_ENCRYPTION_KEY` instead of the OS
  * keychain. This is a deliberate weakening for `pnpm dev:api` and tests,
  * and it refuses to run inside a packaged Electron build so the weakening
  * can never silently reach a real install.
@@ -43,7 +43,7 @@ export class DevEncryptionAdapter implements EncryptionPort {
     }
     if (!devKey) {
       throw new Error(
-        'DEV_ENCRYPTION_KEY não configurada: necessária fora do Electron.',
+        'ESMERALDINHA_ENCRYPTION_KEY não configurada: necessária fora do Electron.',
       );
     }
 

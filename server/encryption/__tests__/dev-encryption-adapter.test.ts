@@ -42,7 +42,7 @@ describe('DevEncryptionAdapter', () => {
 
   it('requires a development key', () => {
     expect(() => new DevEncryptionAdapter('')).toThrow(
-      /DEV_ENCRYPTION_KEY/,
+      /ESMERALDINHA_ENCRYPTION_KEY/,
     );
   });
 });
