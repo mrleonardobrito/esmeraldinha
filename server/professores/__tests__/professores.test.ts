@@ -160,4 +160,216 @@ describe('professores router', () => {
     const body = await response.json();
     expect(body.error).toBeTruthy();
   });
+
+  it('edits a professor', async () => {
+    const app = await freshApp();
+
+    const createResponse = await app.fetch(
+      new Request('http://localhost/api/professores', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor()),
+      }),
+    );
+    const created = await createResponse.json();
+
+    const updateResponse = await app.fetch(
+      new Request(`http://localhost/api/professores/${created.id}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor({ nome: 'Maria Souza', escola: 'Escola Estadual' })),
+      }),
+    );
+
+    expect(updateResponse.status).toBe(200);
+    const updated = await updateResponse.json();
+    expect(updated).toMatchObject({ id: created.id, nome: 'Maria Souza', escola: 'Escola Estadual' });
+    expect(updated).not.toHaveProperty('senha');
+  });
+
+  it('leaves the stored senha unchanged when editing without one', async () => {
+    const app = await freshApp();
+
+    const createResponse = await app.fetch(
+      new Request('http://localhost/api/professores', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor()),
+      }),
+    );
+    const created = await createResponse.json();
+
+    const dbBefore = new DatabaseSync(dbPath);
+    const before = dbBefore.prepare('SELECT senha_encrypted FROM professores WHERE id = ?').get(created.id) as {
+      senha_encrypted: Uint8Array;
+    };
+    dbBefore.close();
+
+    const comSenha = novoProfessor({ nome: 'Maria Souza' });
+    const semSenha: Partial<typeof comSenha> = { ...comSenha };
+    delete semSenha.senha;
+    const updateResponse = await app.fetch(
+      new Request(`http://localhost/api/professores/${created.id}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(semSenha),
+      }),
+    );
+
+    expect(updateResponse.status).toBe(200);
+
+    const dbAfter = new DatabaseSync(dbPath);
+    const after = dbAfter.prepare('SELECT senha_encrypted FROM professores WHERE id = ?').get(created.id) as {
+      senha_encrypted: Uint8Array;
+    };
+    dbAfter.close();
+
+    expect(Buffer.from(after.senha_encrypted).equals(Buffer.from(before.senha_encrypted))).toBe(
+      true,
+    );
+  });
+
+  it('replaces the senha, still encrypted, when a new one is supplied', async () => {
+    const app = await freshApp();
+
+    const createResponse = await app.fetch(
+      new Request('http://localhost/api/professores', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor()),
+      }),
+    );
+    const created = await createResponse.json();
+
+    const updateResponse = await app.fetch(
+      new Request(`http://localhost/api/professores/${created.id}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor({ senha: 'nova-senha-secreta' })),
+      }),
+    );
+
+    expect(updateResponse.status).toBe(200);
+
+    const db = new DatabaseSync(dbPath);
+    const row = db.prepare('SELECT senha_encrypted FROM professores WHERE id = ?').get(created.id) as {
+      senha_encrypted: Uint8Array;
+    };
+    db.close();
+
+    const stored = Buffer.from(row.senha_encrypted).toString('utf8');
+    expect(stored).not.toContain('senha-secreta');
+    expect(stored).not.toContain('nova-senha-secreta');
+  });
+
+  it('rejects a duplicate login on edit', async () => {
+    const app = await freshApp();
+
+    await app.fetch(
+      new Request('http://localhost/api/professores', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor()),
+      }),
+    );
+
+    const secondResponse = await app.fetch(
+      new Request('http://localhost/api/professores', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor({ nome: 'Outro Nome', login: '529.982.247-25' })),
+      }),
+    );
+    const second = await secondResponse.json();
+
+    const updateResponse = await app.fetch(
+      new Request(`http://localhost/api/professores/${second.id}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor()),
+      }),
+    );
+
+    expect(updateResponse.status).toBe(409);
+    const body = await updateResponse.json();
+    expect(body.error).toBeTruthy();
+  });
+
+  it('rejects an invalid CPF on edit', async () => {
+    const app = await freshApp();
+
+    const createResponse = await app.fetch(
+      new Request('http://localhost/api/professores', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor()),
+      }),
+    );
+    const created = await createResponse.json();
+
+    const updateResponse = await app.fetch(
+      new Request(`http://localhost/api/professores/${created.id}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor({ login: '111.111.111-11' })),
+      }),
+    );
+
+    expect(updateResponse.status).toBe(400);
+    const body = await updateResponse.json();
+    expect(body.error).toBeTruthy();
+  });
+
+  it('deletes a professor, removing the row and its encrypted senha', async () => {
+    const app = await freshApp();
+
+    const createResponse = await app.fetch(
+      new Request('http://localhost/api/professores', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor()),
+      }),
+    );
+    const created = await createResponse.json();
+
+    const deleteResponse = await app.fetch(
+      new Request(`http://localhost/api/professores/${created.id}`, { method: 'DELETE' }),
+    );
+
+    expect(deleteResponse.status).toBe(204);
+
+    const db = new DatabaseSync(dbPath);
+    const row = db.prepare('SELECT id FROM professores WHERE id = ?').get(created.id);
+    db.close();
+
+    expect(row).toBeUndefined();
+
+    const listResponse = await app.fetch(new Request('http://localhost/api/professores'));
+    const list = await listResponse.json();
+    expect(list).toHaveLength(0);
+  });
+
+  it('returns 404 when editing a professor that does not exist', async () => {
+    const app = await freshApp();
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/professores/id-inexistente', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor()),
+      }),
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it('returns 404 when deleting a professor that does not exist', async () => {
+    const app = await freshApp();
+
+    const response = await app.fetch(
+      new Request('http://localhost/api/professores/id-inexistente', { method: 'DELETE' }),
+    );
+
+    expect(response.status).toBe(404);
+  });
 });
