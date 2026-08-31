@@ -38,3 +38,6 @@ yarn-error.log*
 
 # artefatos de falha do scraping
 /.portal-debug/
+
+# Banco SQLite local
+data/

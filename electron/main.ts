@@ -5,15 +5,9 @@ import { app, BrowserWindow, net, protocol, shell } from 'electron';
 
 import type { Hono } from 'hono';
 
-/**
- * A SPA é servida por um esquema próprio em vez de `file://`: assim o
- * `BrowserRouter` continua funcionando e o mesmo handler pode responder `/api`
- * chamando a Hono direto, sem subir um servidor HTTP na máquina do usuário.
- */
 const SCHEME = 'app';
 const APP_URL = `${SCHEME}://esmeraldinha/`;
 
-/** Definido por `dev:desktop`; a ausência dele significa build empacotado. */
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 
 const rootDir = join(__dirname, '..');
@@ -33,11 +27,6 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let apiPromise: Promise<Hono> | null = null;
-
-/**
- * O import é tardio de propósito: `server/env.ts` lê `process.env` ao carregar,
- * então os caminhos precisam estar definidos antes.
- */
 function getApi(): Promise<Hono> {
   if (!apiPromise) {
     process.env.PORTAL_DEBUG_DIR ||= join(app.getPath('userData'), 'portal-debug');
@@ -59,12 +48,10 @@ async function serveAsset(pathname: string): Promise<Response> {
   const relative = decodeURIComponent(pathname).replace(/^\/+/, '');
   const filePath = resolve(rendererDir, relative);
 
-  // Um `..` no caminho não pode escapar do diretório do build.
   const inside =
     filePath === rendererDir || filePath.startsWith(`${rendererDir}${sep}`);
   const isFile = inside && (await stat(filePath).catch(() => null))?.isFile();
 
-  // Rotas do react-router não existem em disco: caem no index.html.
   const target = isFile ? filePath : join(rendererDir, 'index.html');
 
   return net.fetch(pathToFileURL(target).toString());
@@ -83,7 +70,6 @@ function registerProtocol(): void {
   });
 }
 
-/** O Vite pode ainda não estar de pé quando o Electron abre. */
 async function loadDevServer(window: BrowserWindow, url: string): Promise<void> {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
@@ -150,15 +136,14 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform !== 'darwin') app.quit();
   });
 
-  // Sem isso os contextos do Playwright ficariam órfãos ao fechar o app.
   app.on('before-quit', (event) => {
     if (!apiPromise) return;
 
     event.preventDefault();
     apiPromise = null;
 
-    void import('../server/portal-sessions')
-      .then(({ closeAllSessions }) => closeAllSessions())
+    void import('../server/infrastructure/portal/playwright/portal-gateway')
+      .then(({ portalGatewayPlaywright }) => portalGatewayPlaywright.encerrarTodasAsSessoes())
       .catch(() => {})
       .finally(() => app.quit());
   });
