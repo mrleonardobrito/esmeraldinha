@@ -1,13 +1,18 @@
-import { z } from "zod";
+import {
+  isValidCpf,
+  onlyDigits,
+  professorSchema,
+  type ProfessorField,
+  type ProfessorInput,
+} from "@shared/professor";
+
+export { isValidCpf, onlyDigits, professorSchema };
+export type { ProfessorField, ProfessorInput };
 
 const STORAGE_KEY = "esmeraldinha:professores";
 
 /** Data URLs go into localStorage, so the image has to fit in it. */
 export const MAX_IMAGE_BYTES = 1024 * 1024;
-
-export function onlyDigits(value: string) {
-  return value.replace(/\D/g, "");
-}
 
 /** Applies the 000.000.000-00 mask as the user types. */
 export function formatCpf(value: string) {
@@ -26,46 +31,10 @@ export function maskCpf(value: string) {
   );
 }
 
-export function isValidCpf(value: string) {
-  const cpf = onlyDigits(value);
-  if (cpf.length !== 11) return false;
-  if (/^(\d)\1{10}$/.test(cpf)) return false;
-
-  for (const position of [9, 10]) {
-    let sum = 0;
-    for (let i = 0; i < position; i++) {
-      sum += Number(cpf[i]) * (position + 1 - i);
-    }
-    const digit = ((sum * 10) % 11) % 10;
-    if (digit !== Number(cpf[position])) return false;
-  }
-
-  return true;
-}
-
-export const professorSchema = z.object({
-  nome: z
-    .string()
-    .trim()
-    .min(3, "Informe o nome com pelo menos 3 caracteres."),
-  login: z
-    .string()
-    .transform(onlyDigits)
-    .refine((cpf) => cpf.length === 11, "O CPF precisa ter 11 dígitos.")
-    .refine(isValidCpf, "CPF inválido."),
-  senha: z.string().min(4, "A senha precisa ter pelo menos 4 caracteres."),
-  escola: z.string().trim().min(2, "Informe a escola do professor."),
-  imagem: z.string().optional(),
-});
-
-export type ProfessorInput = z.infer<typeof professorSchema>;
-
 export type Professor = ProfessorInput & {
   id: string;
   createdAt: string;
 };
-
-export type ProfessorField = keyof ProfessorInput;
 
 export function loadProfessores(): Professor[] {
   try {
