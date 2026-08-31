@@ -2,17 +2,56 @@ import {
   isValidCpf,
   onlyDigits,
   professorSchema,
+  professorUpdateSchema,
   type ProfessorField,
   type ProfessorInput,
+  type ProfessorUpdateInput,
 } from "@shared/professor";
 
-export { isValidCpf, onlyDigits, professorSchema };
-export type { ProfessorField, ProfessorInput };
+export { isValidCpf, onlyDigits, professorSchema, professorUpdateSchema };
+export type { ProfessorField, ProfessorInput, ProfessorUpdateInput };
 
-const STORAGE_KEY = "esmeraldinha:professores";
-
-/** Data URLs go into localStorage, so the image has to fit in it. */
+/** Data URLs travel to the API as JSON, so the image has to fit comfortably in a request body. */
 export const MAX_IMAGE_BYTES = 1024 * 1024;
+
+const API_OFFLINE =
+  "A API local não respondeu. Confira se o `pnpm dev` está rodando (ele sobe o Vite e a API juntos).";
+
+/** Lê o `{ error }` da API; devolve null se a resposta não for JSON. */
+async function readApiError(response: Response): Promise<string | null> {
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === "object" && body !== null) {
+      const { error } = body as Record<string, unknown>;
+      if (typeof error === "string") return error;
+    }
+  } catch {
+    // sem corpo JSON — provavelmente não foi a API que respondeu
+  }
+  return null;
+}
+
+async function requestApi(path: string, init?: RequestInit): Promise<Response> {
+  let response: Response;
+
+  try {
+    response = await fetch(path, init);
+  } catch {
+    throw new Error(API_OFFLINE);
+  }
+
+  if (response.ok) return response;
+
+  const apiError = await readApiError(response);
+  if (apiError) throw new Error(apiError);
+
+  // Sem JSON num 5xx é o proxy do Vite sem ninguém atrás dele.
+  throw new Error(
+    response.status >= 500
+      ? `${API_OFFLINE} (HTTP ${response.status})`
+      : `Falha inesperada ao falar com a API (HTTP ${response.status}).`,
+  );
+}
 
 /** Applies the 000.000.000-00 mask as the user types. */
 export function formatCpf(value: string) {
@@ -31,52 +70,54 @@ export function maskCpf(value: string) {
   );
 }
 
-export type Professor = ProfessorInput & {
+/**
+ * A professor as returned by the API. The senha is write-only across this
+ * boundary — the API never includes it in a response — so it is optional
+ * here rather than on `ProfessorInput`, which the cadastro form uses.
+ */
+export type Professor = Omit<ProfessorInput, "senha"> & {
+  senha?: string;
   id: string;
   createdAt: string;
 };
 
-export function loadProfessores(): Professor[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const stored: unknown = JSON.parse(raw);
-    if (!Array.isArray(stored)) return [];
-    return stored.filter((item): item is Professor => {
-      if (typeof item !== "object" || item === null) return false;
-      const candidate = item as Record<string, unknown>;
-      return (
-        typeof candidate.id === "string" &&
-        professorSchema.safeParse(candidate).success
-      );
-    });
-  } catch {
-    return [];
-  }
+/** Lista os professores cadastrados. */
+export async function loadProfessores(): Promise<Professor[]> {
+  const response = await requestApi("/api/professores");
+  return (await response.json()) as Professor[];
 }
 
-export function saveProfessores(professores: Professor[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(professores));
+/** Cadastra um novo professor. */
+export async function createProfessor(
+  input: ProfessorInput,
+): Promise<Professor> {
+  const response = await requestApi("/api/professores", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return (await response.json()) as Professor;
 }
 
-export function createProfessor(input: ProfessorInput): Professor {
-  return {
-    ...input,
-    id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-  };
+/**
+ * Atualiza um professor cadastrado. Omitir `senha` deixa a senha
+ * armazenada intacta.
+ */
+export async function updateProfessor(
+  id: string,
+  input: ProfessorUpdateInput,
+): Promise<Professor> {
+  const response = await requestApi(`/api/professores/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return (await response.json()) as Professor;
 }
 
-export function isLoginTaken(
-  professores: Professor[],
-  login: string,
-  ignoredId?: string,
-) {
-  const target = onlyDigits(login);
-  return professores.some(
-    (professor) =>
-      professor.id !== ignoredId && onlyDigits(professor.login) === target,
-  );
+/** Exclui um professor cadastrado. */
+export async function deleteProfessor(id: string): Promise<void> {
+  await requestApi(`/api/professores/${id}`, { method: "DELETE" });
 }
 
 export function getInitials(nome: string) {
