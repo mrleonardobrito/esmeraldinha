@@ -1,42 +1,40 @@
 # Esmeraldinha
 
-SPA React 19 + TypeScript servida pelo Vite 7, com uma API Node local que faz
-scraping do portal do professor via Playwright. Não há SSR nem Next.js — não use
-`next/*` nem `"use client"`.
+Automatiza o cadastro de cadernetas dos professores no portal do professor de limoeiro de anadia sob a perspectiva do auxiliar de ensino.
 
-## Frontend (`src/`)
+O glossário do domínio vive em `CONTEXT.md`.
 
-- Alias `@/*` aponta para `src/*`.
-- Estilo: Tailwind CSS v4 via `@tailwindcss/vite` (sem `tailwind.config`); tokens
-  de tema e variáveis de fonte ficam em `src/globals.css`.
-- Componentes de UI vêm do shadcn/ui em `src/components/ui` (`components.json`
-  já aponta para `src/globals.css`, `rsc: false`).
-- Tema claro/escuro via `next-themes` (funciona em React puro) no `src/App.tsx`.
-- Fontes carregadas por `<link>` no `index.html`, não por `next/font`.
-- Rotas com `react-router` (`/professores`, `/cadernetas`) declaradas em
-  `src/App.tsx`; a navegação fica em `src/components/app-sidebar.tsx`.
+# Regras de negócio
 
-## Backend (`server/`) e scraping (`scrape/`)
+1. Um professor pode solicitar o preenchimento de várias cadernetas
+2. Uma caderneta é composta por:
+   1. Conteúdo de cada aula
+   2. Frequência de cada estudante
+   3. Ficha de desempenho de cada estudante
+   4. Ficha descritiva de cada estudante
+   5. Boletim de notas de cada estudante
+3. Uma caderneta é vinculada a uma turma
+4. Uma caderneta só é considerada finalizada quando essas informações estão preenchidas para todas as aulas de todas as 4 etapas do ano letivo
+5. A data de inicialização e finalização de cada uma das 4 etapas do ano letivo depende do calendário acadêmico
+6. O usuário final do sistema é o auxiliar de ensino, que recebe as solicitações dos professores
+7. Cada professor vai enviar o conteúdo de cada caderneta em formato de texto, imagem(manuscrita/digitada) e/ou pdf
+8. Não existe uma ordem correta de envio de conteúdo, o sistema deve saber qual parte da caderneta preencher apenas interpretando o conteúdo enviado
+9. O portal não oferece acesso delegado, então o professor entrega as próprias credenciais ao auxiliar de ensino e a Esmeraldinha precisa guardá-las com segurança. O `localStorage` usado hoje é apenas andaime de teste, não a solução final
 
-- `server/` é uma API Hono rodando em Node (`tsx`), separada do Vite. O Vite faz
-  proxy de `/api` para ela em desenvolvimento.
-- `scrape/` tem o Playwright que opera o portal (PrimeFaces). `server/` só
-  orquestra: `server/portal-sessions.ts` mantém as sessões headless em memória.
-- Configuração por env em `.env` (veja `.env.example`): `PORTAL_URL`,
-  `SERVER_PORT`, `PORTAL_HEADLESS`, `PORTAL_SESSION_IDLE_MS`.
-- `tsconfig.server.json` cobre `server/` e `scrape/`, e inclui a lib DOM porque
-  os callbacks de `page.evaluate` rodam dentro do navegador.
+# Instruções
 
-## Convenções
+1. Desenvolva começando da maneira mais simples de desenvolver aquela funcionalidade e utilize conceitos de arquitetura limpa, DDD, SOLID só quando necessário para o crescimento da aplicação. A única exceção é a linguagem ubíqua, que mantemos desde o início: os termos do domínio definidos em `CONTEXT.md` permanecem em português em prosa, em identificadores de código e em nomes de arquivo; todo o resto — prosa, títulos, comentários e identificadores que não sejam do domínio — é escrito em inglês.
 
-- Identificadores em inglês; o vocabulário do domínio fica em português
-  (`Professor`, `nome`, `login`, `senha`, `escola`, `imagem`, `cpf`). Onde os
-  dois se encontram: `loadProfessores`, `formatCpf`, `isLoginTaken`.
-- Texto visível ao usuário sempre em português.
-- `src/` usa aspas duplas; `server/` e `scrape/` usam aspas simples.
+## Agent skills
 
-## Comandos
+### Issue tracker
 
-- `pnpm dev` sobe Vite e API juntos (`dev:web` e `dev:api` rodam separados).
-- Verifique alterações com `pnpm build` (roda `tsc -b`) e `pnpm lint`.
-- O Playwright precisa do navegador instalado: `pnpm exec playwright install chromium`.
+Issues and specs live as markdown files under `.scratch/<feature>/` in this repo. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, used verbatim as `Status:` values. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

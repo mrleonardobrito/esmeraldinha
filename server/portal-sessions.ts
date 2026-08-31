@@ -3,8 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
-import { login } from '../scrape/portal';
-import type { ProfessorCredenciais } from '../scrape/types';
+import { login } from './scrape/portal';
+import type { ProfessorCredenciais } from './scrape/types';
 import { env } from './env';
 
 export interface PortalSession {
@@ -28,7 +28,7 @@ let browserPromise: Promise<Browser> | null = null;
 /** O navegador é único e compartilhado; cada sessão ganha um contexto isolado. */
 async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
-    browserPromise = chromium.launch({ headless: env.headless }).catch((error: unknown) => {
+    browserPromise = chromium.launch({ headless: env.headless.login }).catch((error: unknown) => {
       browserPromise = null;
       throw error;
     });
@@ -83,8 +83,8 @@ export async function openSession(
   const now = Date.now();
   const session: TrackedSession = {
     id: randomUUID(),
-    login: credentials.username,
-    escola: credentials.school,
+    login: credentials.login,
+    escola: credentials.escola,
     page,
     context,
     createdAt: now,

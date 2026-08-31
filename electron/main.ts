@@ -142,8 +142,8 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     apiPromise = null;
 
-    void import('../server/infrastructure/portal/playwright/portal-gateway')
-      .then(({ portalGatewayPlaywright }) => portalGatewayPlaywright.encerrarTodasAsSessoes())
+    void import('../server/portal-sessions')
+      .then(({ closeAllSessions }) => closeAllSessions())
       .catch(() => {})
       .finally(() => app.quit());
   });

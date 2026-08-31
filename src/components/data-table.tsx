@@ -635,12 +635,12 @@ export function DataTable({
 }
 
 const chartData = [
-  { month: "January", desktop: 186, mobile: 80 },
-  { month: "February", desktop: 305, mobile: 200 },
-  { month: "March", desktop: 237, mobile: 120 },
-  { month: "April", desktop: 73, mobile: 190 },
-  { month: "May", desktop: 209, mobile: 130 },
-  { month: "June", desktop: 214, mobile: 140 },
+  { mes: "January", desktop: 186, mobile: 80 },
+  { mes: "February", desktop: 305, mobile: 200 },
+  { mes: "March", desktop: 237, mobile: 120 },
+  { mes: "April", desktop: 73, mobile: 190 },
+  { mes: "May", desktop: 209, mobile: 130 },
+  { mes: "June", desktop: 214, mobile: 140 },
 ]
 
 const chartConfig = {
@@ -668,7 +668,7 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
         <DrawerHeader className="gap-1">
           <DrawerTitle>{item.header}</DrawerTitle>
           <DrawerDescription>
-            Showing total visitors for the last 6 months
+            Showing total visitors for the last 6 mess
           </DrawerDescription>
         </DrawerHeader>
         <div className="flex flex-col gap-4 overflow-y-auto px-4 text-sm">
@@ -685,7 +685,7 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
                 >
                   <CartesianGrid vertical={false} />
                   <XAxis
-                    dataKey="month"
+                    dataKey="mes"
                     tickLine={false}
                     axisLine={false}
                     tickMargin={8}
@@ -717,11 +717,11 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
               <Separator />
               <div className="grid gap-2">
                 <div className="flex gap-2 leading-none font-medium">
-                  Trending up by 5.2% this month{" "}
+                  Trending up by 5.2% this mes{" "}
                   <IconTrendingUp className="size-4" />
                 </div>
                 <div className="text-muted-foreground">
-                  Showing total visitors for the last 6 months. This is just
+                  Showing total visitors for the last 6 mess. This is just
                   some random text to test the layout. It spans multiple lines
                   and should wrap around.
                 </div>

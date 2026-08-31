@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { LoginError } from '../scrape/errors';
+import { LoginError } from './scrape/errors';
 import { closeSession, openSession, touchSession } from './portal-sessions';
 import { env } from './env';
 
@@ -13,7 +13,6 @@ const credentialsSchema = z.object({
 
 export const cadernetas = new Hono();
 
-/** Abre uma sessão headless no portal e faz login com as credenciais do professor. */
 cadernetas.post('/sessoes', async (context) => {
   const body = await context.req.json().catch(() => null);
   const parsed = credentialsSchema.safeParse(body);
@@ -26,9 +25,9 @@ cadernetas.post('/sessoes', async (context) => {
 
   try {
     const session = await openSession({
-      username: login,
-      password: senha,
-      school: escola,
+      login: login,
+      senha: senha,
+      escola: escola,
     });
 
     return context.json(

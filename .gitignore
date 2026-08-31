@@ -41,3 +41,8 @@ yarn-error.log*
 
 # Banco SQLite local
 data/
+
+# agent tooling (skills are restorable from skills-lock.json)
+/.claude/
+/.scratch/
+/docs/agents/
