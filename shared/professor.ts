@@ -45,3 +45,14 @@ export const professorSchema = z.object({
 export type ProfessorInput = z.infer<typeof professorSchema>;
 
 export type ProfessorField = keyof ProfessorInput;
+
+/**
+ * Validation rules for editing a professor: everything `professorSchema`
+ * requires, except the senha, which is optional — omitting it leaves the
+ * stored senha untouched.
+ */
+export const professorUpdateSchema = professorSchema.extend({
+  senha: professorSchema.shape.senha.optional(),
+});
+
+export type ProfessorUpdateInput = z.infer<typeof professorUpdateSchema>;
