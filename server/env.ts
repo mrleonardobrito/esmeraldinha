@@ -20,4 +20,17 @@ export const env = {
   debugDir: process.env.PORTAL_DEBUG_DIR?.trim() || '.portal-debug',
   /** Uma sessão ociosa é encerrada depois desse tempo. */
   sessionIdleMs: readInt(process.env.PORTAL_SESSION_IDLE_MS, 15 * 60_000),
+  /**
+   * Qual adapter de encriptação usar para a senha do professor. Por
+   * padrão, `electron` dentro do processo principal do Electron e `dev`
+   * em qualquer outro lugar (`pnpm dev:api`, testes). Pode ser forçado via
+   * ENCRYPTION_ADAPTER, o que os testes usam para nunca tocar o keychain
+   * do sistema operacional.
+   */
+  encryptionAdapter: (process.env.ENCRYPTION_ADAPTER === 'electron' ||
+  (!process.env.ENCRYPTION_ADAPTER && process.versions.electron)
+    ? 'electron'
+    : 'dev') as 'electron' | 'dev',
+  /** Chave de desenvolvimento usada pelo DevEncryptionAdapter. */
+  devEncryptionKey: process.env.DEV_ENCRYPTION_KEY?.trim() ?? '',
 } as const;
