@@ -32,5 +32,5 @@ export const env = {
     ? 'electron'
     : 'dev') as 'electron' | 'dev',
   /** Chave de desenvolvimento usada pelo DevEncryptionAdapter. */
-  devEncryptionKey: process.env.DEV_ENCRYPTION_KEY?.trim() ?? '',
+  devEncryptionKey: process.env.ESMERALDINHA_ENCRYPTION_KEY?.trim() ?? '',
 } as const;
