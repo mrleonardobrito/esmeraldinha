@@ -33,4 +33,11 @@ export const env = {
     : 'dev') as 'electron' | 'dev',
   /** Chave de desenvolvimento usada pelo DevEncryptionAdapter. */
   devEncryptionKey: process.env.ESMERALDINHA_ENCRYPTION_KEY?.trim() ?? '',
+  /**
+   * Caminho do arquivo SQLite onde os professores são persistidos. Sob
+   * Electron, `electron/main.ts` aponta isso para `app.getPath('userData')`,
+   * do mesmo jeito que já faz com `PORTAL_DEBUG_DIR`. Testes apontam para um
+   * caminho temporário.
+   */
+  dbPath: process.env.ESMERALDINHA_DB_PATH?.trim() || './data/esmeraldinha.db',
 } as const;
