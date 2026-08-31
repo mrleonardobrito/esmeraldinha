@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
 import type { EncryptionPort } from '../encryption';
-import type { ProfessorInput } from '../../shared/professor';
+import type { ProfessorInput, ProfessorUpdateInput } from '../../shared/professor';
 
 /** A professor as returned by the API: never carries the senha. */
 export interface Professor {
@@ -19,6 +19,14 @@ export class DuplicateLoginError extends Error {
   constructor(login: string) {
     super(`Já existe um professor cadastrado com o login ${login}.`);
     this.name = 'DuplicateLoginError';
+  }
+}
+
+/** Raised when a professor id does not match any cadastrado professor. */
+export class ProfessorNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Nenhum professor encontrado com o id ${id}.`);
+    this.name = 'ProfessorNotFoundError';
   }
 }
 
@@ -98,4 +106,66 @@ export async function createProfessor(
     imagem: input.imagem ?? null,
     createdAt,
   };
+}
+
+/**
+ * Updates a cadastrado professor. Omitting `senha` leaves the stored
+ * encrypted senha untouched; supplying one replaces it, still encrypted.
+ *
+ * @throws {ProfessorNotFoundError} when `id` matches no professor.
+ * @throws {DuplicateLoginError} when `login` belongs to another professor.
+ */
+export async function updateProfessor(
+  db: DatabaseSync,
+  encryption: EncryptionPort,
+  id: string,
+  input: ProfessorUpdateInput,
+): Promise<Professor> {
+  const existing = db.prepare('SELECT id FROM professores WHERE id = ?').get(id) as
+    | { id: string }
+    | undefined;
+
+  if (!existing) {
+    throw new ProfessorNotFoundError(id);
+  }
+
+  const duplicate = db
+    .prepare('SELECT id FROM professores WHERE login = ? AND id != ?')
+    .get(input.login, id);
+
+  if (duplicate) {
+    throw new DuplicateLoginError(input.login);
+  }
+
+  if (input.senha) {
+    const senhaEncrypted = await encryption.encrypt(input.senha);
+    db.prepare(
+      `UPDATE professores SET nome = ?, login = ?, senha_encrypted = ?, escola = ?, imagem = ?
+       WHERE id = ?`,
+    ).run(input.nome, input.login, senhaEncrypted, input.escola, input.imagem ?? null, id);
+  } else {
+    db.prepare(
+      `UPDATE professores SET nome = ?, login = ?, escola = ?, imagem = ?
+       WHERE id = ?`,
+    ).run(input.nome, input.login, input.escola, input.imagem ?? null, id);
+  }
+
+  const row = db
+    .prepare('SELECT id, nome, login, escola, imagem, created_at FROM professores WHERE id = ?')
+    .get(id) as unknown as ProfessorRow;
+
+  return toProfessor(row);
+}
+
+/**
+ * Deletes a professor, removing the row and its encrypted senha.
+ *
+ * @throws {ProfessorNotFoundError} when `id` matches no professor.
+ */
+export function deleteProfessor(db: DatabaseSync, id: string): void {
+  const result = db.prepare('DELETE FROM professores WHERE id = ?').run(id);
+
+  if (result.changes === 0) {
+    throw new ProfessorNotFoundError(id);
+  }
 }
