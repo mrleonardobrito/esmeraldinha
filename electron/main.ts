@@ -30,6 +30,7 @@ let apiPromise: Promise<Hono> | null = null;
 function getApi(): Promise<Hono> {
   if (!apiPromise) {
     process.env.PORTAL_DEBUG_DIR ||= join(app.getPath('userData'), 'portal-debug');
+    process.env.ESMERALDINHA_DB_PATH ||= join(app.getPath('userData'), 'esmeraldinha.db');
     process.env.PLAYWRIGHT_BROWSERS_PATH ||= app.isPackaged
       ? join(process.resourcesPath, 'pw-browsers')
       : join(rootDir, 'pw-browsers');
