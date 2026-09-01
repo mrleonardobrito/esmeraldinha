@@ -1,7 +1,9 @@
 import * as React from "react";
 import {
+  IconAlertTriangle,
   IconChalkboardTeacher,
   IconDotsVertical,
+  IconLoader,
   IconPencil,
   IconPlus,
   IconTrash,
@@ -35,27 +37,62 @@ import {
 } from "@/components/ui/table";
 import {
   createProfessor,
-  formatCpf,
+  deleteProfessor,
   getInitials,
-  isLoginTaken,
   loadProfessores,
-  saveProfessores,
+  maskCpf,
+  updateProfessor,
   type Professor,
   type ProfessorInput,
+  type ProfessorUpdateInput,
 } from "@/lib/professores";
 
+type ListState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready" };
+
 export function Professores() {
-  const [professores, setProfessores] = React.useState<Professor[]>(() =>
-    loadProfessores(),
-  );
+  const [professores, setProfessores] = React.useState<Professor[]>([]);
+  const [listState, setListState] = React.useState<ListState>({
+    status: "loading",
+  });
   const [isFormOpen, setIsFormOpen] = React.useState(false);
   const [editedProfessor, setEditedProfessor] = React.useState<Professor | null>(
     null,
   );
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [reloadToken, setReloadToken] = React.useState(0);
 
   React.useEffect(() => {
-    saveProfessores(professores);
-  }, [professores]);
+    let cancelled = false;
+
+    loadProfessores()
+      .then((list) => {
+        if (cancelled) return;
+        setProfessores(list);
+        setListState({ status: "ready" });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setListState({
+          status: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Não foi possível carregar os professores.",
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  function retryFetchProfessores() {
+    setListState({ status: "loading" });
+    setReloadToken((current) => current + 1);
+  }
 
   function openCreateForm() {
     setEditedProfessor(null);
@@ -67,27 +104,45 @@ export function Professores() {
     setIsFormOpen(true);
   }
 
-  function handleSubmit(values: ProfessorInput) {
-    if (editedProfessor) {
-      const id = editedProfessor.id;
-      setProfessores((current) =>
-        current.map((professor) =>
-          professor.id === id ? { ...professor, ...values } : professor,
-        ),
-      );
-      toast.success("Professor atualizado.");
-      return;
-    }
+  async function handleSubmit(values: ProfessorInput | ProfessorUpdateInput) {
+    setIsSubmitting(true);
+    try {
+      if (editedProfessor) {
+        const updated = await updateProfessor(
+          editedProfessor.id,
+          values as ProfessorUpdateInput,
+        );
+        setProfessores((current) =>
+          current.map((professor) =>
+            professor.id === updated.id ? updated : professor,
+          ),
+        );
+        toast.success("Professor atualizado.");
+        return;
+      }
 
-    setProfessores((current) => [...current, createProfessor(values)]);
-    toast.success("Professor cadastrado.");
+      const created = await createProfessor(values as ProfessorInput);
+      setProfessores((current) => [...current, created]);
+      toast.success("Professor cadastrado.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
-  function handleDelete(professor: Professor) {
-    setProfessores((current) =>
-      current.filter((item) => item.id !== professor.id),
-    );
-    toast.success(`${professor.nome} foi removido.`);
+  async function handleDelete(professor: Professor) {
+    try {
+      await deleteProfessor(professor.id);
+      setProfessores((current) =>
+        current.filter((item) => item.id !== professor.id),
+      );
+      toast.success(`${professor.nome} foi removido.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível excluir o professor.",
+      );
+    }
   }
 
   return (
@@ -106,7 +161,29 @@ export function Professores() {
           </CardAction>
         </CardHeader>
         <CardContent>
-          {professores.length === 0 ? (
+          {listState.status === "loading" ? (
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed px-6 py-12 text-center">
+              <IconLoader className="size-8 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                Carregando professores…
+              </p>
+            </div>
+          ) : listState.status === "error" ? (
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-destructive/30 bg-destructive/10 px-6 py-12 text-center">
+              <IconAlertTriangle className="size-8 text-destructive" />
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-medium text-destructive">
+                  Não foi possível carregar os professores
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {listState.message}
+                </p>
+              </div>
+              <Button variant="outline" onClick={retryFetchProfessores}>
+                Tentar novamente
+              </Button>
+            </div>
+          ) : professores.length === 0 ? (
             <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed px-6 py-12 text-center">
               <IconChalkboardTeacher className="size-8 text-muted-foreground" />
               <div className="flex flex-col gap-1">
@@ -153,7 +230,7 @@ export function Professores() {
                       </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground tabular-nums">
-                      {formatCpf(professor.login)}
+                      {maskCpf(professor.login)}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {"•".repeat(8)}
@@ -202,9 +279,7 @@ export function Professores() {
         onOpenChange={setIsFormOpen}
         professor={editedProfessor}
         onSubmit={handleSubmit}
-        isLoginTaken={(login) =>
-          isLoginTaken(professores, login, editedProfessor?.id)
-        }
+        isSubmitting={isSubmitting}
       />
     </div>
   );
