@@ -16,9 +16,21 @@ export interface Aula {
   readonly ferramentas?: string;
 }
 
+export interface EtapaOptions {
+  readonly nome: string;
+  readonly turmas: readonly string[];
+  readonly meses: readonly string[];
+}
+
+/** As opções válidas de Lançamento de Conteúdo para o professor da sessão. */
+export interface ConteudoCatalogo {
+  readonly etapas: readonly EtapaOptions[];
+}
+
 export interface LancaConteudoFilter {
   readonly etapa: string;
-  readonly reducao: string;
+  /** O portal salva sem ela; fica aqui porque a tela a exibe. */
+  readonly reducao?: string;
   readonly mes: string;
   readonly turma: string;
   readonly aulas: readonly Aula[];
