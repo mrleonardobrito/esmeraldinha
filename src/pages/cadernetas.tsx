@@ -34,12 +34,48 @@ import {
 
 type Status = "idle" | "connecting" | "connected" | "error";
 
+type ProfessoresState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; professores: Professor[] };
+
 export function Cadernetas() {
-  const [professores] = React.useState<Professor[]>(() => loadProfessores());
+  const [professoresState, setProfessoresState] =
+    React.useState<ProfessoresState>({ status: "loading" });
   const [selected, setSelected] = React.useState<Professor | null>(null);
   const [status, setStatus] = React.useState<Status>("idle");
   const [session, setSession] = React.useState<PortalSession | null>(null);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [reloadToken, setReloadToken] = React.useState(0);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    loadProfessores()
+      .then((professores) => {
+        if (cancelled) return;
+        setProfessoresState({ status: "ready", professores });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setProfessoresState({
+          status: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Não foi possível carregar os professores.",
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  function retryFetchProfessores() {
+    setProfessoresState({ status: "loading" });
+    setReloadToken((current) => current + 1);
+  }
 
   /**
    * A conexão parte do clique, não de um efeito: com StrictMode um efeito
@@ -50,7 +86,7 @@ export function Cadernetas() {
     setErrorMessage(null);
 
     try {
-      const opened = await openPortalSession(professor);
+      const opened = await openPortalSession(professor.id);
       setSession(opened);
       setStatus("connected");
       toast.success(`Conectado ao portal como ${professor.nome}.`);
@@ -86,6 +122,64 @@ export function Cadernetas() {
     setErrorMessage(null);
     toast.success("Sessão encerrada.");
   }
+
+  if (professoresState.status === "loading") {
+    return (
+      <Shell>
+        <Card>
+          <CardHeader>
+            <CardTitle>Cadernetas</CardTitle>
+            <CardDescription>
+              Escolha o professor para abrir uma sessão no portal com o login
+              dele.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed px-6 py-12 text-center">
+              <IconLoader className="size-8 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                Carregando professores…
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </Shell>
+    );
+  }
+
+  if (professoresState.status === "error") {
+    return (
+      <Shell>
+        <Card>
+          <CardHeader>
+            <CardTitle>Cadernetas</CardTitle>
+            <CardDescription>
+              Escolha o professor para abrir uma sessão no portal com o login
+              dele.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-destructive/30 bg-destructive/10 px-6 py-12 text-center">
+              <IconAlertTriangle className="size-8 text-destructive" />
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-medium text-destructive">
+                  Não foi possível carregar os professores
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {professoresState.message}
+                </p>
+              </div>
+              <Button variant="outline" onClick={retryFetchProfessores}>
+                Tentar novamente
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </Shell>
+    );
+  }
+
+  const professores = professoresState.professores;
 
   if (professores.length === 0) {
     return (

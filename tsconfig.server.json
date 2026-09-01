@@ -13,5 +13,5 @@
     "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["electron", "server"]
+  "include": ["electron", "server", "shared"]
 }
