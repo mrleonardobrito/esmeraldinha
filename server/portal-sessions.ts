@@ -3,8 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
-import { login } from './scrape/portal';
-import type { ProfessorCredenciais } from './scrape/types';
+import { listConteudoOptions, login } from './scrape/portal';
+import type { ConteudoCatalogo, ProfessorCredenciais } from './scrape/types';
 import { env } from './env';
 
 export interface PortalSession {
@@ -19,6 +19,8 @@ export interface PortalSession {
 interface TrackedSession extends PortalSession {
   readonly context: BrowserContext;
   timer: NodeJS.Timeout;
+  /** Raspar o catálogo custa uma volta por etapa, e ele não muda na sessão. */
+  catalogo?: Promise<ConteudoCatalogo>;
 }
 
 const sessions = new Map<string, TrackedSession>();
@@ -107,6 +109,23 @@ export function touchSession(id: string): PortalSession | undefined {
   scheduleExpiration(session);
 
   return session;
+}
+
+/** O catálogo de opções do professor, raspado na primeira chamada. */
+export async function getCatalogo(id: string): Promise<ConteudoCatalogo | undefined> {
+  const session = sessions.get(id);
+  if (!session) return undefined;
+
+  session.lastUsedAt = Date.now();
+  scheduleExpiration(session);
+
+  session.catalogo ??= listConteudoOptions(session.page).catch((error: unknown) => {
+    // Uma falha não pode virar cache: a próxima tentativa precisa tentar de novo.
+    session.catalogo = undefined;
+    throw error;
+  });
+
+  return session.catalogo;
 }
 
 export async function closeSession(id: string): Promise<boolean> {
