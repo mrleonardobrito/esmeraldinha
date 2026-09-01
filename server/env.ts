@@ -20,4 +20,24 @@ export const env = {
   debugDir: process.env.PORTAL_DEBUG_DIR?.trim() || '.portal-debug',
   /** Uma sessão ociosa é encerrada depois desse tempo. */
   sessionIdleMs: readInt(process.env.PORTAL_SESSION_IDLE_MS, 15 * 60_000),
+  /**
+   * Qual adapter de encriptação usar para a senha do professor. Por
+   * padrão, `electron` dentro do processo principal do Electron e `dev`
+   * em qualquer outro lugar (`pnpm dev:api`, testes). Pode ser forçado via
+   * ENCRYPTION_ADAPTER, o que os testes usam para nunca tocar o keychain
+   * do sistema operacional.
+   */
+  encryptionAdapter: (process.env.ENCRYPTION_ADAPTER === 'electron' ||
+  (!process.env.ENCRYPTION_ADAPTER && process.versions.electron)
+    ? 'electron'
+    : 'dev') as 'electron' | 'dev',
+  /** Chave de desenvolvimento usada pelo DevEncryptionAdapter. */
+  devEncryptionKey: process.env.ESMERALDINHA_ENCRYPTION_KEY?.trim() ?? '',
+  /**
+   * Caminho do arquivo SQLite onde os professores são persistidos. Sob
+   * Electron, `electron/main.ts` aponta isso para `app.getPath('userData')`,
+   * do mesmo jeito que já faz com `PORTAL_DEBUG_DIR`. Testes apontam para um
+   * caminho temporário.
+   */
+  dbPath: process.env.ESMERALDINHA_DB_PATH?.trim() || './data/esmeraldinha.db',
 } as const;
