@@ -1,5 +1,3 @@
-import type { Professor } from "@/lib/professores";
-
 export interface PortalSession {
   sessionId: string;
   escola: string;
@@ -45,18 +43,18 @@ async function requestApi(path: string, init?: RequestInit): Promise<Response> {
   );
 }
 
-/** Abre uma sessão headless no portal usando as credenciais do professor. */
+/**
+ * Abre uma sessão headless no portal para o professor identificado por
+ * `professorId`. A senha nunca sai do servidor: o backend resolve e
+ * decifra as credenciais armazenadas antes de logar no portal.
+ */
 export async function openPortalSession(
-  professor: Professor,
+  professorId: string,
 ): Promise<PortalSession> {
   const response = await requestApi("/api/cadernetas/sessoes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      login: professor.login,
-      senha: professor.senha,
-      escola: professor.escola,
-    }),
+    body: JSON.stringify({ professorId }),
   });
 
   return (await response.json()) as PortalSession;
