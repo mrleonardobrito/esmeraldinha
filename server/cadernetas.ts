@@ -17,31 +17,34 @@ import {
 } from './ai/errors';
 import { interpretarEnvio, type ArquivoEnviado } from './ai/interpretar-envio';
 import { env } from './env';
+import { createEncryptionPort } from './encryption';
+import { getDb } from './professores/db';
+import { getProfessorCredenciais } from './professores/store';
 
-const credentialsSchema = z.object({
-  login: z.string().trim().min(1),
-  senha: z.string().min(1),
-  escola: z.string().trim().min(1),
+const abrirSessaoSchema = z.object({
+  professorId: z.string().trim().min(1),
 });
 
 export const cadernetas = new Hono();
 
 cadernetas.post('/sessoes', async (context) => {
   const body = await context.req.json().catch(() => null);
-  const parsed = credentialsSchema.safeParse(body);
+  const parsed = abrirSessaoSchema.safeParse(body);
 
   if (!parsed.success) {
-    return context.json({ error: 'Credenciais do professor incompletas.' }, 400);
+    return context.json({ error: 'Informe o professor cuja sessão deve ser aberta.' }, 400);
   }
 
-  const { login, senha, escola } = parsed.data;
+  const { professorId } = parsed.data;
+
+  const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), professorId);
+
+  if (!credenciais) {
+    return context.json({ error: 'Professor não encontrado.' }, 404);
+  }
 
   try {
-    const session = await openSession({
-      login: login,
-      senha: senha,
-      escola: escola,
-    });
+    const session = await openSession(credenciais);
 
     return context.json(
       {

@@ -17,10 +17,12 @@ import {
   formatCpf,
   getInitials,
   professorSchema,
+  professorUpdateSchema,
   readImageAsDataUrl,
   type Professor,
   type ProfessorField,
   type ProfessorInput,
+  type ProfessorUpdateInput,
 } from "@/lib/professores";
 
 type FormErrors = Partial<Record<ProfessorField, string>>;
@@ -38,16 +40,17 @@ export function ProfessorForm({
   onOpenChange,
   professor,
   onSubmit,
-  isLoginTaken,
+  isSubmitting,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   professor?: Professor | null;
-  onSubmit: (values: ProfessorInput) => void;
-  isLoginTaken: (login: string) => boolean;
+  onSubmit: (values: ProfessorInput | ProfessorUpdateInput) => Promise<void>;
+  isSubmitting?: boolean;
 }) {
   const [values, setValues] = React.useState<ProfessorInput>(INITIAL_VALUES);
   const [errors, setErrors] = React.useState<FormErrors>({});
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [showSenha, setShowSenha] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -60,13 +63,16 @@ export function ProfessorForm({
         ? {
             nome: professor.nome,
             login: formatCpf(professor.login),
-            senha: professor.senha,
+            // A senha não volta da API: editar deixa o campo em branco, e
+            // em branco significa "manter a senha atual".
+            senha: "",
             escola: professor.escola,
             imagem: professor.imagem,
           }
         : INITIAL_VALUES,
     );
     setErrors({});
+    setSubmitError(null);
     setShowSenha(false);
   }, [open, professor]);
 
@@ -89,9 +95,14 @@ export function ProfessorForm({
     }
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = professorSchema.safeParse(values);
+
+    // Editando, uma senha em branco mantém a senha atual; a validação
+    // completa (mínimo de 4 caracteres) só se aplica ao cadastro.
+    const schema = isEditing ? professorUpdateSchema : professorSchema;
+    const candidate = isEditing && !values.senha ? { ...values, senha: undefined } : values;
+    const result = schema.safeParse(candidate);
 
     if (!result.success) {
       const nextErrors: FormErrors = {};
@@ -103,13 +114,17 @@ export function ProfessorForm({
       return;
     }
 
-    if (isLoginTaken(result.data.login)) {
-      setErrors({ login: "Já existe um professor com esse login." });
-      return;
+    setSubmitError(null);
+    try {
+      await onSubmit(result.data);
+      onOpenChange(false);
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar o professor.",
+      );
     }
-
-    onSubmit(result.data);
-    onOpenChange(false);
   }
 
   return (
@@ -216,7 +231,11 @@ export function ProfessorForm({
                 type={showSenha ? "text" : "password"}
                 value={values.senha}
                 onChange={(event) => updateField("senha", event.target.value)}
-                placeholder="Mínimo de 4 caracteres"
+                placeholder={
+                  isEditing
+                    ? "Deixe em branco para manter a senha atual"
+                    : "Mínimo de 4 caracteres"
+                }
                 autoComplete="new-password"
                 className="pr-9"
                 aria-invalid={Boolean(errors.senha)}
@@ -243,6 +262,8 @@ export function ProfessorForm({
               aria-invalid={Boolean(errors.escola)}
             />
           </Field>
+
+          {submitError && <ErrorMessage>{submitError}</ErrorMessage>}
         </form>
 
         <SheetFooter className="flex-row justify-end">
@@ -253,7 +274,7 @@ export function ProfessorForm({
           >
             Cancelar
           </Button>
-          <Button type="submit" form="professor-form">
+          <Button type="submit" form="professor-form" disabled={isSubmitting}>
             {isEditing ? "Salvar alterações" : "Cadastrar"}
           </Button>
         </SheetFooter>
