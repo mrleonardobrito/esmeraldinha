@@ -1,7 +1,15 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { fillField, selectMenuOption, waitForAjax, AJAX_TIMEOUT_MS } from './primefaces';
+import {
+  fillField,
+  readMenuOptions,
+  selectMenuOption,
+  waitForAjax,
+  AJAX_TIMEOUT_MS,
+} from './primefaces';
 import { LoginError, MissingAulaRowsError } from './errors';
 import type {
+  ConteudoCatalogo,
+  EtapaOptions,
   LancaConteudoFilter,
   AulaFailure,
   ProfessorCredenciais,
@@ -22,6 +30,8 @@ const FIELD = {
 const FILTER = {
   etapa: ':etapaPeriodo-SOM-CP-OBR',
   turma: ':turma-SOM-CP-OBR',
+  /** O portal chama a redução de _Grupo diário_. */
+  reducao: ':grupoDiario-SOM-CP-OBR',
   mes: ':mes-SOM-CP-OBR',
 } as const;
 
@@ -53,18 +63,81 @@ export async function login(
   await page.locator('[id*="periodoLetivo-SOM-CP-OBR_label"]').click();
   await page.getByRole('option', { name: '2026' }).click();
 
-  waitForAjax(page);
+  await waitForAjax(page);
 
   await page.getByRole('button', { name: ' Acessar' }).click();
 }
 
-export function findAulaRow(page: Page, date: string, ordem = 1): Locator {
-  return page
-    .locator('tr[data-ri]')
-    .filter({ has: page.locator('span.texto1', { hasText: date }) })
-    .filter({
-      has: page.locator('span.texto1', { hasText: `Ordem da Aula: ${ordem}` }),
+export async function openLancaConteudo(page: Page): Promise<void> {
+  await page.getByRole('link', { name: 'Etapa' }).click();
+  await page.getByRole('link', { name: 'Lançamento de Conteúdo' }).click();
+  await waitForAjax(page);
+}
+
+/**
+ * As opções válidas do professor, para que o agente escolha entre elas em vez
+ * de inventar uma turma. A etapa manda: o portal recarrega turmas e meses a
+ * cada troca, então cada etapa é selecionada uma vez.
+ */
+export async function listConteudoOptions(page: Page): Promise<ConteudoCatalogo> {
+  await openLancaConteudo(page);
+
+  const nomes = await readMenuOptions(page, FILTER.etapa);
+  const etapas: EtapaOptions[] = [];
+
+  for (const nome of nomes) {
+    await selectMenuOption(page, page, FILTER.etapa, nome);
+
+    const turmas = await readMenuOptions(page, FILTER.turma);
+
+    // Os meses só carregam depois da turma e da redução. São os meses do
+    // calendário da etapa, iguais para todas as turmas dela, então basta
+    // escolher a primeira.
+    if (turmas[0]) {
+      await selectMenuOption(page, page, FILTER.turma, turmas[0]);
+      await selectFirstReducao(page);
+    }
+
+    etapas.push({
+      nome,
+      turmas,
+      meses: turmas[0] ? await readMenuOptions(page, FILTER.mes) : [],
     });
+  }
+
+  return { etapas };
+}
+
+/**
+ * A ordem da aula é do portal, não do plano do professor: quem a define é o
+ * grupo diário da turma. Só filtramos por ela quando o material a informa —
+ * do contrário, a data sozinha já identifica a linha.
+ */
+/**
+ * A redução não vem do material do professor: é o grupo diário sob o qual a
+ * turma arquiva suas aulas. Ficamos com a primeira opção, que é a que o portal
+ * usa para a turma.
+ */
+export async function selectFirstReducao(page: Page): Promise<string | undefined> {
+  const [primeira] = await readMenuOptions(page, FILTER.reducao);
+
+  if (!primeira) return undefined;
+
+  await selectMenuOption(page, page, FILTER.reducao, primeira);
+
+  return primeira;
+}
+
+export function findAulaRow(page: Page, date: string, ordem?: number): Locator {
+  const byDate = page
+    .locator('tr[data-ri]')
+    .filter({ has: page.locator('span.texto1', { hasText: date }) });
+
+  if (ordem === undefined) return byDate;
+
+  return byDate.filter({
+    has: page.locator('span.texto1', { hasText: `Ordem da Aula: ${ordem}` }),
+  });
 }
 
 export async function postAulaContent(
@@ -75,11 +148,11 @@ export async function postAulaContent(
     throw new Error('No aulas provided.');
   }
 
-  await page.getByRole('link', { name: 'Etapa' }).click();
-  await page.getByRole('link', { name: 'Lançamento de Conteúdo' }).click();
+  await openLancaConteudo(page);
 
   await selectMenuOption(page, page, FILTER.etapa, etapa);
   await selectMenuOption(page, page, FILTER.turma, turma);
+  await selectFirstReducao(page);
   await selectMenuOption(page, page, FILTER.mes, mes);
 
   await expect(
@@ -89,8 +162,14 @@ export async function postAulaContent(
 
   const unmatched: string[] = [];
   for (const aula of aulas) {
-    const count = await findAulaRow(page, aula.data, aula.ordem ?? 1).count();
-    if (count !== 1) unmatched.push(`${aula.data} (${count} linhas encontradas)`);
+    const count = await findAulaRow(page, aula.data, aula.ordem).count();
+    if (count !== 1) {
+      unmatched.push(
+        count === 0
+          ? `${aula.data} (nenhuma linha)`
+          : `${aula.data} (${count} linhas — informe a ordem da aula)`,
+      );
+    }
   }
   if (unmatched.length > 0) {
     throw new MissingAulaRowsError(unmatched);
@@ -100,9 +179,9 @@ export async function postAulaContent(
   const failed: AulaFailure[] = [];
 
   for (const aula of aulas) {
-    const label = `${aula.data} #${aula.ordem ?? 1}`;
+    const label = aula.ordem === undefined ? aula.data : `${aula.data} #${aula.ordem}`;
     try {
-      const row = findAulaRow(page, aula.data, aula.ordem ?? 1);
+      const row = findAulaRow(page, aula.data, aula.ordem);
 
       await selectMenuOption(page, row, FIELD.isRecuperacao, aula.isRecuperacao);
       await selectMenuOption(page, row, FIELD.isInteracao, aula.isInteracao);

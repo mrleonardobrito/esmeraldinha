@@ -18,6 +18,16 @@ export const env = {
   },
   /** Onde salvar screenshot + HTML quando o login no portal falha. */
   debugDir: process.env.PORTAL_DEBUG_DIR?.trim() || '.portal-debug',
+  /** O agente que lê o material enviado pelo professor. */
+  openrouter: {
+    apiKey: process.env.OPENROUTER_API_KEY?.trim() ?? '',
+    /** Precisa aceitar imagem e PDF: é isso que o professor manda. */
+    model: process.env.OPENROUTER_MODEL?.trim() || 'google/gemini-2.5-flash',
+    baseUrl:
+      process.env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1',
+  },
+  /** Tamanho máximo de cada arquivo de um envio. */
+  maxUploadBytes: readInt(process.env.MAX_UPLOAD_BYTES, 10 * 1024 * 1024),
   /** Uma sessão ociosa é encerrada depois desse tempo. */
   sessionIdleMs: readInt(process.env.PORTAL_SESSION_IDLE_MS, 15 * 60_000),
   /**

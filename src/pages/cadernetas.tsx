@@ -11,6 +11,7 @@ import {
 import { Link } from "react-router";
 import { toast } from "sonner";
 
+import { EnvioDeMaterial } from "@/components/envio-de-material";
 import { ProfessorPicker } from "@/components/professor-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -269,6 +270,10 @@ export function Cadernetas() {
             <IconAlertTriangle className="mt-0.5 size-4 shrink-0" />
             <span>{errorMessage}</span>
           </div>
+        )}
+
+        {status === "connected" && session && (
+          <EnvioDeMaterial sessionId={session.sessionId} />
         )}
       </div>
     </Shell>

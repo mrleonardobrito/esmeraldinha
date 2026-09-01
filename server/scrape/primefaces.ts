@@ -81,3 +81,22 @@ export async function fillField(
 
   return 'updated';
 }
+/**
+ * O PrimeFaces mantém um <select> escondido junto de cada selectOneMenu.
+ * Ler dele evita abrir o painel — sem clique, sem AJAX, sem corrida.
+ */
+export async function readMenuOptions(
+  scope: Scope,
+  idSuffix: string,
+): Promise<string[]> {
+  const select = scope.locator(`[id$="${idSuffix}_input"]`);
+  await expect(select, `menu ${idSuffix} not found`).toHaveCount(1);
+
+  const labels = await select.locator('option').allTextContents();
+
+  return labels
+    // A primeira opção do PrimeFaces é um espaço em branco — às vezes o
+    // caractere, às vezes a entidade `&nbsp;` literal — e não é uma escolha.
+    .map((label) => label.replace(/&nbsp;|&#160;/g, ' ').replace(/[\s\u00a0]+/g, ' ').trim())
+    .filter((label) => label.length > 0 && !/^selecione/i.test(label));
+}
