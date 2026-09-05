@@ -33,11 +33,18 @@ export interface EnvioResultado {
  */
 export async function enviarMaterial(
   sessionId: string,
-  { texto, arquivos }: { texto: string; arquivos: File[] },
+  {
+    texto,
+    arquivos,
+    cadernetaId,
+  }: { texto: string; arquivos: File[]; cadernetaId?: string },
 ): Promise<EnvioResultado> {
   const form = new FormData();
   form.append("texto", texto);
   for (const arquivo of arquivos) form.append("arquivos", arquivo);
+  // Quando o envio sai de dentro de uma caderneta, o progresso dela é
+  // atualizado junto, sem esperar uma nova sincronização.
+  if (cadernetaId) form.append("cadernetaId", cadernetaId);
 
   const response = await requestApi(`/api/cadernetas/sessoes/${sessionId}/envios`, {
     method: "POST",

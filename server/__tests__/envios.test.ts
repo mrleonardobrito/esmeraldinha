@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../app';
-import { getCatalogo, touchSession } from '../portal-sessions';
+import { getCatalogo, retomarSessao } from '../portal-sessions';
 import { postAulaContent } from '../scrape/portal';
 import { chatCompletion } from '../ai/openrouter';
 import { OpenRouterNotConfiguredError } from '../ai/errors';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
+  retomarSessao: vi.fn(),
   getCatalogo: vi.fn(),
   openSession: vi.fn(),
   closeSession: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('../scrape/portal', () => ({
 vi.mock('../ai/openrouter', () => ({ chatCompletion: vi.fn() }));
 
 const sessionId = 'sessao-1';
+const professorId = 'prof-1';
 
 const plano = {
   parte: 'conteudo',
@@ -60,8 +62,9 @@ function comTexto(texto: string): FormData {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(touchSession).mockReturnValue({
+  vi.mocked(retomarSessao).mockResolvedValue({
     id: sessionId,
+    professorId,
     login: '00000000000',
     escola: 'Escola Teste',
     page: {} as never,
@@ -96,7 +99,7 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
   });
 
   it('devolve 404 quando a sessão não existe ou expirou', async () => {
-    vi.mocked(touchSession).mockReturnValue(undefined);
+    vi.mocked(retomarSessao).mockResolvedValue(undefined);
 
     const response = await enviar(comTexto('qualquer coisa'), 'sumiu');
 

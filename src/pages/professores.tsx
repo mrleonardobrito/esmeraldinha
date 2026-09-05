@@ -104,7 +104,10 @@ export function Professores() {
     setIsFormOpen(true);
   }
 
-  async function handleSubmit(values: ProfessorInput | ProfessorUpdateInput) {
+  /** Devolve o professor gravado: os passos de turmas e estudantes usam o id dele. */
+  async function handleSubmit(
+    values: ProfessorInput | ProfessorUpdateInput,
+  ): Promise<Professor> {
     setIsSubmitting(true);
     try {
       if (editedProfessor) {
@@ -118,12 +121,13 @@ export function Professores() {
           ),
         );
         toast.success("Professor atualizado.");
-        return;
+        return updated;
       }
 
       const created = await createProfessor(values as ProfessorInput);
       setProfessores((current) => [...current, created]);
       toast.success("Professor cadastrado.");
+      return created;
     } finally {
       setIsSubmitting(false);
     }

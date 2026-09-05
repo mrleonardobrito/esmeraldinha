@@ -23,11 +23,25 @@ import { enviarMaterial, type EnvioResultado } from "@/lib/envios";
 
 const ACCEPT = "image/*,application/pdf,text/plain,text/markdown";
 
+export interface EnvioDeMaterialProps {
+  sessionId: string;
+  /** Quando o envio sai de dentro de uma caderneta, o progresso dela sobe junto. */
+  cadernetaId?: string;
+  /** Sem moldura de card, para quando o envio já está dentro de um modal. */
+  semCard?: boolean;
+  onGravou?: () => void;
+}
+
 /**
  * O auxiliar de ensino não escolhe turma, etapa nem mês: quem descobre isso é
  * o agente, lendo o material. Aqui só se entrega o que o professor mandou.
  */
-export function EnvioDeMaterial({ sessionId }: { sessionId: string }) {
+export function EnvioDeMaterial({
+  sessionId,
+  cadernetaId,
+  semCard,
+  onGravou,
+}: EnvioDeMaterialProps) {
   const [texto, setTexto] = React.useState("");
   const [arquivos, setArquivos] = React.useState<File[]>([]);
   const [enviando, setEnviando] = React.useState(false);
@@ -51,13 +65,15 @@ export function EnvioDeMaterial({ sessionId }: { sessionId: string }) {
     setResultado(null);
 
     try {
-      const enviado = await enviarMaterial(sessionId, { texto, arquivos });
+      const enviado = await enviarMaterial(sessionId, { texto, arquivos, cadernetaId });
       setResultado(enviado);
       setTexto("");
       setArquivos([]);
       toast.success(
         `${enviado.resultado.succeeded.length} aula(s) gravada(s) em ${enviado.plano.turma}.`,
       );
+
+      if (enviado.resultado.succeeded.length > 0) onGravou?.();
     } catch (error) {
       setErro(
         error instanceof Error
@@ -71,17 +87,8 @@ export function EnvioDeMaterial({ sessionId }: { sessionId: string }) {
 
   const vazio = !texto.trim() && arquivos.length === 0;
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Enviar material do professor</CardTitle>
-        <CardDescription>
-          Cole o texto ou solte as fotos e PDFs que o professor mandou. A
-          Esmeraldinha descobre a turma, a etapa e o mês e grava no portal.
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-3">
+  const corpo = (
+    <>
         <div
           onDragOver={(event) => {
             event.preventDefault();
@@ -175,7 +182,24 @@ export function EnvioDeMaterial({ sessionId }: { sessionId: string }) {
         )}
 
         {resultado && <Resultado resultado={resultado} />}
-      </CardContent>
+    </>
+  );
+
+  if (semCard) {
+    return <div className="flex flex-col gap-3">{corpo}</div>;
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Enviar material do professor</CardTitle>
+        <CardDescription>
+          Cole o texto ou solte as fotos e PDFs que o professor mandou. A
+          Esmeraldinha descobre a turma, a etapa e o mês e grava no portal.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-3">{corpo}</CardContent>
     </Card>
   );
 }
