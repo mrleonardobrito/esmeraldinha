@@ -4,8 +4,8 @@ import {
   randomBytes,
   scryptSync,
 } from 'node:crypto';
-import { createRequire } from 'node:module';
 
+import { requireElectron } from './require-electron';
 import type { EncryptionPort } from './port';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -21,8 +21,7 @@ const KEY_SALT = 'esmeraldinha-dev-encryption';
 function isPackagedElectronBuild(): boolean {
   if (!process.versions.electron) return false;
 
-  const require = createRequire(import.meta.url);
-  const { app } = require('electron') as typeof import('electron');
+  const { app } = requireElectron();
   return app.isPackaged;
 }
 

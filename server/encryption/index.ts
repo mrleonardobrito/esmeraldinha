@@ -1,6 +1,5 @@
-import { createRequire } from 'node:module';
-
 import { env } from '../env';
+import { requireElectron } from './require-electron';
 import { DevEncryptionAdapter } from './dev-encryption-adapter';
 import { ElectronEncryptionAdapter, type SafeStorage } from './electron-encryption-adapter';
 import type { EncryptionPort } from './port';
@@ -17,8 +16,7 @@ export { ElectronEncryptionAdapter, type SafeStorage } from './electron-encrypti
  */
 export function createEncryptionPort(): EncryptionPort {
   if (env.encryptionAdapter === 'electron') {
-    const require = createRequire(import.meta.url);
-    const { safeStorage } = require('electron') as { safeStorage: SafeStorage };
+    const { safeStorage } = requireElectron() as { safeStorage: SafeStorage };
     return new ElectronEncryptionAdapter(safeStorage);
   }
 

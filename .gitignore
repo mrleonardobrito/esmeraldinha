@@ -16,8 +16,13 @@
 # vite
 /dist/
 
-# production
-/build
+# electron (main process bundle + packaged installers)
+/dist-electron/
+/release/
+
+# Chromium do Playwright, baixado por `pnpm playwright:install` antes de
+# empacotar — grande demais para versionar.
+/pw-browsers/
 
 # misc
 .DS_Store
