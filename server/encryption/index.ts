@@ -3,6 +3,7 @@ import { requireElectron } from './require-electron';
 import { DevEncryptionAdapter } from './dev-encryption-adapter';
 import { ElectronEncryptionAdapter, type SafeStorage } from './electron-encryption-adapter';
 import type { EncryptionPort } from './port';
+import { requireElectron } from './require-electron';
 
 export type { EncryptionPort } from './port';
 export { DevEncryptionAdapter } from './dev-encryption-adapter';
@@ -16,7 +17,7 @@ export { ElectronEncryptionAdapter, type SafeStorage } from './electron-encrypti
  */
 export function createEncryptionPort(): EncryptionPort {
   if (env.encryptionAdapter === 'electron') {
-    const { safeStorage } = requireElectron() as { safeStorage: SafeStorage };
+    const { safeStorage } = requireElectron<{ safeStorage: SafeStorage }>();
     return new ElectronEncryptionAdapter(safeStorage);
   }
 

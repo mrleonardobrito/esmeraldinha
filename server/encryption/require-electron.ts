@@ -1,22 +1,31 @@
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 /**
- * Loads the `electron` module regardless of the module format this file
- * ends up compiled to.
+ * Resolves a base path for `createRequire` that is valid in both module
+ * formats this code ships in.
  *
- * Under `tsx`/Vitest (real ESM) `createRequire(import.meta.url)` is the way
- * in. Under the esbuild CJS bundle that ships in the packaged app,
- * `import.meta.url` is stripped to an empty string — esbuild does not
- * rewrite it for the "cjs" output format — and `createRequire('')` throws;
- * CJS already has a `require` global at that point, so that's the fallback.
- * `typeof require` alone isn't a reliable signal here: some ESM test runners
- * still expose a global `require`, which would skip `import.meta.url`
- * (and any `vi.mock('node:module', ...)`) even though it works fine.
+ * The Electron main process is an esbuild CJS bundle, where `import.meta` is
+ * rewritten to an empty object — `import.meta.url` is `undefined` there, and
+ * `createRequire(undefined)` throws. That bundle does get a real `__dirname`.
+ * Under `tsx` the module stays ESM, where `__dirname` is absent but
+ * `import.meta.url` is real.
+ *
+ * Both identifiers are read bare rather than off `globalThis`: each is a
+ * module-scoped binding, absent from `globalThis` in either format, so only
+ * the bare form sees the value the bundler substitutes.
  */
-export function requireElectron(): typeof import('electron') {
-  const nodeRequire: NodeJS.Require = import.meta.url
-    ? createRequire(import.meta.url)
-    : require;
+function requireBase(): string {
+  return typeof __dirname === 'string'
+    ? pathToFileURL(`${__dirname}/`).href
+    : import.meta.url;
+}
 
-  return nodeRequire('electron') as typeof import('electron');
+/**
+ * Loads `electron` at runtime, without letting a bundler resolve it
+ * statically — `electron` is external to the bundle and only exists inside
+ * the Electron process.
+ */
+export function requireElectron<T>(): T {
+  return createRequire(requireBase())('electron') as T;
 }

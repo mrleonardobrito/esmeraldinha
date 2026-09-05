@@ -6,6 +6,7 @@ import {
   IconLoader,
   IconPencil,
   IconPlus,
+  IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
@@ -46,6 +47,7 @@ import {
   type ProfessorInput,
   type ProfessorUpdateInput,
 } from "@/lib/professores";
+import { buscarTurmas } from "@/lib/turmas";
 
 type ListState =
   | { status: "loading" }
@@ -63,6 +65,7 @@ export function Professores() {
   );
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [reloadToken, setReloadToken] = React.useState(0);
+  const [relendo, setRelendo] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -104,7 +107,10 @@ export function Professores() {
     setIsFormOpen(true);
   }
 
-  async function handleSubmit(values: ProfessorInput | ProfessorUpdateInput) {
+  /** Devolve o professor gravado: os passos de turmas e estudantes usam o id dele. */
+  async function handleSubmit(
+    values: ProfessorInput | ProfessorUpdateInput,
+  ): Promise<Professor> {
     setIsSubmitting(true);
     try {
       if (editedProfessor) {
@@ -118,14 +124,44 @@ export function Professores() {
           ),
         );
         toast.success("Professor atualizado.");
-        return;
+        return updated;
       }
 
       const created = await createProfessor(values as ProfessorInput);
       setProfessores((current) => [...current, created]);
       toast.success("Professor cadastrado.");
+      return created;
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  /**
+   * Relê turmas e estudantes no portal para um professor já cadastrado — o
+   * caminho para quem foi cadastrado antes de a leitura de estudantes existir.
+   * A senha não é pedida de novo: ela já está guardada, e o servidor a decifra.
+   */
+  async function relerDoPortal(professor: Professor) {
+    setRelendo(professor.id);
+
+    try {
+      const turmas = await buscarTurmas(professor.id);
+      const estudantes = turmas.reduce(
+        (total, turma) => total + turma.totalDeEstudantes,
+        0,
+      );
+
+      toast.success(
+        `${professor.nome}: ${turmas.length} turma(s) e ${estudantes} estudante(s) lidos do portal.`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível reler as turmas no portal.",
+      );
+    } finally {
+      setRelendo(null);
     }
   }
 
@@ -255,6 +291,15 @@ export function Professores() {
                           >
                             <IconPencil />
                             Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={relendo === professor.id}
+                            onSelect={() => void relerDoPortal(professor)}
+                          >
+                            <IconRefresh />
+                            {relendo === professor.id
+                              ? "Lendo o portal…"
+                              : "Reler turmas e estudantes"}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             variant="destructive"
