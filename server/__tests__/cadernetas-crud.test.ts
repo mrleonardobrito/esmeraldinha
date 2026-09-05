@@ -10,6 +10,7 @@ vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
   retomarSessao: vi.fn(),
   getCatalogo: vi.fn(),
+  getCatalogoComAvaliacoes: vi.fn(),
   openSession: vi.fn(),
   closeSession: vi.fn(),
 }));
@@ -18,10 +19,22 @@ vi.mock('../ai/openrouter', () => ({ chatCompletion: vi.fn() }));
 
 vi.mock('../scrape/portal', () => ({
   listAulas: vi.fn(),
+  listBoletim: vi.fn(),
+  listDisciplinas: vi.fn(),
   listEstudantes: vi.fn(),
-  postAulaContent: vi.fn(),
+  prepararAulaParaPreenchimento: vi.fn(),
+  prepararNotasParaPreenchimento: vi.fn(),
   // env.ts importa a URL padrão deste módulo.
   PORTAL_URL: 'https://portal.example/teste',
+}));
+
+// O preenchimento assistido abriria um navegador de verdade; o que interessa
+// aqui é a rota entregar a ela o conteúdo certo.
+vi.mock('../sessoes-headed', () => ({
+  naSessaoHeaded: vi.fn(
+    async (_professorId: string, _credenciais: unknown, trabalho: (page: unknown) => unknown) =>
+      trabalho({}),
+  ),
 }));
 
 const sessionId = 'sessao-1';
@@ -35,26 +48,32 @@ const catalogo = {
 };
 
 const originalDbPath = process.env.ESMERALDINHA_DB_PATH;
+const originalKey = process.env.ESMERALDINHA_ENCRYPTION_KEY;
 let tempDir: string;
 
 async function freshApp() {
   const { createApp } = await import('../app');
   const app = (createApp as typeof CreateApp)();
 
+  const { createEncryptionPort } = await import('../encryption');
+  const senhaEncrypted = await createEncryptionPort().encrypt('segredo');
+
   // Uma caderneta referencia o professor dela: sem a linha, o SQLite recusa.
   const { getDb } = await import('../professores/db');
   getDb()
     .prepare(
       `INSERT INTO professores (id, nome, login, senha_encrypted, escola, created_at)
-       VALUES (?, 'Maria', '111', X'00', 'Escola', '2026-01-01T00:00:00.000Z')`,
+       VALUES (?, 'Maria', '111', ?, 'Escola', '2026-01-01T00:00:00.000Z')`,
     )
-    .run(professorId);
+    .run(professorId, senhaEncrypted);
 
   return app;
 }
 
 async function stubSession() {
-  const { retomarSessao, getCatalogo } = await import('../portal-sessions');
+  const { retomarSessao, getCatalogo, getCatalogoComAvaliacoes } = await import(
+    '../portal-sessions'
+  );
   vi.mocked(retomarSessao).mockResolvedValue({
     id: sessionId,
     professorId,
@@ -65,6 +84,7 @@ async function stubSession() {
     lastUsedAt: Date.now(),
   });
   vi.mocked(getCatalogo).mockResolvedValue(catalogo);
+  vi.mocked(getCatalogoComAvaliacoes).mockResolvedValue(catalogo);
 }
 
 /** Toda aula que o portal devolve, para qualquer mês pedido. */
@@ -82,8 +102,29 @@ async function stubAulas(
   vi.mocked(listAulas).mockResolvedValue(aulas);
 }
 
+/**
+ * O boletim que o portal devolve para qualquer etapa e disciplina pedidas.
+ * Sem disciplina, a turma não tem avaliação cadastrada.
+ */
+async function stubBoletim(
+  boletim: {
+    avaliacoes: { nome: string; valor?: number }[];
+    notas: { matricula: string; avaliacao: string; valor: number }[];
+  } = { avaliacoes: [], notas: [] },
+  disciplinas: string[] = ['MATEMÁTICA'],
+) {
+  const { listBoletim, listDisciplinas } = await import('../scrape/portal');
+  vi.mocked(listDisciplinas).mockResolvedValue(disciplinas);
+  vi.mocked(listBoletim).mockResolvedValue({ notasDoEstudante: [], ...boletim });
+}
+
 async function stubEstudantes(
-  estudantes: { matricula: string; nome: string; situacao?: string }[] = [],
+  estudantes: {
+    matricula: string;
+    nome: string;
+    situacao?: string;
+    dataMatricula?: string;
+  }[] = [],
 ) {
   const { listEstudantes } = await import('../scrape/portal');
   vi.mocked(listEstudantes).mockResolvedValue(estudantes);
@@ -143,6 +184,10 @@ describe('cadernetas CRUD', () => {
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'esmeraldinha-cadernetas-'));
     process.env.ESMERALDINHA_DB_PATH = join(tempDir, 'esmeraldinha.db');
+    // `env.ts` lê a variável uma vez ao ser importado; setá-la aqui, antes de
+    // qualquer import dinâmico do teste, é o que garante que o preenchimento
+    // assistido consiga decifrar a senha de teste que `freshApp` grava.
+    process.env.ESMERALDINHA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
 
     vi.resetModules();
     vi.clearAllMocks();
@@ -159,7 +204,18 @@ describe('cadernetas CRUD', () => {
       },
       { data: '12/03/2026', preenchida: false },
     ]);
-    await stubEstudantes([{ matricula: '2026001', nome: 'Ana Lima', situacao: 'ATIVO' }]);
+    await stubEstudantes([
+      {
+        matricula: '2026001',
+        nome: 'Ana Lima',
+        situacao: 'ATIVO',
+        dataMatricula: '05/01/2026',
+      },
+    ]);
+    await stubBoletim({
+      avaliacoes: [{ nome: 'PROVA 1', valor: 10 }],
+      notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 7.5 }],
+    });
 
     const { resetSincronizacoes } = await import('../cadernetas/sincronizacao');
     resetSincronizacoes();
@@ -168,6 +224,9 @@ describe('cadernetas CRUD', () => {
   afterEach(() => {
     if (originalDbPath === undefined) delete process.env.ESMERALDINHA_DB_PATH;
     else process.env.ESMERALDINHA_DB_PATH = originalDbPath;
+
+    if (originalKey === undefined) delete process.env.ESMERALDINHA_ENCRYPTION_KEY;
+    else process.env.ESMERALDINHA_ENCRYPTION_KEY = originalKey;
 
     rmSync(tempDir, { recursive: true, force: true });
   });
@@ -214,7 +273,14 @@ describe('cadernetas CRUD', () => {
     const response = await app.fetch(request(`/${id}/estudantes`));
 
     expect(await response.json()).toEqual({
-      estudantes: [{ matricula: '2026001', nome: 'Ana Lima', situacao: 'ATIVO' }],
+      estudantes: [
+        {
+          matricula: '2026001',
+          nome: 'Ana Lima',
+          situacao: 'ATIVO',
+          dataMatricula: '05/01/2026',
+        },
+      ],
     });
   });
 
@@ -462,13 +528,10 @@ describe('cadernetas CRUD', () => {
     expect(caderneta.etapas[0]).toMatchObject({ totalDeAulas: 3, conteudo: 'concluido' });
   });
 
-  it('marca as aulas gravadas quando o envio parte de uma caderneta', async () => {
+  it('marca a aula gravada quando o preenchimento assistido do envio é confirmado', async () => {
     const app = await freshApp();
     const { id } = (await (await cadastrar(app)).json()) as { id: string };
     await esperarSincronizacao(app, id);
-
-    const { postAulaContent } = await import('../scrape/portal');
-    vi.mocked(postAulaContent).mockResolvedValue({ succeeded: ['12/03/2026'], failed: [] });
 
     const { chatCompletion } = await import('../ai/openrouter');
     vi.mocked(chatCompletion).mockResolvedValue(
@@ -497,11 +560,29 @@ describe('cadernetas CRUD', () => {
     form.append('texto', 'Aula de 12/03/2026.');
     form.append('cadernetaId', id);
 
-    const response = await app.fetch(
+    const preview = await app.fetch(
       new Request(`http://localhost/api/cadernetas/sessoes/${sessionId}/envios`, {
         method: 'POST',
         body: form,
       }),
+    );
+    expect(preview.status).toBe(200);
+    const { plano } = (await preview.json()) as {
+      plano: { etapa: string; mes: string; turma: string; aulas: { data: string; ordem: number | null }[] };
+    };
+
+    const response = await app.fetch(
+      request(
+        `/sessoes/${sessionId}/envios/aulas/preenchimentos-assistidos`,
+        json({
+          professorId,
+          cadernetaId: id,
+          etapa: plano.etapa,
+          mes: plano.mes,
+          turma: plano.turma,
+          aula: plano.aulas[0],
+        }),
+      ),
     );
 
     expect(response.status).toBe(200);
@@ -519,5 +600,48 @@ describe('cadernetas CRUD', () => {
 
     expect((await app.fetch(request(`/${id}`, { method: 'DELETE' }))).status).toBe(204);
     expect((await app.fetch(request(`/${id}`))).status).toBe(404);
+  });
+
+  it('devolve o boletim da etapa com as avaliações e as notas do portal', async () => {
+    const app = await freshApp();
+    const { id } = (await (await cadastrar(app)).json()) as { id: string };
+    await esperarSincronizacao(app, id);
+
+    const response = await app.fetch(request(`/${id}/etapas/1%C2%AA%20Etapa/boletim`));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      etapa: '1ª Etapa',
+      disciplina: 'MATEMÁTICA',
+      disciplinas: ['MATEMÁTICA'],
+      estudantes: [{ matricula: '2026001', nome: 'Ana Lima' }],
+      avaliacoes: [{ nome: 'PROVA 1', valor: 10 }],
+      notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 7.5 }],
+    });
+  });
+
+  it('conta o progresso do boletim como estudantes × avaliações', async () => {
+    const app = await freshApp();
+    const { id } = (await (await cadastrar(app)).json()) as { id: string };
+    await esperarSincronizacao(app, id);
+
+    const caderneta = (await (await app.fetch(request(`/${id}`))).json()) as {
+      etapas: { totalDeNotas: number; notasLancadas: number; boletim: string }[];
+    };
+
+    // Uma estudante e uma avaliação: uma nota possível, e ela já está lançada.
+    expect(caderneta.etapas[0]).toMatchObject({
+      totalDeNotas: 1,
+      notasLancadas: 1,
+      boletim: 'concluido',
+    });
+  });
+
+  it('devolve 404 no boletim de uma caderneta inexistente', async () => {
+    const app = await freshApp();
+
+    const response = await app.fetch(request('/nao-existe/etapas/1/boletim'));
+
+    expect(response.status).toBe(404);
   });
 });

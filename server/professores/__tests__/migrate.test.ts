@@ -44,6 +44,40 @@ describe('migrate', () => {
     ).toEqual([{ data: '05/03/2026', desenvolvimento: null }]);
   });
 
+  it('acrescenta a data da matrícula aos estudantes de um banco antigo', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`
+      CREATE TABLE caderneta_estudantes (
+        caderneta_id TEXT NOT NULL,
+        matricula TEXT NOT NULL,
+        nome TEXT NOT NULL,
+        situacao TEXT,
+        ordem INTEGER NOT NULL,
+        PRIMARY KEY (caderneta_id, matricula)
+      );
+    `);
+    db.prepare(
+      `INSERT INTO caderneta_estudantes (caderneta_id, matricula, nome, situacao, ordem)
+       VALUES ('c1', '12658', 'Benjamin', 'ATIVO', 0)`,
+    ).run();
+
+    migrate(db);
+
+    expect(
+      db.prepare('SELECT nome, data_matricula FROM caderneta_estudantes').all(),
+    ).toEqual([{ nome: 'Benjamin', data_matricula: null }]);
+  });
+
+  it('ignora as tabelas que o banco antigo ainda não tem', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(SCHEMA_ANTIGO);
+
+    // `turma_estudantes` não existe aqui: um ALTER TABLE nela estouraria.
+    expect(() => {
+      migrate(db);
+    }).not.toThrow();
+  });
+
   it('não faz nada quando as colunas já existem', () => {
     const db = new DatabaseSync(':memory:');
     db.exec(SCHEMA_ANTIGO);

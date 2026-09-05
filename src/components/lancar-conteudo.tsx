@@ -111,6 +111,7 @@ export function LancarConteudo({
 
             <EnvioDeMaterial
               sessionId={sessionId}
+              professorId={caderneta.professorId}
               cadernetaId={caderneta.id}
               semCard
               onGravou={() => {

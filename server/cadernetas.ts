@@ -5,30 +5,44 @@ import { LoginError, MissingAulaRowsError } from './scrape/errors';
 import {
   closeSession,
   getCatalogo,
+  getCatalogoComAvaliacoes,
   openSession,
   retomarSessao,
 } from './portal-sessions';
-import { postAulaContent, prepararAulaParaPreenchimento } from './scrape/portal';
+import {
+  prepararAulaParaPreenchimento,
+  prepararNotasParaPreenchimento,
+} from './scrape/portal';
 import { naSessaoHeaded } from './sessoes-headed';
 import {
+  ArquivoIlegivelError,
   EnvioInvalidoError,
   OpenRouterError,
   OpenRouterNotConfiguredError,
   ParteNaoSuportadaError,
 } from './ai/errors';
-import { interpretarEnvio, type ArquivoEnviado } from './ai/interpretar-envio';
+import {
+  interpretarEnvio,
+  type ArquivoEnviado,
+  type EnvioPlan,
+} from './ai/interpretar-envio';
 import {
   CadernetaNotFoundError,
   TurmaJaCadastradaError,
   createCaderneta,
   deleteCaderneta,
+  getBoletimDaEtapa,
   getCaderneta,
+  listDisciplinasDaCaderneta,
   listAulasDaEtapa,
   listCadernetas,
   listEstudantes,
   marcarConteudoPreenchido,
+  marcarNotasLancadas,
   type Caderneta,
 } from './cadernetas/store';
+import { resolverNotasParaPreview, type NotaResolvida } from './notas/plano';
+import type { NotaParaLancar } from './scrape/types';
 import { TurmaNaoEncontradaError } from './cadernetas/raspagem';
 import { turmasDoCatalogo } from './turmas/busca';
 import { sincronizarEmSegundoPlano } from './cadernetas/sincronizacao';
@@ -80,6 +94,41 @@ const preenchimentoAssistidoSchema = z.object({
   isRecuperacao: simNaoSchema.optional(),
   isInteracao: simNaoSchema.optional(),
 });
+
+/**
+ * O preenchimento assistido do boletim, como o da aula: uma janela visível,
+ * as notas escritas nos campos, e a decisão de salvar deixada para o auxiliar
+ * de ensino. As notas vêm da tela porque é lá que elas acabaram de ser
+ * editadas.
+ */
+const preenchimentoDeNotasSchema = z
+  .object({
+    etapa: z.string().trim().min(1),
+    disciplina: z.string().trim().min(1).optional(),
+    notas: z
+      .array(
+        z.object({
+          matricula: z.string().trim().min(1),
+          avaliacao: z.string().trim().min(1),
+          valor: z.number().min(0),
+        }),
+      )
+      .default([]),
+    /** A nota personalizada e a final da etapa, que não são de avaliação. */
+    notasDoEstudante: z
+      .array(
+        z.object({
+          matricula: z.string().trim().min(1),
+          personalizada: z.number().min(0).nullish(),
+          final: z.number().min(0).nullish(),
+        }),
+      )
+      .default([]),
+  })
+  .refine(
+    (body) => body.notas.length > 0 || body.notasDoEstudante.length > 0,
+    { message: 'Informe ao menos uma nota.' },
+  );
 
 export const cadernetas = new Hono();
 
@@ -148,7 +197,46 @@ cadernetas.delete('/sessoes/:id', async (context) => {
   return context.body(null, 204);
 });
 
-/** Um envio: o material que o professor mandou, do jeito que ele mandou. */
+/**
+ * Um item da preview de um envio: uma aula de conteúdo, ou a nota de um
+ * estudante do boletim — na mesma ordem de `plano.aulas`/`plano.notas`, para o
+ * cliente casar um item com o dado que ele descreve pelo índice. `pronta` é o
+ * que o preenchimento assistido vai tentar escrever na tela; `falha` já se
+ * sabe sem abrir o portal — nome fora da turma, por exemplo — e nem chega a
+ * ser tentada.
+ */
+type ItemDoEnvio =
+  | { readonly status: 'pronta'; readonly rotulo: string }
+  | { readonly status: 'falha'; readonly rotulo: string; readonly motivo: string };
+
+function rotuloDaAula(aula: EnvioPlan['aulas'][number]): string {
+  return aula.ordem === undefined ? aula.data : `${aula.data} #${aula.ordem}`;
+}
+
+/** As notas resolvidas, na mesma ordem de `plano.notas` — a única que casa por índice. */
+function notasResolvidasNaOrdem(
+  notas: readonly NotaResolvida[],
+): readonly (NotaParaLancar | undefined)[] {
+  return notas.map((nota) => (nota.status === 'pronta' ? nota.nota : undefined));
+}
+
+function itensDoBoletim(notas: readonly NotaResolvida[]): ItemDoEnvio[] {
+  return notas.map((nota) =>
+    nota.status === 'pronta'
+      ? { status: 'pronta', rotulo: nota.nota.matricula }
+      : { status: 'falha', rotulo: nota.estudante, motivo: nota.motivo },
+  );
+}
+
+/**
+ * A preview de um envio: o que o agente leu, mais o que dá para saber sobre
+ * cada item sem tocar no portal — se o nome do estudante bate com alguém da
+ * turma, por exemplo. O que só o portal sabe, como se a linha da aula existe,
+ * só aparece depois, quando o preenchimento assistido tenta aquele item.
+ *
+ * Não escreve nada: o preenchimento de verdade é outro passo, que o auxiliar
+ * de ensino dispara item a item depois de conferir esta tela.
+ */
 cadernetas.post('/sessoes/:id/envios', async (context) => {
   let session;
   try {
@@ -207,72 +295,296 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
       return context.json({ error: 'Sessão não encontrada ou expirada.' }, 404);
     }
 
-    const plano = await interpretarEnvio({ texto, arquivos, catalogo });
+    // O agente escolhe a disciplina e a avaliação de uma lista fechada, então
+    // o catálogo já vai enriquecido: uma segunda leitura do material só para
+    // descobrir que ele era de notas custaria outra chamada ao modelo, e nada
+    // garante que as duas concordariam. O catálogo fica em cache na sessão.
+    const comAvaliacoes = (await getCatalogoComAvaliacoes(session.id)) ?? catalogo;
 
-    const resultado = await postAulaContent(session.page, {
-      etapa: plano.etapa,
-      turma: plano.turma,
-      mes: plano.mes,
-      aulas: plano.aulas,
-    });
+    const plano = await interpretarEnvio({ texto, arquivos, catalogo: comAvaliacoes });
 
-    if (cadernetaId && resultado.succeeded.length > 0) {
-      const gravadas = plano.aulas.filter((aula) =>
-        resultado.succeeded.includes(
-          aula.ordem === undefined ? aula.data : `${aula.data} #${aula.ordem}`,
-        ),
-      );
+    if (plano.parte === 'boletim') {
+      const caderneta = cadernetaDoPlano(cadernetaId, session.professorId, plano.turma);
 
-      try {
-        marcarConteudoPreenchido(
-          getDb(),
-          cadernetaId,
-          gravadas.map((aula) => ({
-            etapa: plano.etapa,
-            data: aula.data,
-            ordem: aula.ordem ?? null,
-          })),
+      if (!caderneta) {
+        throw new BoletimIndisponivelError(
+          `O material é do boletim de ${plano.turma}, mas essa turma ainda não ` +
+            'tem caderneta cadastrada. Cadastre a caderneta dela primeiro.',
         );
-      } catch (error) {
-        // O conteúdo já está no portal, que é o que importa. Um progresso
-        // desatualizado se resolve numa sincronização.
-        console.error('Falha ao atualizar o progresso da caderneta:', error);
       }
+
+      const estudantes = listEstudantes(getDb(), caderneta.id);
+
+      if (estudantes.length === 0) {
+        throw new BoletimIndisponivelError(
+          `A caderneta de ${caderneta.turma} ainda não tem os estudantes lidos ` +
+            'do portal. Atualize a caderneta e tente de novo.',
+        );
+      }
+
+      const disciplinas = listDisciplinasDaCaderneta(getDb(), caderneta.id);
+      const disciplina = plano.disciplina || disciplinas[0];
+
+      if (!disciplina) {
+        throw new BoletimIndisponivelError(
+          `A caderneta de ${caderneta.turma} não tem nenhuma disciplina com ` +
+            'avaliação cadastrada. Cadastre a avaliação no portal e sincronize.',
+        );
+      }
+
+      const notas = resolverNotasParaPreview(plano.notas, plano.avaliacao, estudantes);
+
+      return context.json({
+        plano: { ...plano, disciplina },
+        cadernetaId: caderneta.id,
+        itens: itensDoBoletim(notas),
+        // Só os `pronta`, na ordem de `plano.notas` — os índices batem, então
+        // um `undefined` marca o índice cujo item é `falha`.
+        notasResolvidas: notasResolvidasNaOrdem(notas),
+      });
     }
 
-    return context.json({ plano, resultado });
+    return context.json({
+      plano,
+      cadernetaId: cadernetaId || undefined,
+      itens: plano.aulas.map((aula) => ({
+        status: 'pronta' as const,
+        rotulo: rotuloDaAula(aula),
+      })),
+    });
   } catch (error) {
     if (error instanceof OpenRouterNotConfiguredError) {
       return context.json({ error: error.message }, 503);
     }
 
-    if (error instanceof ParteNaoSuportadaError || error instanceof EnvioInvalidoError) {
+    if (
+      error instanceof ParteNaoSuportadaError ||
+      error instanceof EnvioInvalidoError ||
+      error instanceof ArquivoIlegivelError
+    ) {
       return context.json({ error: error.message }, 422);
     }
 
-    if (error instanceof MissingAulaRowsError) {
-      return context.json(
-        {
-          error:
-            'O portal não tem as aulas que o material descreve: ' +
-            `${error.entries.join(', ')}. Confira a turma e o mês detectados.`,
-        },
-        422,
-      );
+    if (error instanceof BoletimIndisponivelError) {
+      return context.json({ error: error.message }, 422);
     }
 
     if (error instanceof OpenRouterError) {
       return context.json({ error: `O agente falhou: ${error.message}` }, 502);
     }
 
-    console.error('Falha ao processar o envio:', error);
+    console.error('Falha ao interpretar o envio:', error);
     return context.json(
-      { error: 'Não foi possível gravar o conteúdo no portal. Tente novamente.' },
+      { error: 'Não foi possível interpretar o material. Tente novamente.' },
       502,
     );
   }
 });
 
+const preenchimentoDeAulaDoEnvioSchema = z.object({
+  professorId: z.string().trim().min(1),
+  cadernetaId: z.string().trim().min(1).optional(),
+  etapa: z.string().trim().min(1),
+  mes: z.string().trim().min(1),
+  turma: z.string().trim().min(1),
+  aula: z.object({
+    data: z.string().trim().min(1),
+    ordem: z.number().int().nonnegative().nullish(),
+    codigoCR: z.string().optional(),
+    desenvolvimento: z.string().optional(),
+    ferramentas: z.string().optional(),
+    isRecuperacao: simNaoSchema.optional(),
+    isInteracao: simNaoSchema.optional(),
+  }),
+});
+
+/**
+ * O preenchimento assistido de uma aula do plano que o agente leu no _Analisar
+ * documentos_ — o mesmo trato do preenchimento assistido manual, uma aula por
+ * vez: abre a janela headed, escreve o conteúdo, e para aí. O auxiliar de
+ * ensino confere, salva, e só então a tela pede a próxima aula.
+ */
+cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (context) => {
+  const body = await context.req.json().catch(() => null);
+  const parsed = preenchimentoDeAulaDoEnvioSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return context.json({ error: 'Informe o professor, a turma, a etapa e a aula.' }, 400);
+  }
+
+  const { professorId, cadernetaId, etapa, mes, turma, aula } = parsed.data;
+  const { data, ordem, ...conteudo } = aula;
+
+  const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), professorId);
+
+  if (!credenciais) {
+    return context.json({ error: 'Professor não encontrado.' }, 404);
+  }
+
+  try {
+    await naSessaoHeaded(professorId, credenciais, (page) =>
+      prepararAulaParaPreenchimento(page, {
+        etapa,
+        mes,
+        turma,
+        data,
+        ...(ordem === null || ordem === undefined ? {} : { ordem }),
+        conteudo,
+      }),
+    );
+
+    if (cadernetaId) {
+      try {
+        marcarConteudoPreenchido(getDb(), cadernetaId, [{ etapa, data, ordem: ordem ?? null }]);
+      } catch (error) {
+        // O preenchimento assistido só escreve na tela; o auxiliar ainda vai
+        // salvar por conta própria. Um progresso desatualizado se resolve numa
+        // sincronização, e não vale interromper o fluxo por isso.
+        console.error('Falha ao atualizar o progresso da caderneta:', error);
+      }
+    }
+
+    return context.json({ etapa, mes, data, ordem: ordem ?? null });
+  } catch (error) {
+    if (error instanceof LoginError) {
+      return context.json({ error: error.message }, 401);
+    }
+
+    if (error instanceof MissingAulaRowsError) {
+      return context.json(
+        {
+          error:
+            `O portal não tem a aula de ${data} nesta turma. ` +
+            'Sincronize a caderneta e tente de novo.',
+        },
+        422,
+      );
+    }
+
+    console.error('Falha ao preparar o preenchimento da aula:', error);
+    return context.json(
+      { error: 'Não foi possível abrir a aula no portal. Tente novamente.' },
+      502,
+    );
+  }
+});
+
+const preenchimentoDeBoletimDoEnvioSchema = z.object({
+  professorId: z.string().trim().min(1),
+  cadernetaId: z.string().trim().min(1).optional(),
+  etapa: z.string().trim().min(1),
+  turma: z.string().trim().min(1),
+  disciplina: z.string().trim().min(1),
+  notas: z
+    .array(
+      z.object({
+        matricula: z.string().trim().min(1),
+        avaliacao: z.string().trim().min(1),
+        valor: z.number().min(0),
+      }),
+    )
+    .default([]),
+});
+
+/**
+ * O preenchimento assistido do boletim do plano que o agente leu no _Analisar
+ * documentos_ — todas as notas resolvidas vão de uma vez para a mesma tela,
+ * como o portal já mostra o boletim inteiro numa grade só. Salvar continua
+ * sendo do auxiliar de ensino.
+ */
+cadernetas.post('/sessoes/:id/envios/boletim/preenchimentos-assistidos', async (context) => {
+  const body = await context.req.json().catch(() => null);
+  const parsed = preenchimentoDeBoletimDoEnvioSchema.safeParse(body);
+
+  if (!parsed.success || parsed.data.notas.length === 0) {
+    return context.json({ error: 'Informe o professor, a turma, a etapa e ao menos uma nota.' }, 400);
+  }
+
+  const { professorId, cadernetaId, etapa, turma, disciplina, notas } = parsed.data;
+
+  const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), professorId);
+
+  if (!credenciais) {
+    return context.json({ error: 'Professor não encontrado.' }, 404);
+  }
+
+  try {
+    await naSessaoHeaded(professorId, credenciais, (page) =>
+      prepararNotasParaPreenchimento(page, { etapa, turma, disciplina, notas }),
+    );
+
+    if (cadernetaId) {
+      try {
+        marcarNotasLancadas(
+          getDb(),
+          cadernetaId,
+          notas.map((nota) => ({ etapa, disciplina, ...nota })),
+          [],
+        );
+      } catch (error) {
+        console.error('Falha ao atualizar o progresso do boletim:', error);
+      }
+    }
+
+    return context.json({ etapa, disciplina, notas });
+  } catch (error) {
+    if (error instanceof LoginError) {
+      return context.json({ error: error.message }, 401);
+    }
+
+    if (error instanceof MissingAulaRowsError) {
+      return context.json(
+        {
+          error:
+            'O portal não tem estas linhas no boletim desta turma: ' +
+            `${error.entries.join(', ')}. Sincronize a caderneta e tente de novo.`,
+        },
+        422,
+      );
+    }
+
+    console.error('Falha ao preparar o preenchimento das notas:', error);
+    return context.json(
+      { error: 'Não foi possível abrir o boletim no portal. Tente novamente.' },
+      502,
+    );
+  }
+});
+
+
+/**
+ * A caderneta que o plano descreve. Quando o envio saiu de dentro de uma
+ * caderneta, é aquela; quando saiu do _Upload Inteligente_, é a da turma que
+ * o agente identificou — e é por isso que a tela solta também consegue lançar
+ * notas sem que ninguém diga de qual turma se trata.
+ */
+function cadernetaDoPlano(
+  cadernetaId: string,
+  professorId: string,
+  turma: string,
+): Caderneta | undefined {
+  if (cadernetaId) {
+    try {
+      return getCaderneta(getDb(), cadernetaId);
+    } catch {
+      // Um id que não existe mais cai no caminho da turma, abaixo.
+    }
+  }
+
+  const row = getDb()
+    .prepare('SELECT id FROM cadernetas WHERE professor_id = ? AND turma = ?')
+    .get(professorId, turma) as unknown as { id: string } | undefined;
+
+  return row ? getCaderneta(getDb(), row.id) : undefined;
+}
+
+/** O envio de notas não pôde ser gravado, e o porquê. */
+class BoletimIndisponivelError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BoletimIndisponivelError';
+  }
+}
 
 /**
  * Passa a guardar a caderneta de cada turma pedida, e dispara um job de
@@ -458,6 +770,25 @@ cadernetas.get('/:id/etapas/:etapa/aulas', (context) => {
   return context.json({ etapa, aulas: listAulasDaEtapa(getDb(), id, etapa) });
 });
 
+/** O boletim de uma etapa: os estudantes, as avaliações e as notas. */
+cadernetas.get('/:id/etapas/:etapa/boletim', (context) => {
+  const id = context.req.param('id');
+  const etapa = decodeURIComponent(context.req.param('etapa'));
+
+  try {
+    getCaderneta(getDb(), id);
+  } catch (error) {
+    if (error instanceof CadernetaNotFoundError) {
+      return context.json({ error: error.message }, 404);
+    }
+    throw error;
+  }
+
+  const disciplina = context.req.query('disciplina')?.trim() || undefined;
+
+  return context.json(getBoletimDaEtapa(getDb(), id, etapa, disciplina));
+});
+
 /** Os estudantes da turma, que é o que a aba de turmas mostra. */
 cadernetas.get('/:id/estudantes', (context) => {
   const id = context.req.param('id');
@@ -595,6 +926,111 @@ cadernetas.post('/:id/aulas/preenchimentos-assistidos', async (context) => {
     console.error('Falha ao preparar o preenchimento da aula:', error);
     return context.json(
       { error: 'Não foi possível abrir a aula no portal. Tente novamente.' },
+      502,
+    );
+  }
+});
+
+/**
+ * Abre o boletim numa janela visível do portal, com as notas editadas já
+ * escritas nos campos, e para aí — o mesmo trato do preenchimento assistido de
+ * uma aula. Salvar continua sendo do auxiliar de ensino.
+ */
+cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
+  const body = await context.req.json().catch(() => null);
+  const parsed = preenchimentoDeNotasSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return context.json({ error: 'Informe a etapa e ao menos uma nota.' }, 400);
+  }
+
+  const { etapa, disciplina, notas, notasDoEstudante } = parsed.data;
+
+  let caderneta: Caderneta;
+  try {
+    caderneta = getCaderneta(getDb(), context.req.param('id'));
+  } catch (error) {
+    if (error instanceof CadernetaNotFoundError) {
+      return context.json({ error: error.message }, 404);
+    }
+    throw error;
+  }
+
+  const credenciais = await getProfessorCredenciais(
+    getDb(),
+    createEncryptionPort(),
+    caderneta.professorId,
+  );
+
+  if (!credenciais) {
+    return context.json({ error: 'Professor não encontrado.' }, 404);
+  }
+
+  try {
+    // Sem disciplina informada vale a primeira da caderneta: é o caso de quem
+    // tem uma só e não escolheu nada na tela.
+    const escolhida = disciplina ?? listDisciplinasDaCaderneta(getDb(), caderneta.id)[0];
+
+    if (!escolhida) {
+      return context.json(
+        {
+          error:
+            `A caderneta de ${caderneta.turma} não tem nenhuma disciplina com ` +
+            'avaliação cadastrada. Cadastre a avaliação no portal e sincronize.',
+        },
+        422,
+      );
+    }
+
+    await naSessaoHeaded(caderneta.professorId, credenciais, (page) =>
+      prepararNotasParaPreenchimento(page, {
+        etapa,
+        turma: caderneta.turma,
+        disciplina: escolhida,
+        notas,
+        notasDoEstudante: notasDoEstudante.map((nota) => ({
+          matricula: nota.matricula,
+          ...(nota.personalizada === null || nota.personalizada === undefined
+            ? {}
+            : { personalizada: nota.personalizada }),
+          ...(nota.final === null || nota.final === undefined
+            ? {}
+            : { final: nota.final }),
+        })),
+      }),
+    );
+
+    try {
+      marcarNotasLancadas(
+        getDb(),
+        caderneta.id,
+        notas.map((nota) => ({ etapa, disciplina: escolhida, ...nota })),
+        notasDoEstudante.map((nota) => ({ etapa, disciplina: escolhida, ...nota })),
+      );
+    } catch (error) {
+      console.error('Falha ao atualizar o progresso do boletim:', error);
+    }
+
+    return context.json({ etapa, disciplina: escolhida, notas, notasDoEstudante });
+  } catch (error) {
+    if (error instanceof LoginError) {
+      return context.json({ error: error.message }, 401);
+    }
+
+    if (error instanceof MissingAulaRowsError) {
+      return context.json(
+        {
+          error:
+            'O portal não tem estas linhas no boletim desta turma: ' +
+            `${error.entries.join(', ')}. Sincronize a caderneta e tente de novo.`,
+        },
+        422,
+      );
+    }
+
+    console.error('Falha ao preparar o preenchimento das notas:', error);
+    return context.json(
+      { error: 'Não foi possível abrir o boletim no portal. Tente novamente.' },
       502,
     );
   }

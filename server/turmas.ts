@@ -68,8 +68,12 @@ turmas.post('/validacoes', async (context) => {
 
 /**
  * Passo 2 do cadastro: as turmas em que o professor trabalha, lidas do portal
- * e guardadas. O nome e o turno saem do próprio nome que o portal escreve —
- * nada disso é digitado.
+ * e guardadas, com os estudantes de cada uma. O nome e o turno saem do próprio
+ * nome que o portal escreve — nada disso é digitado.
+ *
+ * Serve tanto para um professor recém-cadastrado quanto para um que já existe:
+ * rodar de novo relê tudo do portal, que é como um professor antigo ganha os
+ * estudantes que o cadastro dele não tinha lido.
  *
  * Abre e fecha a própria sessão: o cadastro acabou de gravar o professor, e a
  * senha nunca precisa sair do servidor para isso.
@@ -107,7 +111,19 @@ turmas.post('/buscas', async (context) => {
 
     const encontradas = replaceTurmas(getDb(), professorId, turmasDoCatalogo(catalogo));
 
-    return context.json({ turmas: encontradas });
+    // Os estudantes vêm na mesma sessão: ela já está aberta, e uma turma sem
+    // eles não serve para as fichas nem para o boletim. A falha de uma turma
+    // não derruba as outras — turma sem estudante ainda é turma conhecida.
+    for (const turma of encontradas) {
+      try {
+        const estudantes = await buscarEstudantes(session.page, turma.nome);
+        replaceEstudantes(getDb(), turma.id, estudantes);
+      } catch (error) {
+        console.error(`Falha ao ler os estudantes de ${turma.nome}:`, error);
+      }
+    }
+
+    return context.json({ turmas: listTurmas(getDb(), professorId) });
   } catch (error) {
     if (error instanceof LoginError) {
       return context.json({ error: error.message }, 401);
@@ -146,12 +162,7 @@ turmas.get('/:id/estudantes', (context) => {
   return context.json({ estudantes: listEstudantes(getDb(), id) });
 });
 
-/**
- * Passo 3 do cadastro: os estudantes de uma turma, lidos do portal.
- *
- * TODO: `buscarEstudantes` ainda devolve lista vazia — o esqueleto está de pé,
- * a leitura da tela de presença é que falta. Ver `server/turmas/busca.ts`.
- */
+/** Passo 3 do cadastro: os estudantes de uma turma, lidos do portal. */
 turmas.post('/:id/estudantes/buscas', async (context) => {
   const id = context.req.param('id');
   const body = await context.req.json().catch(() => null);
@@ -177,13 +188,7 @@ turmas.post('/:id/estudantes/buscas', async (context) => {
 
   try {
     const turma = getTurma(getDb(), id);
-    const catalogo = await getCatalogo(session.id);
-
-    if (!catalogo) {
-      return context.json({ error: 'Sessão não encontrada ou expirada.' }, 404);
-    }
-
-    const encontrados = await buscarEstudantes(session.page, turma.nome, catalogo);
+    const encontrados = await buscarEstudantes(session.page, turma.nome);
 
     return context.json({ estudantes: replaceEstudantes(getDb(), id, encontrados) });
   } catch (error) {

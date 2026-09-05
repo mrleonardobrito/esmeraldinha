@@ -10,11 +10,15 @@ import { pathToFileURL } from 'node:url';
  * `createRequire(undefined)` throws. That bundle does get a real `__dirname`.
  * Under `tsx` the module stays ESM, where `__dirname` is absent but
  * `import.meta.url` is real.
+ *
+ * Both identifiers are read bare rather than off `globalThis`: each is a
+ * module-scoped binding, absent from `globalThis` in either format, so only
+ * the bare form sees the value the bundler substitutes.
  */
 function requireBase(): string {
-  const dir = (globalThis as { __dirname?: string }).__dirname;
-  if (typeof dir === 'string') return pathToFileURL(`${dir}/`).href;
-  return import.meta.url;
+  return typeof __dirname === 'string'
+    ? pathToFileURL(`${__dirname}/`).href
+    : import.meta.url;
 }
 
 /**

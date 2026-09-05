@@ -49,6 +49,9 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-caderneta-parte: var(--caderneta-parte);
+  --color-caderneta-parte-vazia: var(--caderneta-parte-vazia);
+  --color-caderneta-parte-futura: var(--caderneta-parte-futura);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -75,6 +78,14 @@
   --popover-foreground: oklch(0.148 0.004 228.8);
   --primary: oklch(0.508 0.118 165.612);
   --primary-foreground: oklch(0.979 0.021 166.113);
+  /*
+   * Os ícones das partes da caderneta não usam --primary direto: no claro ele
+   * precisa de mais croma para destacar num ícone fino, e no escuro precisa
+   * clarear em vez de escurecer. Ver a definição no bloco .dark.
+   */
+  --caderneta-parte: oklch(0.52 0.15 165.6);
+  --caderneta-parte-vazia: oklch(0.72 0.07 165.6);
+  --caderneta-parte-futura: oklch(0.7 0.008 286.3);
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.963 0.002 197.1);
@@ -110,6 +121,14 @@
   --popover-foreground: oklch(0.987 0.002 197.1);
   --primary: oklch(0.432 0.095 166.913);
   --primary-foreground: oklch(0.979 0.021 166.113);
+  /*
+   * No escuro o verde sobe de luminosidade em vez de descer: --primary (L .43)
+   * é escuro demais para um traço fino sobre fundo quase preto e lê como
+   * cinza. Estes valores mantêm a matiz da marca e ganham contraste.
+   */
+  --caderneta-parte: oklch(0.8 0.155 164.9);
+  --caderneta-parte-vazia: oklch(0.58 0.075 165.6);
+  --caderneta-parte-futura: oklch(0.5 0.01 286.3);
   --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.275 0.011 216.9);
@@ -144,5 +163,44 @@
   }
   html {
     @apply font-sans;
+  }
+}
+/* Utilitários usados por `ui/attachment.tsx`. */
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Esmaece as bordas laterais da tira de anexos, sinalizando que ela rola. */
+@utility scroll-fade-x {
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 0.5rem,
+    black calc(100% - 0.5rem),
+    transparent 100%
+  );
+}
+
+/* Pulsa o nome do anexo enquanto ele está sendo lido. */
+@utility shimmer {
+  background: linear-gradient(
+      90deg,
+      var(--muted-foreground) 0%,
+      var(--foreground) 50%,
+      var(--muted-foreground) 100%
+    )
+    0 0 / 200% 100%;
+  color: transparent;
+  background-clip: text;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
   }
 }

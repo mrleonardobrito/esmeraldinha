@@ -9,35 +9,42 @@ import { EnvioDeMaterial } from "@/components/envio-de-material";
 
 export interface AnalisarDocumentosProps {
   sessionId: string;
+  professorId: string;
   onClose: () => void;
   /** Chamado quando um envio grava algo, para a grade recarregar. */
   onGravou: () => void;
+  /** A sessão sumiu do servidor; quem abriu este modal é dono dela. */
+  onSessaoExpirada: () => void;
 }
 
-/**
- * O envio de material sem uma caderneta em volta: o auxiliar de ensino cola o
- * que o professor mandou e a Esmeraldinha descobre sozinha a turma, a etapa e
- * o mês. Fica num modal porque é uma tarefa que se abre e se fecha, não algo
- * que precise ocupar a tela enquanto se olha a grade.
- */
 export function AnalisarDocumentos({
   sessionId,
+  professorId,
   onClose,
   onGravou,
+  onSessaoExpirada,
 }: AnalisarDocumentosProps) {
   return (
     <Dialog open onOpenChange={(aberto) => !aberto && onClose()}>
       <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="font-heading">Analisar documentos</DialogTitle>
+          <DialogTitle className="font-heading">Upload Inteligente</DialogTitle>
           <DialogDescription>
-            Cole o texto ou solte as fotos e PDFs que o professor mandou. A
-            Esmeraldinha descobre a turma, a etapa e o mês e grava no portal.
+            Cole o texto ou solte as fotos, PDFs, Word ou Excel que o
+            professor mandou — conteúdo das aulas ou notas dos estudantes. O
+            sistema descobre a turma, a etapa e a que parte da caderneta o
+            material pertence.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex min-h-0 flex-col overflow-y-auto">
-          <EnvioDeMaterial sessionId={sessionId} semCard onGravou={onGravou} />
+          <EnvioDeMaterial
+            sessionId={sessionId}
+            professorId={professorId}
+            semCard
+            onGravou={onGravou}
+            onSessaoExpirada={onSessaoExpirada}
+          />
         </div>
       </DialogContent>
     </Dialog>

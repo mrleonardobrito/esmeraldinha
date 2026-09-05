@@ -3,12 +3,19 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
-import { listConteudoOptions, login } from './scrape/portal';
+import { comAvaliacoes, listConteudoOptions, login } from './scrape/portal';
 import type { ConteudoCatalogo, ProfessorCredenciais } from './scrape/types';
 import { env } from './env';
 import { createEncryptionPort } from './encryption';
 import { getDb } from './professores/db';
 import { getProfessorCredenciais } from './professores/store';
+import {
+  fecharConexaoRedis,
+  invalidarSessao,
+  lerSessao,
+  renovarSessao,
+  salvarSessao,
+} from './sessoes-redis';
 
 export interface PortalSession {
   readonly id: string;
@@ -25,6 +32,8 @@ interface TrackedSession extends PortalSession {
   timer: NodeJS.Timeout;
   /** Raspar o catálogo custa uma volta por etapa, e ele não muda na sessão. */
   catalogo?: Promise<ConteudoCatalogo>;
+  /** O mesmo catálogo, mais as disciplinas e avaliações. Só o boletim o pede. */
+  catalogoComAvaliacoes?: Promise<ConteudoCatalogo>;
 }
 
 const sessions = new Map<string, TrackedSession>();
@@ -49,10 +58,30 @@ async function getBrowser(): Promise<Browser> {
 function scheduleExpiration(session: TrackedSession): void {
   clearTimeout(session.timer);
   session.timer = setTimeout(() => {
-    void closeSession(session.id);
+    void expireSession(session.id);
   }, env.sessionIdleMs);
   // Uma sessão ociosa não deve segurar o processo aberto.
   session.timer.unref();
+
+  // O TTL no Redis acompanha o timer em memória: os dois devem expirar juntos.
+  void renovarSessao(session.id);
+}
+
+/**
+ * Larga o navegador da sessão ociosa, mas guarda de quem ela era: expirar é o
+ * portal cansando de esperar, não o auxiliar de ensino dizendo que terminou.
+ * É o que `retomarSessao` desfaz.
+ */
+export async function expireSession(id: string): Promise<boolean> {
+  const session = sessions.get(id);
+  if (!session) return false;
+
+  sessions.delete(id);
+  clearTimeout(session.timer);
+  await session.context.close().catch(() => {});
+  await invalidarSessao(id);
+
+  return true;
 }
 
 /** Salva screenshot e HTML da página; devolve o caminho base, sem extensão. */
@@ -77,6 +106,15 @@ export async function openSession(
 ): Promise<PortalSession> {
   const browser = await getBrowser();
   const context = await browser.newContext();
+  // `tsx` compila o servidor com o `keepNames` do esbuild ligado, que injeta
+  // um `__name(fn, "fn")` ao redor de função nomeada. Como `page.evaluate` e
+  // companhia serializam só o texto da função para rodar dentro da página,
+  // esse `__name` não viaja junto — e a chamada quebra com
+  // `ReferenceError: __name is not defined`. Suprir um `__name` inofensivo
+  // no escopo da página neutraliza o vazamento sem mexer em cada callback.
+  await context.addInitScript(() => {
+    (window as unknown as { __name?: <T>(fn: T) => T }).__name = (fn) => fn;
+  });
   const page = await context.newPage();
 
   try {
@@ -108,6 +146,14 @@ export async function openSession(
   sessions.set(session.id, session);
   if (session.professorId) donos.set(session.id, session.professorId);
   scheduleExpiration(session);
+
+  await salvarSessao({
+    id: session.id,
+    professorId: session.professorId,
+    login: session.login,
+    escola: session.escola,
+    createdAt: session.createdAt,
+  });
 
   return session;
 }
@@ -147,6 +193,49 @@ export async function getCatalogo(id: string): Promise<ConteudoCatalogo | undefi
 }
 
 /**
+ * O catálogo com as disciplinas e as avaliações de cada etapa. Fica à parte de
+ * `getCatalogo` porque custa uma volta ao portal por etapa e por disciplina:
+ * quem só vai lançar conteúdo não paga por isso.
+ */
+export async function getCatalogoComAvaliacoes(
+  id: string,
+): Promise<ConteudoCatalogo | undefined> {
+  const base = await getCatalogo(id);
+  if (!base) return undefined;
+
+  const session = sessions.get(id);
+  if (!session) return undefined;
+
+  session.catalogoComAvaliacoes ??= comAvaliacoes(session.page, base).catch(
+    (error: unknown) => {
+      session.catalogoComAvaliacoes = undefined;
+      throw error;
+    },
+  );
+
+  return session.catalogoComAvaliacoes;
+}
+
+/**
+ * De quem é a sessão `id`. O `Map` em memória responde primeiro; quando ele
+ * não sabe — o processo reiniciou e perdeu tudo que não estava no disco —,
+ * o Redis é a segunda fonte, desde que o registro ainda não tenha vencido o
+ * TTL. Sem essa segunda fonte, um restart em desenvolvimento (o `tsx watch`
+ * reinicia a cada arquivo salvo) faz `retomarSessao` desistir na hora, mesmo
+ * a sessão estando viva na visão de quem a abriu.
+ */
+async function donoDaSessao(id: string): Promise<string | undefined> {
+  const emMemoria = donos.get(id);
+  if (emMemoria) return emMemoria;
+
+  const metadados = await lerSessao(id);
+  if (!metadados) return undefined;
+
+  donos.set(id, metadados.professorId);
+  return metadados.professorId;
+}
+
+/**
  * A sessão de `id`, viva. Quando ela já expirou por ociosidade, um novo login
  * é feito com as credenciais do professor que a abriu e a sessão volta com o
  * mesmo id — a tela que a pediu não precisa saber que ela caiu.
@@ -160,7 +249,7 @@ export async function retomarSessao(id: string): Promise<PortalSession | undefin
   const viva = touchSession(id);
   if (viva) return viva;
 
-  const professorId = donos.get(id);
+  const professorId = await donoDaSessao(id);
   if (!professorId) return undefined;
 
   const emVoo = retomando.get(id);
@@ -190,17 +279,10 @@ export async function retomarSessao(id: string): Promise<PortalSession | undefin
 }
 
 export async function closeSession(id: string): Promise<boolean> {
-  const session = sessions.get(id);
   // Encerrar de propósito é diferente de expirar: esta sessão não volta.
   donos.delete(id);
 
-  if (!session) return false;
-
-  sessions.delete(id);
-  clearTimeout(session.timer);
-  await session.context.close().catch(() => {});
-
-  return true;
+  return expireSession(id);
 }
 
 export async function closeAllSessions(): Promise<void> {
@@ -212,6 +294,8 @@ export async function closeAllSessions(): Promise<void> {
     browserPromise = null;
     await browser?.close().catch(() => {});
   }
+
+  await fecharConexaoRedis();
 }
 
 export const sessionIdleMs = env.sessionIdleMs;

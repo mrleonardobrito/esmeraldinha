@@ -21,7 +21,7 @@ export interface EstudanteDaTurma {
   matricula: string;
   nome: string;
   situacao: string | null;
-  /** Nulo enquanto a busca de estudantes não estiver implementada. */
+  /** Como o portal a escreve, em DD/MM/AAAA; nula quando ele a omite. */
   dataMatricula: string | null;
 }
 
@@ -69,12 +69,7 @@ export async function loadEstudantes(turmaId: string): Promise<EstudanteDaTurma[
   return body.estudantes;
 }
 
-/**
- * Lê no portal os estudantes de uma turma.
- *
- * TODO: o servidor ainda devolve lista vazia — falta ler a tela de presença.
- * Ver `server/turmas/busca.ts`.
- */
+/** Relê no portal os estudantes de uma turma, da tela de Ficha Desempenho. */
 export async function buscarEstudantes(
   turmaId: string,
   sessionId: string,

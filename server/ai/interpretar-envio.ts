@@ -309,9 +309,38 @@ export async function buildContentParts({
   return parts;
 }
 
-/** Confere o plano contra o catálogo: é o que impede uma turma inventada. */
+/** Normaliza para comparar: ignora caixa, acentos e espaços nas bordas. */
+function normalizar(valor: string): string {
+  return valor
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function encontraPorNome<T extends { nome: string }>(
+  candidatos: readonly T[],
+  nome: string,
+): T | undefined {
+  return candidatos.find((candidato) => normalizar(candidato.nome) === normalizar(nome));
+}
+
+function encontraIgualIgnorandoCaixaEAcento(
+  lista: readonly string[],
+  valor: string,
+): string | undefined {
+  const alvo = normalizar(valor);
+  return lista.find((item) => normalizar(item) === alvo);
+}
+
+/**
+ * Confere o plano contra o catálogo (impede uma turma inventada) e reescreve
+ * os campos de nome com a grafia canônica do catálogo — o agente pode devolver
+ * "FEVEREIRO" onde o portal espera "Fevereiro", e a raspagem casa por igualdade
+ * exata com as opções do PrimeFaces.
+ */
 function assertNoCatalogo(plan: z.infer<typeof planSchema>, catalogo: ConteudoCatalogo): void {
-  const etapa = catalogo.etapas.find((candidate) => candidate.nome === plan.etapa);
+  const etapa = encontraPorNome(catalogo.etapas, plan.etapa);
 
   if (!etapa) {
     throw new EnvioInvalidoError(
@@ -319,20 +348,25 @@ function assertNoCatalogo(plan: z.infer<typeof planSchema>, catalogo: ConteudoCa
         `Etapas disponíveis: ${catalogo.etapas.map((e) => e.nome).join(', ')}.`,
     );
   }
+  plan.etapa = etapa.nome;
 
-  if (!etapa.turmas.includes(plan.turma)) {
+  const turma = encontraIgualIgnorandoCaixaEAcento(etapa.turmas, plan.turma);
+  if (!turma) {
     throw new EnvioInvalidoError(
       `A turma "${plan.turma}" não existe na etapa "${etapa.nome}". ` +
         `Turmas disponíveis: ${etapa.turmas.join(', ')}.`,
     );
   }
+  plan.turma = turma;
 
-  if (!etapa.meses.includes(plan.mes)) {
+  const mes = encontraIgualIgnorandoCaixaEAcento(etapa.meses, plan.mes);
+  if (!mes) {
     throw new EnvioInvalidoError(
       `O mês "${plan.mes}" não existe na etapa "${etapa.nome}". ` +
         `Meses disponíveis: ${etapa.meses.join(', ')}.`,
     );
   }
+  plan.mes = mes;
 
   if (plan.parte !== 'boletim') return;
 
@@ -347,7 +381,7 @@ function assertNoCatalogo(plan: z.infer<typeof planSchema>, catalogo: ConteudoCa
   // Sem disciplina escolhida vale a única que existe; com várias, o agente
   // precisa ter dito qual — a nota iria para o boletim errado.
   const disciplina = plan.disciplina
-    ? disciplinas.find((candidata) => candidata.nome === plan.disciplina)
+    ? encontraPorNome(disciplinas, plan.disciplina)
     : disciplinas.length === 1
       ? disciplinas[0]
       : undefined;
@@ -361,9 +395,10 @@ function assertNoCatalogo(plan: z.infer<typeof planSchema>, catalogo: ConteudoCa
           `diz de qual é. Disciplinas: ${disciplinas.map((d) => d.nome).join(', ')}.`,
     );
   }
+  plan.disciplina = disciplina.nome;
 
   const avaliacoes = disciplina.avaliacoes;
-  const avaliacao = avaliacoes.find((candidata) => candidata.nome === plan.avaliacao);
+  const avaliacao = encontraPorNome(avaliacoes, plan.avaliacao);
 
   if (!avaliacao) {
     throw new EnvioInvalidoError(
@@ -372,6 +407,7 @@ function assertNoCatalogo(plan: z.infer<typeof planSchema>, catalogo: ConteudoCa
         `Avaliações disponíveis: ${avaliacoes.map((a) => a.nome).join(', ')}.`,
     );
   }
+  plan.avaliacao = avaliacao.nome;
 
   // Uma nota fora do valor da avaliação é erro de leitura do material, e o
   // portal a recusaria de qualquer jeito.

@@ -29,6 +29,7 @@ vi.mock('playwright', () => ({
         const pagina = novaPagina();
         return {
           newPage: vi.fn(async () => pagina),
+          addInitScript: vi.fn(async () => {}),
           close: vi.fn(async () => {
             pagina.fechada = true;
           }),
@@ -43,6 +44,20 @@ vi.mock('../scrape/portal', () => ({
   login: vi.fn(async () => {}),
   listConteudoOptions: vi.fn(async () => ({ etapas: [] })),
   PORTAL_URL: 'https://portal.example/teste',
+}));
+
+// O Redis é um cache auxiliar fora do processo; estes testes cobrem o ciclo
+// de vida da sessão em memória, não o espelhamento nele — isso fica a cargo
+// de sessoes-redis.test.ts. Sem o mock, cada chamada tentaria conectar de
+// verdade e só desistiria depois do retry configurado.
+vi.mock('../sessoes-redis', () => ({
+  salvarSessao: vi.fn(async () => {}),
+  renovarSessao: vi.fn(async () => {}),
+  invalidarSessao: vi.fn(async () => {}),
+  fecharConexaoRedis: vi.fn(async () => {}),
+  // `undefined` por padrão: os testes existentes cobrem o dono vindo do Map
+  // em memória. O fallback ao Redis depois de um restart tem teste próprio.
+  lerSessao: vi.fn(async () => undefined),
 }));
 
 const originalDbPath = process.env.ESMERALDINHA_DB_PATH;
@@ -195,6 +210,43 @@ describe('retomarSessao', () => {
     await expect(retomarSessao(aberta.id)).rejects.toBeInstanceOf(LoginError);
   });
 
+  it('retoma a sessão usando o Redis quando o processo reinicia', async () => {
+    await comProfessor();
+    const { openSession } = await import('../portal-sessions');
+    const { salvarSessao, lerSessao } = await import('../sessoes-redis');
+
+    const aberta = await openSession(
+      { login: '11111111111', senha: 'segredo', escola: 'Escola' },
+      { professorId },
+    );
+
+    // O que `salvarSessao` teria persistido de verdade — o mock só grava a
+    // chamada, então aqui ele é ligado para devolver o que o real devolveria.
+    expect(vi.mocked(salvarSessao)).toHaveBeenCalledWith(
+      expect.objectContaining({ id: aberta.id, professorId }),
+    );
+    const metadados = vi.mocked(salvarSessao).mock.calls[0][0];
+
+    // Um restart de verdade: `donos` e `sessions` são estado do módulo, e um
+    // novo processo (ou o `tsx watch` recarregando) começa com os dois vazios
+    // — só o Redis atravessa. `vi.resetModules` simula isso sem reiniciar o
+    // processo de teste.
+    vi.resetModules();
+    vi.mocked(lerSessao).mockResolvedValueOnce(metadados);
+
+    const { retomarSessao } = await import('../portal-sessions');
+    const { login } = await import('../scrape/portal');
+    const chamadasAntes = vi.mocked(login).mock.calls.length;
+
+    const retomada = await retomarSessao(aberta.id);
+
+    // Mesmo id, mas com um login novo — a página de antes do restart não
+    // sobrevive a ele, então retomar sem logar de novo devolveria uma sessão
+    // sem página nenhuma.
+    expect(retomada?.id).toBe(aberta.id);
+    expect(vi.mocked(login).mock.calls.length - chamadasAntes).toBe(1);
+  });
+
   it('raspa o catálogo de novo na página da sessão retomada', async () => {
     await comProfessor();
     const { openSession, getCatalogo } = await import('../portal-sessions');
@@ -216,6 +268,6 @@ describe('retomarSessao', () => {
 
 /** O que o timer de ociosidade faz, sem esperar os quinze minutos. */
 async function expirar(id: string): Promise<void> {
-  const { expirarSessaoParaTeste } = await import('../portal-sessions');
-  expirarSessaoParaTeste(id);
+  const { expireSession } = await import('../portal-sessions');
+  await expireSession(id);
 }

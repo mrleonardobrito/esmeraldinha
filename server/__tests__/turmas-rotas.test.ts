@@ -10,6 +10,7 @@ vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
   retomarSessao: vi.fn(),
   getCatalogo: vi.fn(),
+  getCatalogoComAvaliacoes: vi.fn(),
   openSession: vi.fn(),
   closeSession: vi.fn(),
 }));
@@ -85,6 +86,11 @@ async function stubSession() {
   vi.mocked(openSession).mockResolvedValue(session);
   vi.mocked(closeSession).mockResolvedValue(true);
   vi.mocked(getCatalogo).mockResolvedValue(catalogo);
+
+  // O passo 2 lê os estudantes de cada turma na mesma sessão; sem estudantes
+  // é o caso mais simples, e cada teste que se importa sobrescreve.
+  const { listEstudantes } = await import('../scrape/portal');
+  vi.mocked(listEstudantes).mockResolvedValue([]);
 }
 
 function request(path: string, init?: RequestInit) {
@@ -203,8 +209,18 @@ describe('rotas de turmas', () => {
   });
 
   describe('passo 3: buscar estudantes', () => {
-    it('devolve lista vazia enquanto a leitura do portal não existe', async () => {
+    it('guarda os estudantes que o portal devolveu', async () => {
       const app = await freshApp();
+      const { listEstudantes } = await import('../scrape/portal');
+      vi.mocked(listEstudantes).mockResolvedValue([
+        {
+          matricula: '12658',
+          nome: 'Benjamin de Oliveira Silva',
+          situacao: 'TRANSFERIDO',
+          dataMatricula: '05/01/2026',
+        },
+      ]);
+
       const turmas = (await (
         await app.fetch(request('/buscas', json({ professorId })))
       ).json()) as { turmas: { id: string }[] };
@@ -214,7 +230,43 @@ describe('rotas de turmas', () => {
       );
 
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ estudantes: [] });
+      expect(await response.json()).toEqual({
+        estudantes: [
+          {
+            matricula: '12658',
+            nome: 'Benjamin de Oliveira Silva',
+            situacao: 'TRANSFERIDO',
+            dataMatricula: '05/01/2026',
+          },
+        ],
+      });
+    });
+
+    it('guarda a ausência de situação e data como nula', async () => {
+      const app = await freshApp();
+      const { listEstudantes } = await import('../scrape/portal');
+      vi.mocked(listEstudantes).mockResolvedValue([
+        { matricula: '12672', nome: 'Adylla Luiza Ferreira' },
+      ]);
+
+      const turmas = (await (
+        await app.fetch(request('/buscas', json({ professorId })))
+      ).json()) as { turmas: { id: string }[] };
+
+      const response = await app.fetch(
+        request(`/${turmas.turmas[0].id}/estudantes/buscas`, json({ sessionId })),
+      );
+
+      expect(await response.json()).toEqual({
+        estudantes: [
+          {
+            matricula: '12672',
+            nome: 'Adylla Luiza Ferreira',
+            situacao: null,
+            dataMatricula: null,
+          },
+        ],
+      });
     });
 
     it('responde 404 quando a turma não existe', async () => {

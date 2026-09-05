@@ -37,12 +37,6 @@ export interface EditarAulaProps {
   onClose: () => void;
 }
 
-/**
- * O conteúdo de uma aula, editável. O botão _Preencher no sistema_ leva o que
- * está aqui para uma janela do portal já na linha certa — e para aí. Salvar
- * continua sendo do auxiliar de ensino: a Esmeraldinha só facilita o
- * preenchimento.
- */
 export function EditarAula({ caderneta, aula, onClose }: EditarAulaProps) {
   const [conteudo, setConteudo] = React.useState<ConteudoEditado>({
     codigoCR: aula.codigoCR ?? "",
@@ -165,7 +159,7 @@ export function EditarAula({ caderneta, aula, onClose }: EditarAulaProps) {
           <p className="rounded-xl bg-primary/10 px-3 py-2 text-sm">
             O portal está aberto na aula de{" "}
             <span className="tabular-nums">{aula.data}</span> com este conteúdo
-            preenchido. Confira e salve por lá — a Esmeraldinha não salva por você.
+            preenchido. Confira e salve por lá — o sistema não salva por você.
           </p>
         )}
 
