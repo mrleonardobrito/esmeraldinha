@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { chatCompletion, type ContentPart } from './openrouter';
 import { EnvioInvalidoError, ParteNaoSuportadaError } from './errors';
+import { ehArquivoDePlanilha, ehArquivoWord, extrairTexto } from './extrair-texto';
 import type { Aula, ConteudoCatalogo } from '../scrape/types';
 
 /** As cinco partes da caderneta, como definidas no CONTEXT.md. */
@@ -43,7 +44,25 @@ const planSchema = z.object({
       isInteracao: simNao,
     }),
   ),
+  /** A disciplina do boletim; vazia quando a turma só tem uma. */
+  disciplina: z.string().trim().default(''),
+  /** A avaliação a que as notas se referem; vazia fora da parte boletim. */
+  avaliacao: z.string().trim().default(''),
+  notas: z
+    .array(
+      z.object({
+        estudante: z.string().trim(),
+        valor: z.number(),
+      }),
+    )
+    .default([]),
 });
+
+/** Uma nota como o agente a leu: o estudante pelo nome, ainda sem matrícula. */
+export interface NotaLida {
+  readonly estudante: string;
+  readonly valor: number;
+}
 
 export interface EnvioPlan {
   readonly parte: ParteDaCaderneta;
@@ -53,6 +72,11 @@ export interface EnvioPlan {
   readonly mes: string;
   readonly observacao: string;
   readonly aulas: readonly Aula[];
+  /** A disciplina do boletim; vazia quando a turma só tem uma. */
+  readonly disciplina: string;
+  /** A avaliação a que as notas se referem; vazia fora da parte boletim. */
+  readonly avaliacao: string;
+  readonly notas: readonly NotaLida[];
 }
 
 export interface ArquivoEnviado {
@@ -73,7 +97,18 @@ export interface InterpretarEnvioInput {
 const RESPONSE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['parte', 'identificado', 'etapa', 'turma', 'mes', 'observacao', 'aulas'],
+  required: [
+    'parte',
+    'identificado',
+    'etapa',
+    'turma',
+    'mes',
+    'observacao',
+    'aulas',
+    'disciplina',
+    'avaliacao',
+    'notas',
+  ],
   properties: {
     parte: { type: 'string', enum: [...PARTES] },
     identificado: {
@@ -120,6 +155,40 @@ const RESPONSE_SCHEMA = {
         },
       },
     },
+    disciplina: {
+      type: 'string',
+      description:
+        'Só para a parte "boletim": a disciplina do boletim, copiada ' +
+        'exatamente da lista da etapa. String vazia quando a etapa só tem ' +
+        'uma disciplina ou nas outras partes.',
+    },
+    avaliacao: {
+      type: 'string',
+      description:
+        'Só para a parte "boletim": o nome da avaliação a que as notas se ' +
+        'referem, copiado exatamente da lista de avaliações da etapa. ' +
+        'String vazia nas outras partes.',
+    },
+    notas: {
+      type: 'array',
+      description:
+        'Só para a parte "boletim": uma entrada por estudante com nota no ' +
+        'material. Lista vazia nas outras partes.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['estudante', 'valor'],
+        properties: {
+          estudante: {
+            type: 'string',
+            description:
+              'O nome do estudante como o material o escreve. Não invente ' +
+              'nem corrija para um nome que você acha parecido.',
+          },
+          valor: { type: 'number', description: 'A nota, com ponto decimal.' },
+        },
+      },
+    },
   },
 } as const;
 
@@ -129,7 +198,18 @@ function buildSystemPrompt(catalogo: ConteudoCatalogo): string {
       (etapa) =>
         `- Etapa "${etapa.nome}"\n` +
         `  turmas: ${etapa.turmas.join(' | ') || '(nenhuma)'}\n` +
-        `  meses: ${etapa.meses.join(' | ') || '(nenhum)'}`,
+        `  meses: ${etapa.meses.join(' | ') || '(nenhum)'}\n` +
+        `  disciplinas e avaliações:\n` +
+        ((etapa.disciplinas ?? []).length === 0
+          ? '    (nenhuma avaliação cadastrada)'
+          : (etapa.disciplinas ?? [])
+              .map(
+                (disciplina) =>
+                  `    ${disciplina.nome}: ${
+                    disciplina.avaliacoes.map((a) => a.nome).join(' | ') || '(nenhuma)'
+                  }`,
+              )
+              .join('\n')),
     )
     .join('\n');
 
@@ -148,6 +228,16 @@ function buildSystemPrompt(catalogo: ConteudoCatalogo): string {
     'abaixo, que são as únicas que existem para este professor. A turma e o mês',
     'precisam pertencer à etapa escolhida. Nunca invente um valor.',
     '',
+    'O mês é sempre só o nome do mês (ex.: "MARÇO"), nunca o ano — mesmo que a',
+    'data no material inclua o ano (ex.: 10/02/2026 é o mês "FEVEREIRO"; o ano',
+    'não entra nessa comparação e não é motivo para não identificar a turma).',
+    '',
+    'O nome da turma no material costuma vir abreviado (ex.: "3º ano A"),',
+    'enquanto a lista abaixo traz o nome completo do portal (ex.:',
+    '"3º ANO - 3º ANO A - MATUTINO"). Case pela série e letra da turma, não',
+    'pela igualdade literal do texto — copie o nome completo da lista, nunca o',
+    'nome abreviado do material.',
+    '',
     'Se o material não for de nenhuma dessas turmas — por exemplo, ele fala de',
     'um "5º ano" e este professor só tem turmas de pré-escola —, devolva',
     'identificado: false, deixe etapa, turma e mês vazios e diga em observacao',
@@ -162,6 +252,16 @@ function buildSystemPrompt(catalogo: ConteudoCatalogo): string {
     'disser, e use "Não" para recuperação e interação quando não houver menção.',
     'Para as outras partes, devolva a lista de aulas vazia.',
     '',
+    'Para a parte "boletim", devolva uma entrada em notas por estudante com',
+    'nota no material, e em avaliacao o nome da avaliação a que elas se',
+    'referem — copiado exatamente da lista de avaliações da etapa escolhida.',
+    'Escreva o nome do estudante como o material o escreve: quem casa o nome',
+    'com a matrícula é o sistema, não você. Se o material não disser a qual',
+    'avaliação as notas pertencem e a etapa tiver mais de uma, devolva',
+    'identificado: false e diga isso em observacao — lançar a nota na',
+    'avaliação errada é tão ruim quanto lançá-la no estudante errado.',
+    'Para as outras partes, devolva avaliacao vazia e a lista de notas vazia.',
+    '',
     'Se algo ficou ambíguo, diga em observacao. Responda só o JSON do schema.',
   ].join('\n');
 }
@@ -170,13 +270,13 @@ function toDataUrl(arquivo: ArquivoEnviado): string {
   return `data:${arquivo.mimeType};base64,${Buffer.from(arquivo.data).toString('base64')}`;
 }
 
-export function buildContentParts({
+export async function buildContentParts({
   texto,
   arquivos = [],
 }: {
   texto?: string;
   arquivos?: readonly ArquivoEnviado[];
-}): ContentPart[] {
+}): Promise<ContentPart[]> {
   const parts: ContentPart[] = [];
 
   if (texto?.trim()) {
@@ -197,11 +297,13 @@ export function buildContentParts({
       continue;
     }
 
-    // Qualquer outra coisa é tratada como texto: .txt, .md, o que o professor colar.
-    parts.push({
-      type: 'text',
-      text: `Arquivo ${arquivo.filename}:\n${Buffer.from(arquivo.data).toString('utf8')}`,
-    });
+    // Word e Excel viram texto; o resto (.txt, .md, o que o professor colar)
+    // já é texto puro e só precisa ser decodificado.
+    const conteudo = ehArquivoWord(arquivo) || ehArquivoDePlanilha(arquivo)
+      ? await extrairTexto(arquivo)
+      : Buffer.from(arquivo.data).toString('utf8');
+
+    parts.push({ type: 'text', text: `Arquivo ${arquivo.filename}:\n${conteudo}` });
   }
 
   return parts;
@@ -231,6 +333,62 @@ function assertNoCatalogo(plan: z.infer<typeof planSchema>, catalogo: ConteudoCa
         `Meses disponíveis: ${etapa.meses.join(', ')}.`,
     );
   }
+
+  if (plan.parte !== 'boletim') return;
+
+  const disciplinas = etapa.disciplinas ?? [];
+  if (disciplinas.length === 0) {
+    throw new EnvioInvalidoError(
+      `A etapa "${etapa.nome}" não tem nenhuma avaliação cadastrada no portal. ` +
+        'Cadastre a avaliação em Cadastro de Avaliação antes de lançar notas.',
+    );
+  }
+
+  // Sem disciplina escolhida vale a única que existe; com várias, o agente
+  // precisa ter dito qual — a nota iria para o boletim errado.
+  const disciplina = plan.disciplina
+    ? disciplinas.find((candidata) => candidata.nome === plan.disciplina)
+    : disciplinas.length === 1
+      ? disciplinas[0]
+      : undefined;
+
+  if (!disciplina) {
+    throw new EnvioInvalidoError(
+      plan.disciplina
+        ? `A disciplina "${plan.disciplina}" não existe na etapa "${etapa.nome}". ` +
+          `Disciplinas disponíveis: ${disciplinas.map((d) => d.nome).join(', ')}.`
+        : `A etapa "${etapa.nome}" tem mais de uma disciplina e o material não ` +
+          `diz de qual é. Disciplinas: ${disciplinas.map((d) => d.nome).join(', ')}.`,
+    );
+  }
+
+  const avaliacoes = disciplina.avaliacoes;
+  const avaliacao = avaliacoes.find((candidata) => candidata.nome === plan.avaliacao);
+
+  if (!avaliacao) {
+    throw new EnvioInvalidoError(
+      `A avaliação "${plan.avaliacao}" não existe em ${disciplina.nome} na ` +
+        `etapa "${etapa.nome}". ` +
+        `Avaliações disponíveis: ${avaliacoes.map((a) => a.nome).join(', ')}.`,
+    );
+  }
+
+  // Uma nota fora do valor da avaliação é erro de leitura do material, e o
+  // portal a recusaria de qualquer jeito.
+  for (const nota of plan.notas) {
+    if (nota.valor < 0) {
+      throw new EnvioInvalidoError(
+        `A nota de ${nota.estudante} veio negativa (${nota.valor}).`,
+      );
+    }
+
+    if (avaliacao.valor !== undefined && nota.valor > avaliacao.valor) {
+      throw new EnvioInvalidoError(
+        `A nota de ${nota.estudante} (${nota.valor}) passa do valor da ` +
+          `avaliação "${avaliacao.nome}", que vale ${avaliacao.valor}.`,
+      );
+    }
+  }
 }
 
 export async function interpretarEnvio({
@@ -240,7 +398,7 @@ export async function interpretarEnvio({
   signal,
   complete = chatCompletion,
 }: InterpretarEnvioInput): Promise<EnvioPlan> {
-  const content = buildContentParts({ texto, arquivos });
+  const content = await buildContentParts({ texto, arquivos });
 
   if (content.length === 0) {
     throw new EnvioInvalidoError('Envie um texto ou pelo menos um arquivo.');
@@ -278,13 +436,19 @@ export async function interpretarEnvio({
     );
   }
 
-  if (plan.data.parte !== 'conteudo') {
+  if (plan.data.parte !== 'conteudo' && plan.data.parte !== 'boletim') {
     throw new ParteNaoSuportadaError(PARTE_LABEL[plan.data.parte]);
   }
 
   assertNoCatalogo(plan.data, catalogo);
 
-  if (plan.data.aulas.length === 0) {
+  if (plan.data.parte === 'boletim' && plan.data.notas.length === 0) {
+    throw new EnvioInvalidoError(
+      'O agente não encontrou nenhuma nota no material enviado.',
+    );
+  }
+
+  if (plan.data.parte === 'conteudo' && plan.data.aulas.length === 0) {
     throw new EnvioInvalidoError(
       'O agente não encontrou nenhuma aula datada no material enviado.',
     );
