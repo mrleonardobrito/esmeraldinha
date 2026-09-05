@@ -1,4 +1,6 @@
 allowBuilds:
+  # Alvo Squirrel, que não usamos: `electron-builder.yml` empacota com NSIS.
+  electron-winstaller: false
   esbuild: true
   sharp: false
   unrs-resolver: false

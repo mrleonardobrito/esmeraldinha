@@ -39,7 +39,13 @@ export const professorSchema = z.object({
     .refine(isValidCpf, "CPF inválido."),
   senha: z.string().min(4, "A senha precisa ter pelo menos 4 caracteres."),
   escola: z.string().trim().min(2, "Informe a escola do professor."),
-  imagem: z.string().optional(),
+  // O banco guarda a ausência de imagem como NULL, e é assim que ela volta
+  // da API para o formulário de edição: aceitamos os dois e normalizamos.
+  imagem: z
+    .string()
+    .nullish()
+    .transform((imagem) => imagem ?? undefined)
+    .optional(),
 });
 
 export type ProfessorInput = z.infer<typeof professorSchema>;

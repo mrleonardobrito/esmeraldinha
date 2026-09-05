@@ -25,3 +25,16 @@ export class FieldTooLongError extends Error {
     this.name = 'FieldTooLongError';
   }
 }
+
+export class OptionNotFoundError extends Error {
+  constructor(
+    readonly label: string,
+    readonly disponiveis: readonly string[] = [],
+  ) {
+    super(
+      `Option not found in the menu: ${label}. ` +
+        `Available options: ${disponiveis.join(', ') || '(none)'}.`,
+    );
+    this.name = 'OptionNotFoundError';
+  }
+}

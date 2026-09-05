@@ -41,8 +41,24 @@ The record a professor must keep for one turma across the school year. Composed 
 _Avoid_: diário, registro, notebook
 
 **turma**:
-A class group. A caderneta belongs to exactly one turma.
+A class group. Discovered on the portal during the cadastro do professor, never
+typed: the portal is what knows which turmas a professor works in. Owns its
+estudantes, and a caderneta belongs to exactly one turma.
 _Avoid_: class, grupo
+
+**nome curto da turma**:
+What a turma is called on screen, derived from the name the portal writes. The
+portal spells a turma as `<série> - <turma> - <turno>`, repeating the série and
+appending the turno — `PRÉ-ESCOLA II - PRÉ-ESCOLA II - C - INTEGRAL`. Only the
+middle identifies it (`PRÉ-ESCOLA II - C`), so that is what is shown; the full
+name stays the stored one, since it is what the portal and the caderneta key on.
+_Avoid_: nome amigável, display name
+
+**turno**:
+The shift a turma runs in — `MATUTINO`, `VESPERTINO` or `INTEGRAL`. The portal
+has no field for it: it writes the turno at the end of the turma's name, so it
+is read from there rather than asked for.
+_Avoid_: shift, período
 
 **etapa**:
 One of the four periods the school year is divided into. Its start and end dates come from the calendário acadêmico.
@@ -124,6 +140,31 @@ _Avoid_: interaction, participação
 An assessment an etapa's notas are given against, with a nome, tipo (e.g. `OBSERVAÇÃO`, `TRABALHO EM GRUPO`, `AVALIAÇÃO/PROVA`), data and valor. Created on the portal's _Cadastro de Avaliação_ screen before the boletim can be filled in.
 _Avoid_: assessment, prova, atividade
 
+**disciplina**:
+A subject a turma is taught. A caderneta covers one turma and may hold several,
+each with its own boletim. The portal only offers it once the etapa has an
+avaliação, so no disciplina means no avaliação has been registered yet.
+_Avoid_: subject, matéria, componente
+
+**nota**:
+What one estudante scored on one avaliação — one cell of the boletim, where a
+student's row meets an avaliação's column. Keyed by matrícula, disciplina and
+avaliação, never by name: the name is what a professor writes, the matrícula is
+what the portal stores.
+_Avoid_: grade, score, pontuação
+
+**nota personalizada**:
+A grade the professor sets on an estudante's row directly, outside any
+avaliação. Editable, unlike the ones the portal computes.
+_Avoid_: custom grade, nota manual
+
+**nota parcial**:
+A grade the portal computes for an estudante's row and shows read-only,
+alongside the **nota calculada pelas avaliações**. Esmeraldinha reads both and
+writes neither.
+_Avoid_: partial grade, prévia
+
 **nota final da etapa**:
-The grade an estudante closes an etapa with.
-_Avoid_: final grade, média, nota
+The grade an estudante closes an etapa with, written on their row of the
+boletim. Editable, unlike the nota parcial and the nota calculada.
+_Avoid_: final grade, média

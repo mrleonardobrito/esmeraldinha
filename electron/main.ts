@@ -36,7 +36,13 @@ function getApi(): Promise<Hono> {
       : join(rootDir, 'pw-browsers');
 
     apiPromise = import('../server/app')
-      .then(({ createApp }) => createApp())
+      .then(({ createApp }) => {
+        const api = createApp();
+        void import('../server/cadernetas/agenda').then(({ iniciarAgendaSemanal }) =>
+          iniciarAgendaSemanal(),
+        );
+        return api;
+      })
       .catch((error: unknown) => {
         apiPromise = null;
         throw error;
@@ -143,8 +149,18 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     apiPromise = null;
 
-    void import('../server/portal-sessions')
-      .then(({ closeAllSessions }) => closeAllSessions())
+    void import('../server/cadernetas/agenda')
+      .then(({ pararAgendaSemanal }) => pararAgendaSemanal())
+      .catch(() => {});
+
+    void Promise.all([
+      import('../server/portal-sessions').then(({ closeAllSessions }) =>
+        closeAllSessions(),
+      ),
+      import('../server/sessoes-headed').then(({ fecharSessoesHeaded }) =>
+        fecharSessoesHeaded(),
+      ),
+    ])
       .catch(() => {})
       .finally(() => app.quit());
   });
