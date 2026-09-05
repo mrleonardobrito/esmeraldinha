@@ -52,6 +52,25 @@ export const env = {
   /** Uma sessão ociosa é encerrada depois desse tempo. */
   sessionIdleMs: readInt(process.env.PORTAL_SESSION_IDLE_MS, 15 * 60_000),
   /**
+   * Onde os metadados da sessão do portal (id, professor, login, escola)
+   * ficam guardados fora do processo, com o mesmo prazo de vida da sessão
+   * em memória. A `Page`/`BrowserContext` do Playwright não viaja para lá —
+   * só o registro de que a sessão existe e a quem ela pertence.
+   */
+  redisUrl: process.env.REDIS_URL?.trim() || 'redis://localhost:6379',
+  /**
+   * Sem Redis instalado (dev, testes, ou o app empacotado sem infra externa),
+   * `ioredis-mock` guarda o mesmo par chave/TTL num Map do processo — a
+   * mesma API do `ioredis`, sem precisar de um servidor de verdade. Ligado
+   * por padrão fora de produção; force com REDIS_EM_MEMORIA=false para testar
+   * contra um Redis real mesmo em dev.
+   */
+  redisEmMemoria:
+    process.env.REDIS_EM_MEMORIA?.trim() === 'false'
+      ? false
+      : process.env.REDIS_EM_MEMORIA?.trim() === 'true' ||
+        process.env.NODE_ENV !== 'production',
+  /**
    * Qual adapter de encriptação usar para a senha do professor. Por
    * padrão, `electron` dentro do processo principal do Electron e `dev`
    * em qualquer outro lugar (`pnpm dev:api`, testes). Pode ser forçado via

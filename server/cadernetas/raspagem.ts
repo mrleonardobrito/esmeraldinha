@@ -1,9 +1,14 @@
 import type { Page } from 'playwright';
 
-import { listAulas, listEstudantes } from '../scrape/portal';
+import {
+  listAulas,
+  listBoletim,
+  listDisciplinas,
+  listEstudantes,
+} from '../scrape/portal';
 import type { ConteudoCatalogo } from '../scrape/types';
 import { turmasDoCatalogo } from '../turmas/busca';
-import type { EtapaRaspada, RaspagemDaTurma } from './store';
+import type { BoletimRaspado, EtapaRaspada, RaspagemDaTurma } from './store';
 
 export class TurmaNaoEncontradaError extends Error {
   constructor(
@@ -38,6 +43,10 @@ export async function rasparCaderneta(
 
   const etapas: EtapaRaspada[] = [];
 
+  // As aulas primeiro, todas elas. Ler aula e boletim alternadamente obrigaria
+  // o portal a trocar de tela a cada etapa — _Lançamento de Conteúdo_ e
+  // _Resultado de Avaliação_ —, e é no meio dessa troca que os menus do
+  // PrimeFaces deixam de responder ao clique. Uma tela por vez.
   for (const etapa of catalogo.etapas) {
     // Uma etapa que não oferece a turma não tem aulas dela: entra vazia para a
     // grade continuar mostrando as quatro colunas.
@@ -56,24 +65,51 @@ export async function rasparCaderneta(
     etapas.push({ nome: etapa.nome, meses: [...etapa.meses], aulas });
   }
 
-  // Os estudantes são da turma, não da etapa: basta lê-los uma vez, na
-  // primeira etapa que a oferece.
-  const etapaComTurma = catalogo.etapas.find((etapa) => etapa.turmas.includes(turma));
+  // Agora os boletins, já na outra tela. Uma falha aqui não pode custar as
+  // aulas que acabaram de ser lidas — o mesmo cuidado que a lista de
+  // estudantes recebe logo abaixo.
+  for (const etapa of etapas) {
+    if (!catalogo.etapas.find((atual) => atual.nome === etapa.nome)?.turmas.includes(turma)) {
+      continue;
+    }
+
+    const boletins: BoletimRaspado[] = [];
+
+    try {
+      // Sem disciplina não há avaliação cadastrada, e portanto nada a ler: a
+      // etapa fica sem boletim nenhum e a tela pede o cadastro.
+      for (const disciplina of await listDisciplinas(page, { etapa: etapa.nome, turma })) {
+        const boletim = await listBoletim(page, {
+          etapa: etapa.nome,
+          turma,
+          disciplina,
+        });
+
+        boletins.push({ disciplina, ...boletim });
+      }
+    } catch (error) {
+      console.error(`Falha ao ler o boletim de ${turma} na ${etapa.nome}:`, error);
+    }
+
+    etapa.boletins = boletins;
+  }
+
+  // Os estudantes são da turma, não da etapa: a tela de Ficha Desempenho os
+  // lista pela turma sozinha, então basta lê-los uma vez.
   let estudantes: RaspagemDaTurma['estudantes'] = [];
 
-  if (etapaComTurma) {
-    try {
-      const doPortal = await listEstudantes(page, { etapa: etapaComTurma.nome, turma });
-      // O portal omite a situação; o banco guarda a ausência como null.
-      estudantes = doPortal.map((estudante) => ({
-        matricula: estudante.matricula,
-        nome: estudante.nome,
-        situacao: estudante.situacao ?? null,
-      }));
-    } catch (error) {
-      // A lista de estudantes não pode derrubar o que já sabemos das aulas.
-      console.error(`Falha ao ler os estudantes de ${turma}:`, error);
-    }
+  try {
+    const doPortal = await listEstudantes(page, { turma });
+    // O portal omite a situação e a data; o banco guarda a ausência como null.
+    estudantes = doPortal.map((estudante) => ({
+      matricula: estudante.matricula,
+      nome: estudante.nome,
+      situacao: estudante.situacao ?? null,
+      dataMatricula: estudante.dataMatricula ?? null,
+    }));
+  } catch (error) {
+    // A lista de estudantes não pode derrubar o que já sabemos das aulas.
+    console.error(`Falha ao ler os estudantes de ${turma}:`, error);
   }
 
   return { etapas, estudantes };

@@ -36,12 +36,6 @@ export interface CadastrarCadernetaProps {
   onCadastrou: (cadernetas: Caderneta[]) => void;
 }
 
-/**
- * Cadastrar cadernetas é escolher as turmas: cada uma vira uma caderneta com
- * seu próprio job, e a Esmeraldinha lê o portal em segundo plano, uma turma de
- * cada vez. Por isso o cadastro responde na hora e a grade é que mostra o
- * progresso de cada caderneta.
- */
 export function CadastrarCaderneta({
   sessionId,
   professorId,
@@ -147,7 +141,7 @@ export function CadastrarCaderneta({
         <SheetHeader>
           <SheetTitle className="font-heading">Nova caderneta</SheetTitle>
           <SheetDescription>
-            Escolha as turmas. A Esmeraldinha lê as aulas de cada uma no portal
+            Escolha as turmas. O sistema lê as aulas de cada uma no portal
             em segundo plano, uma turma de cada vez.
           </SheetDescription>
         </SheetHeader>

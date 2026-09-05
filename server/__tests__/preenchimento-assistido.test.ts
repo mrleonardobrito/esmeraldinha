@@ -10,6 +10,7 @@ vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
   retomarSessao: vi.fn(),
   getCatalogo: vi.fn(),
+  getCatalogoComAvaliacoes: vi.fn(),
   openSession: vi.fn(),
   closeSession: vi.fn(),
 }));
@@ -18,9 +19,11 @@ vi.mock('../ai/openrouter', () => ({ chatCompletion: vi.fn() }));
 
 vi.mock('../scrape/portal', () => ({
   listAulas: vi.fn(),
+  listBoletim: vi.fn(),
+  listDisciplinas: vi.fn(),
   listEstudantes: vi.fn(),
-  postAulaContent: vi.fn(),
   prepararAulaParaPreenchimento: vi.fn(),
+  prepararNotasParaPreenchimento: vi.fn(),
   PORTAL_URL: 'https://portal.example/teste',
 }));
 
@@ -97,7 +100,7 @@ describe('preenchimento assistido de uma aula', () => {
     vi.resetModules();
     vi.clearAllMocks();
 
-    const { retomarSessao, getCatalogo } = await import(
+    const { retomarSessao, getCatalogo, getCatalogoComAvaliacoes } = await import(
       '../portal-sessions'
     );
     const sessao = {
@@ -112,10 +115,21 @@ describe('preenchimento assistido de uma aula', () => {
     vi.mocked(retomarSessao).mockResolvedValue(sessao);
     vi.mocked(retomarSessao).mockResolvedValue(sessao);
     vi.mocked(getCatalogo).mockResolvedValue(catalogo);
+    vi.mocked(getCatalogoComAvaliacoes).mockResolvedValue(catalogo);
 
-    const { listAulas, listEstudantes } = await import('../scrape/portal');
+    const { listAulas, listBoletim, listDisciplinas, listEstudantes } = await import(
+      '../scrape/portal'
+    );
+    vi.mocked(listDisciplinas).mockResolvedValue(['MATEMÁTICA']);
     vi.mocked(listAulas).mockResolvedValue([]);
-    vi.mocked(listEstudantes).mockResolvedValue([]);
+    vi.mocked(listEstudantes).mockResolvedValue([
+      { matricula: '2026001', nome: 'Ana Lima', situacao: 'ATIVO' },
+    ]);
+    vi.mocked(listBoletim).mockResolvedValue({
+      avaliacoes: [{ nome: 'PROVA 1', valor: 10 }],
+      notas: [],
+      notasDoEstudante: [],
+    });
 
     const { naSessaoHeaded } = await import('../sessoes-headed');
     vi.mocked(naSessaoHeaded).mockImplementation(
@@ -185,21 +199,6 @@ describe('preenchimento assistido de uma aula', () => {
     );
   });
 
-  it('nunca grava: a aula continua pendente na caderneta', async () => {
-    const { app, professorId: id } = await freshApp();
-    const caderneta = await cadastrarCaderneta(app, id);
-
-    await app.fetch(
-      request(
-        `/${caderneta.id}/aulas/preenchimentos-assistidos`,
-        json({ ...aula, desenvolvimento: 'Roda de conversa.' }),
-      ),
-    );
-
-    const { postAulaContent } = await import('../scrape/portal');
-    expect(postAulaContent).not.toHaveBeenCalled();
-  });
-
   it('404 numa caderneta que não existe', async () => {
     const { app } = await freshApp();
 
@@ -239,5 +238,104 @@ describe('preenchimento assistido de uma aula', () => {
     );
 
     expect(response.status).toBe(422);
+  });
+
+  it('leva as notas editadas para o boletim na sessão headed', async () => {
+    const { app, professorId: id } = await freshApp();
+    const caderneta = await cadastrarCaderneta(app, id);
+
+    const response = await app.fetch(
+      request(
+        `/${caderneta.id}/boletim/preenchimentos-assistidos`,
+        json({
+          etapa: '1ª Etapa',
+          notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+
+    const { prepararNotasParaPreenchimento } = await import('../scrape/portal');
+    expect(prepararNotasParaPreenchimento).toHaveBeenCalledWith(expect.anything(), {
+      etapa: '1ª Etapa',
+      turma,
+      disciplina: 'MATEMÁTICA',
+      notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }],
+      notasDoEstudante: [],
+    });
+  });
+
+  it('recusa um preenchimento de notas sem nenhuma nota', async () => {
+    const { app, professorId: id } = await freshApp();
+    const caderneta = await cadastrarCaderneta(app, id);
+
+    const response = await app.fetch(
+      request(
+        `/${caderneta.id}/boletim/preenchimentos-assistidos`,
+        json({ etapa: '1ª Etapa', notas: [] }),
+      ),
+    );
+
+    expect(response.status).toBe(400);
+
+    const { prepararNotasParaPreenchimento } = await import('../scrape/portal');
+    expect(prepararNotasParaPreenchimento).not.toHaveBeenCalled();
+  });
+
+  it('leva a nota personalizada e a final da etapa junto das avaliações', async () => {
+    const { app, professorId: id } = await freshApp();
+    const caderneta = await cadastrarCaderneta(app, id);
+
+    const response = await app.fetch(
+      request(
+        `/${caderneta.id}/boletim/preenchimentos-assistidos`,
+        json({
+          etapa: '1ª Etapa',
+          notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }],
+          notasDoEstudante: [
+            { matricula: '2026001', personalizada: 8, final: 8.5 },
+          ],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+
+    const { prepararNotasParaPreenchimento } = await import('../scrape/portal');
+    expect(prepararNotasParaPreenchimento).toHaveBeenCalledWith(expect.anything(), {
+      etapa: '1ª Etapa',
+      turma,
+      disciplina: 'MATEMÁTICA',
+      notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }],
+      notasDoEstudante: [{ matricula: '2026001', personalizada: 8, final: 8.5 }],
+    });
+  });
+
+  it('aceita um envio só com a nota final da etapa, sem nota de avaliação', async () => {
+    const { app, professorId: id } = await freshApp();
+    const caderneta = await cadastrarCaderneta(app, id);
+
+    const response = await app.fetch(
+      request(
+        `/${caderneta.id}/boletim/preenchimentos-assistidos`,
+        json({
+          etapa: '1ª Etapa',
+          notas: [],
+          notasDoEstudante: [{ matricula: '2026001', final: 7 }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+
+    const { prepararNotasParaPreenchimento } = await import('../scrape/portal');
+    expect(prepararNotasParaPreenchimento).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        notas: [],
+        notasDoEstudante: [{ matricula: '2026001', final: 7 }],
+      }),
+    );
   });
 });

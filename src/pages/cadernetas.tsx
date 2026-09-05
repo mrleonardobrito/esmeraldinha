@@ -20,6 +20,7 @@ import {
   GradeDeCadernetasSkeleton,
 } from "@/components/grade-de-cadernetas";
 import { LancarConteudo } from "@/components/lancar-conteudo";
+import { LancarNotas } from "@/components/lancar-notas";
 import {
   ProfessorPicker,
   ProfessorPickerSkeleton,
@@ -50,6 +51,11 @@ import {
   sincronizarCaderneta,
   type Caderneta,
 } from "@/lib/cadernetas";
+import {
+  esquecerSessaoDeTrabalho,
+  guardarSessaoDeTrabalho,
+  lerSessaoDeTrabalho,
+} from "@/lib/sessao-de-trabalho";
 
 type Status = "idle" | "connecting" | "connected" | "error";
 
@@ -59,21 +65,39 @@ type ProfessoresState =
   | { status: "ready"; professores: Professor[] };
 
 export function Cadernetas() {
+  // Voltar para esta tela deve cair onde se estava, não no começo: o que a
+  // visita anterior deixou em aberto é o estado inicial desta.
+  const retomada = React.useMemo(() => lerSessaoDeTrabalho(), []);
+
   const [professoresState, setProfessoresState] =
     React.useState<ProfessoresState>({ status: "loading" });
-  const [selected, setSelected] = React.useState<Professor | null>(null);
-  const [status, setStatus] = React.useState<Status>("idle");
-  const [session, setSession] = React.useState<PortalSession | null>(null);
+  const [selected, setSelected] = React.useState<Professor | null>(
+    retomada?.professor ?? null,
+  );
+  const [status, setStatus] = React.useState<Status>(
+    retomada?.session ? "connected" : "idle",
+  );
+  const [session, setSession] = React.useState<PortalSession | null>(
+    retomada?.session ?? null,
+  );
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [reloadToken, setReloadToken] = React.useState(0);
-  const [cadernetas, setCadernetas] = React.useState<Caderneta[]>([]);
+  const [cadernetas, setCadernetas] = React.useState<Caderneta[]>(
+    retomada?.cadernetas ?? [],
+  );
   const [cadernetasToken, setCadernetasToken] = React.useState(0);
   /** Falso só depois da primeira leitura: antes dela a grade é um esqueleto. */
-  const [carregandoCadernetas, setCarregandoCadernetas] = React.useState(true);
+  const [carregandoCadernetas, setCarregandoCadernetas] = React.useState(
+    retomada === null,
+  );
   const [cadastrando, setCadastrando] = React.useState(false);
   const [analisando, setAnalisando] = React.useState(false);
   const [excluindo, setExcluindo] = React.useState<Caderneta | null>(null);
   const [lancando, setLancando] = React.useState<{
+    caderneta: Caderneta;
+    etapa: string;
+  } | null>(null);
+  const [lancandoNotas, setLancandoNotas] = React.useState<{
     caderneta: Caderneta;
     etapa: string;
   } | null>(null);
@@ -101,6 +125,13 @@ export function Cadernetas() {
       cancelled = true;
     };
   }, [reloadToken]);
+
+  // O que a próxima visita retoma. Fica fora do React porque precisa
+  // sobreviver ao desmonte que a troca de página provoca.
+  React.useEffect(() => {
+    if (!selected) return;
+    guardarSessaoDeTrabalho({ professor: selected, session, cadernetas });
+  }, [selected, session, cadernetas]);
 
   /** Sobe a cada envio gravado, para a grade refletir o portal. */
   const recarregarCadernetas = React.useCallback(() => {
@@ -182,6 +213,31 @@ export function Cadernetas() {
   }
 
   /**
+   * A sessão sumiu do servidor sem a tela saber — um restart do processo em
+   * dev é o caso comum, mas ociosidade de verdade também some assim. Não há
+   * o que recuperar dela no id velho, mas a tela não pode ficar sem `session`
+   * nem por um instante: é ele que mantém o modal de envio montado, com o
+   * texto e os anexos que o auxiliar de ensino já tinha preenchido — zerar
+   * primeiro descartaria tudo isso antes da sessão nova chegar.
+   */
+  async function reabrirSessao() {
+    if (!selected) return;
+
+    try {
+      const reaberta = await openPortalSession(selected.id);
+      setSession(reaberta);
+      toast.info("A sessão com o portal caiu; reconectado automaticamente.");
+    } catch (error) {
+      setStatus("error");
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "A sessão com o portal caiu, e não foi possível abrir outra.",
+      );
+    }
+  }
+
+  /**
    * O que há para editar numa caderneta é o que o portal diz sobre ela: turma,
    * aulas e estudantes vêm todos de lá, e nenhum é nosso para reescrever.
    * Atualizar é reler — a raspagem roda em segundo plano e a grade acompanha.
@@ -215,11 +271,13 @@ export function Cadernetas() {
 
   function backToPicker() {
     if (session) void closePortalSession(session.sessionId);
+    esquecerSessaoDeTrabalho();
     setSelected(null);
     setSession(null);
     setErrorMessage(null);
     setStatus("idle");
     setLancando(null);
+    setLancandoNotas(null);
     setCadastrando(false);
     setAnalisando(false);
     setExcluindo(null);
@@ -406,7 +464,7 @@ export function Cadernetas() {
                 <div className="flex flex-wrap items-center gap-2">
                   <Button variant="outline" onClick={() => setAnalisando(true)}>
                     <IconSparkles data-icon="inline-start" />
-                    Analisar documentos
+                    Upload Inteligente
                   </Button>
                   <Button onClick={() => setCadastrando(true)}>
                     <IconPlus data-icon="inline-start" />
@@ -426,7 +484,7 @@ export function Cadernetas() {
                         Nenhuma caderneta ainda
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        Cadastre a caderneta de uma turma para a Esmeraldinha
+                        Cadastre a caderneta de uma turma para o sistema
                         ler as aulas dela no portal.
                       </p>
                     </div>
@@ -441,6 +499,9 @@ export function Cadernetas() {
                     onAbrirConteudo={(caderneta, etapa) =>
                       setLancando({ caderneta, etapa })
                     }
+                    onAbrirBoletim={(caderneta, etapa) =>
+                      setLancandoNotas({ caderneta, etapa })
+                    }
                     onAtualizar={(caderneta) => void atualizarCaderneta(caderneta)}
                     onExcluir={setExcluindo}
                   />
@@ -451,8 +512,10 @@ export function Cadernetas() {
             {analisando && (
               <AnalisarDocumentos
                 sessionId={session.sessionId}
+                professorId={selected.id}
                 onClose={() => setAnalisando(false)}
                 onGravou={recarregarCadernetas}
+                onSessaoExpirada={() => void reabrirSessao()}
               />
             )}
 
@@ -491,6 +554,16 @@ export function Cadernetas() {
                 onGravou={recarregarCadernetas}
               />
             )}
+
+            {lancandoNotas && (
+              <LancarNotas
+                caderneta={lancandoNotas.caderneta}
+                etapa={lancandoNotas.etapa}
+                sessionId={session.sessionId}
+                onClose={() => setLancandoNotas(null)}
+                onGravou={recarregarCadernetas}
+              />
+            )}
           </>
         )}
       </div>
@@ -511,7 +584,7 @@ function ConectandoAoPortal({ nome }: { nome: string }) {
           <div className="flex flex-col gap-0.5">
             <CardTitle>Abrindo a sessão no portal…</CardTitle>
             <CardDescription>
-              A Esmeraldinha está entrando com o login de {nome}.
+              Sistema entrando com o login de {nome}.
             </CardDescription>
           </div>
         </div>

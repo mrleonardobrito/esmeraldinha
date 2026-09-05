@@ -2,6 +2,7 @@ import * as React from "react";
 import {
   IconAlertTriangle,
   IconCheck,
+  IconChevronDown,
   IconEye,
   IconEyeOff,
   IconLoader,
@@ -36,9 +37,11 @@ import {
 } from "@/lib/professores";
 import {
   buscarTurmas,
+  loadEstudantes,
   loadTurmas,
   nomeCurtoDaTurma,
   validarCredenciais,
+  type EstudanteDaTurma,
   type Turma,
 } from "@/lib/turmas";
 import { cn } from "@/lib/utils";
@@ -205,9 +208,9 @@ export function ProfessorForm({
           </SheetTitle>
           <SheetDescription>
             {passo === "dados-de-login"
-              ? "A Esmeraldinha confere no portal se as credenciais funcionam antes de guardá-las."
+              ? "O sistema confere no portal se as credenciais funcionam antes de guardá-las."
               : passo === "turmas"
-                ? "As turmas vêm do portal: nome e turno saem do jeito que ele as escreve."
+                ? "As turmas vêm do portal, com os estudantes de cada uma. Nome e turno saem do jeito que o portal as escreve."
                 : "Os estudantes de cada turma, com matrícula, situação e data da matrícula."}
           </SheetDescription>
         </SheetHeader>
@@ -429,11 +432,6 @@ type TurmasState =
   | { status: "error"; message: string }
   | { status: "ready"; turmas: Turma[] };
 
-/**
- * Passo 2: as turmas do professor, lidas do portal. Não há nada para escolher
- * aqui — o professor trabalha nas turmas em que trabalha, e a Esmeraldinha só
- * precisa saber quais são.
- */
 function BuscarTurmas({
   professor,
   onVoltar,
@@ -477,7 +475,8 @@ function BuscarTurmas({
         {estado.status === "loading" && (
           <Aviso>
             <IconLoader className="size-4 animate-spin" />
-            Lendo as turmas no portal…
+            Lendo as turmas e os estudantes no portal… isso leva alguns
+            instantes.
           </Aviso>
         )}
 
@@ -536,6 +535,11 @@ function BuscarTurmas({
  * Falta ler matrícula, nome, situação e data da matrícula da tela de
  * Lançamento de Presença. Ver `server/turmas/busca.ts`.
  */
+/**
+ * Passo 3: os estudantes que a busca das turmas leu, turma por turma. Não há
+ * nada a buscar aqui: o passo 2 já os trouxe na mesma sessão do portal. Esta
+ * tela é a conferência — quantos estudantes cada turma tem, e quem são.
+ */
 function BuscarEstudantes({
   professor,
   onVoltar,
@@ -546,6 +550,7 @@ function BuscarEstudantes({
   onConcluir: () => void;
 }) {
   const [estado, setEstado] = React.useState<TurmasState>({ status: "loading" });
+  const [aberta, setAberta] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -567,28 +572,41 @@ function BuscarEstudantes({
     };
   }, [professor.id]);
 
+  const semEstudantes =
+    estado.status === "ready" &&
+    estado.turmas.length > 0 &&
+    estado.turmas.every((turma) => turma.totalDeEstudantes === 0);
+
   return (
     <>
       <div className="flex flex-col gap-3 px-6">
-        <Aviso>
-          <IconUsers className="size-4 shrink-0" />
-          A busca dos estudantes ainda não lê o portal. As turmas já estão
-          guardadas — os estudantes de cada uma entram depois.
-        </Aviso>
+        {estado.status === "loading" && (
+          <Aviso>
+            <IconLoader className="size-4 animate-spin" />
+            Carregando as turmas…
+          </Aviso>
+        )}
 
         {estado.status === "error" && <ErrorMessage>{estado.message}</ErrorMessage>}
 
+        {semEstudantes && (
+          <Aviso>
+            <IconUsers className="size-4 shrink-0" />
+            O portal não devolveu estudantes para nenhuma turma. Volte e busque
+            as turmas de novo para tentar outra vez.
+          </Aviso>
+        )}
+
         {estado.status === "ready" &&
           estado.turmas.map((turma) => (
-            <div
+            <TurmaComEstudantes
               key={turma.id}
-              className="flex items-center justify-between gap-3 rounded-2xl border bg-card px-4 py-3"
-            >
-              <span className="text-sm font-medium">{nomeCurtoDaTurma(turma.nome)}</span>
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {turma.totalDeEstudantes} estudante(s)
-              </span>
-            </div>
+              turma={turma}
+              aberta={aberta === turma.id}
+              onAlternar={() =>
+                setAberta((atual) => (atual === turma.id ? null : turma.id))
+              }
+            />
           ))}
       </div>
 
@@ -599,6 +617,119 @@ function BuscarEstudantes({
         <Button onClick={onConcluir}>Concluir</Button>
       </SheetFooter>
     </>
+  );
+}
+
+type EstudantesState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; estudantes: EstudanteDaTurma[] };
+
+/** Uma turma que abre para mostrar quem está matriculado nela. */
+function TurmaComEstudantes({
+  turma,
+  aberta,
+  onAlternar,
+}: {
+  turma: Turma;
+  aberta: boolean;
+  onAlternar: () => void;
+}) {
+  const [estado, setEstado] = React.useState<EstudantesState>({ status: "loading" });
+
+  React.useEffect(() => {
+    // Os estudantes só são buscados quando a turma abre: são muitas turmas, e
+    // quase sempre se quer conferir uma.
+    if (!aberta) return;
+
+    let cancelled = false;
+
+    loadEstudantes(turma.id)
+      .then((estudantes) => {
+        if (!cancelled) setEstado({ status: "ready", estudantes });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setEstado({
+          status: "error",
+          message: mensagem(error, "Não foi possível carregar os estudantes."),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [turma.id, aberta]);
+
+  return (
+    <div className="flex flex-col rounded-2xl border bg-card">
+      <button
+        type="button"
+        onClick={onAlternar}
+        aria-expanded={aberta}
+        disabled={turma.totalDeEstudantes === 0}
+        className="flex items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted disabled:hover:bg-transparent"
+      >
+        <span className="text-sm font-medium">{nomeCurtoDaTurma(turma.nome)}</span>
+        <span className="flex items-center gap-2 text-xs tabular-nums text-muted-foreground">
+          {turma.totalDeEstudantes} estudante(s)
+          {turma.totalDeEstudantes > 0 && (
+            <IconChevronDown
+              className={cn("size-4 transition-transform", aberta && "rotate-180")}
+              aria-hidden
+            />
+          )}
+        </span>
+      </button>
+
+      {aberta && (
+        <div className="border-t px-4 py-3">
+          {estado.status === "loading" && (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <IconLoader className="size-4 animate-spin" />
+              Carregando…
+            </p>
+          )}
+
+          {estado.status === "error" && <ErrorMessage>{estado.message}</ErrorMessage>}
+
+          {estado.status === "ready" && (
+            <ul className="flex flex-col gap-2">
+              {estado.estudantes.map((estudante) => (
+                <li
+                  key={estudante.matricula}
+                  className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm"
+                >
+                  <span className="tabular-nums text-muted-foreground">
+                    {estudante.matricula}
+                  </span>
+                  <span className="font-medium">{estudante.nome}</span>
+                  {estudante.situacao && (
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-xs",
+                        // O portal escreve em vermelho quem não está ativo;
+                        // aqui basta não parecer normal.
+                        estudante.situacao.toUpperCase() !== "ATIVO" &&
+                          "border-destructive/40 text-destructive",
+                      )}
+                    >
+                      {estudante.situacao}
+                    </Badge>
+                  )}
+                  {estudante.dataMatricula && (
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      matriculado em {estudante.dataMatricula}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

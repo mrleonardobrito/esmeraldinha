@@ -24,45 +24,77 @@ import { cn } from "@/lib/utils";
 import type { Caderneta, StatusDaParte } from "@/lib/cadernetas";
 import { nomeCurtoDaTurma } from "@/lib/turmas";
 
+/** Uma das partes da caderneta, como a grade a mostra em cada etapa. */
+interface ParteDaGrade {
+  chave: string;
+  rotulo: string;
+  nome: string;
+  icone: typeof IconBook;
+  disabled?: boolean;
+}
+
 /**
- * As quatro partes que a grade mostra por etapa. Só o conteúdo abre: as outras
- * ainda são trabalho manual no portal, e a grade diz isso sem esconder que elas
- * existem.
+ * As quatro partes que a grade mostra por etapa. Conteúdo e boletim abrem; as
+ * marcadas com `disabled` ainda são trabalho manual no portal, e a grade diz
+ * isso sem esconder que elas existem.
  */
-const PARTES = [
+const PARTES: readonly ParteDaGrade[] = [
   { chave: "conteudo", rotulo: "Aulas", nome: "Conteúdo", icone: IconBook },
-  { chave: "frequencia", rotulo: "Frequencia", nome: "Frequência", icone: IconUserCheck },
-  { chave: "boletim", rotulo: "Nota", nome: "Boletim", icone: IconListCheck },
+  { chave: "boletim", rotulo: "Boletim", nome: "Boletim", icone: IconListCheck },
+  {
+    chave: "frequencia",
+    rotulo: "Frequencia",
+    nome: "Frequência",
+    icone: IconUserCheck,
+    disabled: true,
+  },
   {
     chave: "ficha-desempenho",
     rotulo: "Desempenho/Descritivo",
     nome: "Ficha de desempenho",
     icone: IconActivity,
+    disabled: true,
   },
-] as const;
+];
 
 const STATUS_DOT: Record<StatusDaParte, string> = {
   pendente: "bg-muted-foreground/40",
   // O parcial precisa se distinguir do concluído a um relance: fica anelado,
-  // enquanto o concluído é sólido.
-  parcial: "bg-background ring-2 ring-inset ring-primary",
-  processando: "bg-background ring-2 ring-inset ring-primary animate-pulse",
-  concluido: "bg-primary",
+  // enquanto o concluído é sólido. Agora que o ícone não muda de cor, é o
+  // ponto que carrega o estado sozinho — por isso ele usa a mesma cor
+  // reforçada dos ícones, e não --primary.
+  parcial: "bg-background ring-2 ring-inset ring-caderneta-parte",
+  processando:
+    "bg-background ring-2 ring-inset ring-caderneta-parte animate-pulse",
+  concluido: "bg-caderneta-parte",
 };
 
-/** O ícone do conteúdo acompanha o estado: apagado, normal, cheio. */
+/**
+ * As partes que já funcionam ficam na cor cheia em qualquer estado: quem
+ * distingue pendente de concluído é o ponto, não a intensidade do ícone.
+ * Apagar o ícone por opacidade some com ele no tema escuro, então a cor não
+ * varia — varia o ponto.
+ */
 const STATUS_ICONE: Record<StatusDaParte, string> = {
-  pendente: "text-primary/45",
-  parcial: "text-primary",
-  processando: "text-primary",
-  concluido: "text-primary",
+  pendente: "text-caderneta-parte",
+  parcial: "text-caderneta-parte",
+  processando: "text-caderneta-parte",
+  concluido: "text-caderneta-parte",
 };
+
+/**
+ * As partes que ainda não existem ficam neutras de propósito: a cor separa o
+ * que a Esmeraldinha já preenche do que continua sendo trabalho manual no
+ * portal, antes mesmo de o auxiliar passar o mouse pelo ícone.
+ */
+const ICONE_INDISPONIVEL = "text-caderneta-parte-futura";
 
 export interface GradeDeCadernetasProps {
   cadernetas: Caderneta[];
   /** A etapa cujo conteúdo está sendo enviado agora, se houver. */
   processando?: { cadernetaId: string; etapa: string } | null;
   onAbrirConteudo: (caderneta: Caderneta, etapa: string) => void;
+  onAbrirBoletim: (caderneta: Caderneta, etapa: string) => void;
   /** Relê a turma no portal: é o que "editar" significa para uma caderneta. */
   onAtualizar: (caderneta: Caderneta) => void;
   onExcluir: (caderneta: Caderneta) => void;
@@ -77,6 +109,7 @@ export function GradeDeCadernetas({
   cadernetas,
   processando,
   onAbrirConteudo,
+  onAbrirBoletim,
   onAtualizar,
   onExcluir,
 }: GradeDeCadernetasProps) {
@@ -122,6 +155,7 @@ export function GradeDeCadernetas({
                             processando.etapa === nome
                           }
                           onAbrirConteudo={onAbrirConteudo}
+                          onAbrirBoletim={onAbrirBoletim}
                         />
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
@@ -160,7 +194,7 @@ function StatusDaRaspagem({ caderneta }: { caderneta: Caderneta }) {
             <span className="sr-only">Lendo o portal</span>
           </span>
         </TooltipTrigger>
-        <TooltipContent>A Esmeraldinha está lendo esta turma no portal.</TooltipContent>
+        <TooltipContent>O sistema está lendo esta turma no portal.</TooltipContent>
       </Tooltip>
     );
   }
@@ -226,43 +260,53 @@ function CelulaDaEtapa({
   etapa,
   processando,
   onAbrirConteudo,
+  onAbrirBoletim,
 }: {
   caderneta: Caderneta;
   etapa: Caderneta["etapas"][number];
   processando: boolean;
   onAbrirConteudo: GradeDeCadernetasProps["onAbrirConteudo"];
+  onAbrirBoletim: GradeDeCadernetasProps["onAbrirBoletim"];
 }) {
   const semAulas = etapa.totalDeAulas === 0;
   const statusConteudo: StatusDaParte = processando ? "processando" : etapa.conteudo;
 
   return (
-    <div
-      className={cn(
-        "inline-flex items-center gap-2.5 rounded-xl border px-2.5 py-1.5 transition-colors",
-        statusConteudo === "pendente" || semAulas
-          ? "border-transparent"
-          : "border-primary/30 bg-primary/5",
-      )}
-    >
-      {PARTES.map(({ chave, nome, icone: Icone }) => {
+    <div className="inline-flex items-center gap-2.5">
+      {PARTES.map(({ chave, nome, icone: Icone, disabled }) => {
         const conteudo = chave === "conteudo";
-        const status: StatusDaParte = conteudo ? statusConteudo : "pendente";
+        const semNotas = etapa.totalDeNotas === 0;
+        // Uma etapa sem aula não tem conteúdo a lançar. O boletim continua
+        // acionável sem avaliação: é dentro do modal que a tela explica que
+        // elas nascem no portal.
+        const vazia = conteudo && semAulas;
+        const acionavel = !disabled && !vazia;
 
-        // Só o conteúdo é acionável, e só quando a etapa tem aulas.
-        if (!conteudo || semAulas) {
+        if (!acionavel) {
           return (
             <Tooltip key={chave}>
               <TooltipTrigger asChild>
-                <span className="relative inline-flex text-muted-foreground/35">
+                <span
+                  aria-disabled="true"
+                  className={cn(
+                    "relative inline-flex cursor-not-allowed",
+                    // Uma etapa sem aula é um conteúdo que existe e está vazio:
+                    // continua verde, apenas apagado. O que ainda não existe é
+                    // que fica neutro.
+                    disabled
+                      ? ICONE_INDISPONIVEL
+                      : "text-caderneta-parte-vazia",
+                  )}
+                >
                   <Icone className="size-4.5" aria-hidden="true" />
                   <span className="sr-only">
-                    {nome}: {semAulas && conteudo ? "sem aulas" : "pendente"}
+                    {nome}: {vazia ? "sem lançamentos" : "indisponível"}
                   </span>
                 </span>
               </TooltipTrigger>
               <TooltipContent>
                 {nome} —{" "}
-                {semAulas && conteudo
+                {vazia
                   ? "esta etapa não tem aulas para a turma"
                   : "ainda preenchido à mão no portal"}
               </TooltipContent>
@@ -270,13 +314,25 @@ function CelulaDaEtapa({
           );
         }
 
+        const status: StatusDaParte = conteudo
+          ? statusConteudo
+          : etapa.boletim;
+
         return (
           <Tooltip key={chave}>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => onAbrirConteudo(caderneta, etapa.nome)}
-                aria-label={`Lançar conteúdo de ${caderneta.turma}, ${etapa.nome}`}
+                onClick={() =>
+                  conteudo
+                    ? onAbrirConteudo(caderneta, etapa.nome)
+                    : onAbrirBoletim(caderneta, etapa.nome)
+                }
+                aria-label={
+                  conteudo
+                    ? `Lançar conteúdo de ${caderneta.turma}, ${etapa.nome}`
+                    : `Lançar notas de ${caderneta.turma}, ${etapa.nome}`
+                }
                 className={cn(
                   "relative inline-flex rounded-md transition-opacity hover:opacity-70 focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none",
                   STATUS_ICONE[status],
@@ -293,7 +349,11 @@ function CelulaDaEtapa({
               </button>
             </TooltipTrigger>
             <TooltipContent>
-              {nome} — {etapa.aulasPreenchidas} de {etapa.totalDeAulas} aula(s)
+              {conteudo
+                ? `${nome} — ${etapa.aulasPreenchidas} de ${etapa.totalDeAulas} aula(s)`
+                : semNotas
+                  ? `${nome} — nenhuma avaliação cadastrada nesta etapa`
+                  : `${nome} — ${etapa.notasLancadas} de ${etapa.totalDeNotas} nota(s)`}
             </TooltipContent>
           </Tooltip>
         );
@@ -385,10 +445,28 @@ function Legenda() {
       </div>
 
       <div className="flex items-center gap-3 sm:ml-auto">
-        {PARTES.map(({ chave, rotulo, icone: Icone }) => (
-          <span key={chave} className="flex items-center gap-1.5">
-            <Icone className="size-4" aria-hidden="true" />
+        {PARTES.map(({ chave, rotulo, icone: Icone, disabled }) => (
+          <span
+            key={chave}
+            className={cn(
+              "flex items-center gap-1.5",
+              disabled && "text-muted-foreground/60",
+            )}
+            title={disabled ? `${rotulo} — em breve` : undefined}
+          >
+            <Icone
+              className={cn(
+                "size-4",
+                disabled ? ICONE_INDISPONIVEL : "text-caderneta-parte",
+              )}
+              aria-hidden="true"
+            />
             {rotulo}
+            {disabled && (
+              <span className="text-[10px] tracking-wide uppercase opacity-70">
+                em breve
+              </span>
+            )}
           </span>
         ))}
       </div>

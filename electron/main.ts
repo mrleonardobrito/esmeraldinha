@@ -38,8 +38,6 @@ function getApi(): Promise<Hono> {
     apiPromise = import('../server/app')
       .then(({ createApp }) => {
         const api = createApp();
-        // A agenda semanal só existe enquanto o app está aberto: ela não
-        // acorda a máquina nem roda com a Esmeraldinha fechada.
         void import('../server/cadernetas/agenda').then(({ iniciarAgendaSemanal }) =>
           iniciarAgendaSemanal(),
         );

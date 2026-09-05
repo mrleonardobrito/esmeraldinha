@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
-import type { AulaDoPortal } from '../scrape/types';
+import type {
+  AulaDoPortal,
+  AvaliacaoDoPortal,
+  NotaDoEstudante,
+  NotaDoPortal,
+} from '../scrape/types';
 import { turnoDaTurma } from '../turmas/turno';
 
 /** As cinco partes da caderneta, como definidas no CONTEXT.md. */
@@ -29,6 +34,8 @@ export interface EstudanteDaCaderneta {
   matricula: string;
   nome: string;
   situacao: string | null;
+  /** Como o portal a escreve, em DD/MM/AAAA; nula quando ele a omite. */
+  dataMatricula: string | null;
 }
 
 /** Uma aula da caderneta, com o que o portal disse sobre ela. */
@@ -45,13 +52,61 @@ export interface AulaDaCaderneta {
   ferramentas: string | null;
 }
 
-/** Uma etapa da caderneta e o progresso do conteúdo dentro dela. */
+/** Uma avaliação da etapa: uma coluna do boletim. */
+export interface AvaliacaoDaCaderneta {
+  nome: string;
+  tipo: string | null;
+  data: string | null;
+  /** O valor máximo da avaliação; `null` quando o portal não o informa. */
+  valor: number | null;
+  /** A média que o portal exibe junto do valor. */
+  media: number | null;
+}
+
+/**
+ * As notas da linha do estudante que não são de nenhuma avaliação. O portal
+ * calcula `calculada` e `parcial` — elas chegam desabilitadas e só são
+ * exibidas; `personalizada` e `final` é que se preenche.
+ */
+export interface NotaDoEstudanteDaCaderneta {
+  matricula: string;
+  personalizada: number | null;
+  final: number | null;
+  calculada: number | null;
+  parcial: number | null;
+}
+
+/** Uma nota lançada no portal, chaveada como o portal a chaveia. */
+export interface NotaDaCaderneta {
+  matricula: string;
+  avaliacao: string;
+  valor: number;
+}
+
+/** O boletim de uma etapa numa disciplina: quem, em quê, com quanto. */
+export interface BoletimDaEtapa {
+  etapa: string;
+  /** A disciplina deste boletim; `null` quando a caderneta não tem nenhuma. */
+  disciplina: string | null;
+  /** Todas as disciplinas da caderneta, para a tela poder trocar. */
+  disciplinas: string[];
+  estudantes: EstudanteDaCaderneta[];
+  avaliacoes: AvaliacaoDaCaderneta[];
+  notas: NotaDaCaderneta[];
+  notasDoEstudante: NotaDoEstudanteDaCaderneta[];
+}
+
+/** Uma etapa da caderneta e o progresso das partes dentro dela. */
 export interface EtapaDaCaderneta {
   nome: string;
   meses: string[];
   totalDeAulas: number;
   aulasPreenchidas: number;
   conteudo: StatusDaParte;
+  /** Quantas notas a etapa comporta: estudantes × avaliações. */
+  totalDeNotas: number;
+  notasLancadas: number;
+  boletim: StatusDaParte;
 }
 
 export interface Caderneta {
@@ -69,11 +124,24 @@ export interface Caderneta {
 }
 
 /** O que uma raspagem do portal traz para uma etapa da turma. */
+/** O boletim de uma disciplina dentro de uma etapa, como a raspagem o traz. */
+export interface BoletimRaspado {
+  disciplina: string;
+  avaliacoes: readonly AvaliacaoDoPortal[];
+  notas: readonly NotaDoPortal[];
+  notasDoEstudante: readonly NotaDoEstudante[];
+}
+
 export interface EtapaRaspada {
   nome: string;
   meses: string[];
   /** As aulas datadas da etapa, com o mês em que o portal as lista. */
   aulas: (AulaDoPortal & { mes: string })[];
+  /**
+   * Um boletim por disciplina da turma. Vazio quando a etapa não tem avaliação
+   * cadastrada — aí o portal não oferece nem disciplina nem tabela.
+   */
+  boletins?: readonly BoletimRaspado[];
 }
 
 export class CadernetaNotFoundError extends Error {
@@ -127,6 +195,11 @@ function statusDoConteudo(total: number, preenchidas: number): StatusDaParte {
   return preenchidas >= total ? 'concluido' : 'parcial';
 }
 
+/**
+ * O progresso de cada etapa. As aulas e as notas são contadas em consultas
+ * separadas de propósito: um único JOIN entre as duas multiplicaria uma pela
+ * outra, e a etapa apareceria com dez vezes mais aulas do que tem.
+ */
 function readEtapas(db: DatabaseSync, cadernetaId: string): EtapaDaCaderneta[] {
   const rows = db
     .prepare(
@@ -143,13 +216,51 @@ function readEtapas(db: DatabaseSync, cadernetaId: string): EtapaDaCaderneta[] {
     )
     .all(cadernetaId) as unknown as EtapaRow[];
 
-  return rows.map((row) => ({
-    nome: row.nome,
-    meses: JSON.parse(row.meses) as string[],
-    totalDeAulas: Number(row.total),
-    aulasPreenchidas: Number(row.preenchidas),
-    conteudo: statusDoConteudo(Number(row.total), Number(row.preenchidas)),
-  }));
+  const { estudantes } = db
+    .prepare(
+      'SELECT COUNT(*) AS estudantes FROM caderneta_estudantes WHERE caderneta_id = ?',
+    )
+    .get(cadernetaId) as unknown as { estudantes: number };
+
+  const avaliacoesPorEtapa = new Map<string, number>();
+  for (const row of db
+    .prepare(
+      `SELECT etapa, COUNT(*) AS total FROM caderneta_avaliacoes
+        WHERE caderneta_id = ? GROUP BY etapa`,
+    )
+    .all(cadernetaId) as unknown as { etapa: string; total: number }[]) {
+    // Soma as avaliações de todas as disciplinas: o progresso da etapa é o do
+    // boletim inteiro, não o de uma disciplina só.
+    avaliacoesPorEtapa.set(row.etapa, Number(row.total));
+  }
+
+  const notasPorEtapa = new Map<string, number>();
+  for (const row of db
+    .prepare(
+      `SELECT etapa, COUNT(*) AS total FROM caderneta_notas
+        WHERE caderneta_id = ? GROUP BY etapa`,
+    )
+    .all(cadernetaId) as unknown as { etapa: string; total: number }[]) {
+    notasPorEtapa.set(row.etapa, Number(row.total));
+  }
+
+  return rows.map((row) => {
+    // O boletim está completo quando todo estudante tem nota em toda
+    // avaliação: são as células da grade que o portal mostra.
+    const totalDeNotas = Number(estudantes) * (avaliacoesPorEtapa.get(row.nome) ?? 0);
+    const notasLancadas = notasPorEtapa.get(row.nome) ?? 0;
+
+    return {
+      nome: row.nome,
+      meses: JSON.parse(row.meses) as string[],
+      totalDeAulas: Number(row.total),
+      aulasPreenchidas: Number(row.preenchidas),
+      conteudo: statusDoConteudo(Number(row.total), Number(row.preenchidas)),
+      totalDeNotas,
+      notasLancadas,
+      boletim: statusDoConteudo(totalDeNotas, notasLancadas),
+    };
+  });
 }
 
 function toCaderneta(db: DatabaseSync, row: CadernetaRow): Caderneta {
@@ -191,11 +302,87 @@ function replaceEtapas(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
+  const insertAvaliacao = db.prepare(
+    `INSERT INTO caderneta_avaliacoes
+       (caderneta_id, etapa, disciplina, nome, tipo, data, valor, media, posicao)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const insertNota = db.prepare(
+    `INSERT INTO caderneta_notas
+       (caderneta_id, etapa, disciplina, matricula, avaliacao, valor)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  const insertNotaDoEstudante = db.prepare(
+    `INSERT INTO caderneta_notas_do_estudante
+       (caderneta_id, etapa, disciplina, matricula, personalizada, final, calculada, parcial)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const insertDisciplina = db.prepare(
+    'INSERT OR IGNORE INTO caderneta_disciplinas (caderneta_id, nome, posicao) VALUES (?, ?, ?)',
+  );
+
   db.prepare('DELETE FROM caderneta_etapas WHERE caderneta_id = ?').run(cadernetaId);
   db.prepare('DELETE FROM caderneta_aulas WHERE caderneta_id = ?').run(cadernetaId);
+  db.prepare('DELETE FROM caderneta_avaliacoes WHERE caderneta_id = ?').run(cadernetaId);
+  db.prepare('DELETE FROM caderneta_notas WHERE caderneta_id = ?').run(cadernetaId);
+  db.prepare('DELETE FROM caderneta_notas_do_estudante WHERE caderneta_id = ?').run(
+    cadernetaId,
+  );
+  db.prepare('DELETE FROM caderneta_disciplinas WHERE caderneta_id = ?').run(cadernetaId);
+
+  // As disciplinas são da turma, mas o portal as oferece por etapa: a união do
+  // que apareceu em cada uma é o conjunto da caderneta.
+  const disciplinas: string[] = [];
 
   etapas.forEach((etapa, posicao) => {
     insertEtapa.run(cadernetaId, etapa.nome, posicao, JSON.stringify(etapa.meses));
+
+    for (const boletim of etapa.boletins ?? []) {
+      if (!disciplinas.includes(boletim.disciplina)) {
+        insertDisciplina.run(cadernetaId, boletim.disciplina, disciplinas.length);
+        disciplinas.push(boletim.disciplina);
+      }
+
+      boletim.avaliacoes.forEach((avaliacao, ordem) => {
+        insertAvaliacao.run(
+          cadernetaId,
+          etapa.nome,
+          boletim.disciplina,
+          avaliacao.nome,
+          avaliacao.tipo ?? null,
+          avaliacao.data ?? null,
+          avaliacao.valor ?? null,
+          avaliacao.media ?? null,
+          ordem,
+        );
+      });
+
+      for (const nota of boletim.notas) {
+        insertNota.run(
+          cadernetaId,
+          etapa.nome,
+          boletim.disciplina,
+          nota.matricula,
+          nota.avaliacao,
+          nota.valor,
+        );
+      }
+
+      for (const nota of boletim.notasDoEstudante) {
+        // Uma linha só com calculadas não diz nada que o portal não recalcule;
+        // guardar as quatro mesmo assim mantém a leitura fiel à tela.
+        insertNotaDoEstudante.run(
+          cadernetaId,
+          etapa.nome,
+          boletim.disciplina,
+          nota.matricula,
+          nota.personalizada ?? null,
+          nota.final ?? null,
+          nota.calculada ?? null,
+          nota.parcial ?? null,
+        );
+      }
+    }
 
     for (const aula of etapa.aulas) {
       insertAula.run(
@@ -318,8 +505,8 @@ function replaceEstudantes(
   estudantes: readonly EstudanteDaCaderneta[],
 ): void {
   const insert = db.prepare(
-    `INSERT INTO caderneta_estudantes (caderneta_id, matricula, nome, situacao, ordem)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO caderneta_estudantes (caderneta_id, matricula, nome, situacao, data_matricula, ordem)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   );
 
   db.prepare('DELETE FROM caderneta_estudantes WHERE caderneta_id = ?').run(cadernetaId);
@@ -330,6 +517,7 @@ function replaceEstudantes(
       estudante.matricula,
       estudante.nome,
       estudante.situacao ?? null,
+      estudante.dataMatricula ?? null,
       ordem,
     );
   });
@@ -360,16 +548,22 @@ export function listEstudantes(
 ): EstudanteDaCaderneta[] {
   const rows = db
     .prepare(
-      `SELECT matricula, nome, situacao FROM caderneta_estudantes
+      `SELECT matricula, nome, situacao, data_matricula FROM caderneta_estudantes
         WHERE caderneta_id = ? ORDER BY ordem ASC`,
     )
     .all(cadernetaId) as unknown as {
     matricula: string;
     nome: string;
     situacao: string | null;
+    data_matricula: string | null;
   }[];
 
-  return rows;
+  return rows.map((row) => ({
+    matricula: row.matricula,
+    nome: row.nome,
+    situacao: row.situacao,
+    dataMatricula: row.data_matricula,
+  }));
 }
 
 /**
@@ -463,4 +657,209 @@ export function deleteCaderneta(db: DatabaseSync, id: string): void {
 
   db.prepare('DELETE FROM caderneta_etapas WHERE caderneta_id = ?').run(id);
   db.prepare('DELETE FROM caderneta_aulas WHERE caderneta_id = ?').run(id);
+  db.prepare('DELETE FROM caderneta_avaliacoes WHERE caderneta_id = ?').run(id);
+  db.prepare('DELETE FROM caderneta_notas WHERE caderneta_id = ?').run(id);
+  db.prepare('DELETE FROM caderneta_notas_do_estudante WHERE caderneta_id = ?').run(id);
+  db.prepare('DELETE FROM caderneta_disciplinas WHERE caderneta_id = ?').run(id);
+}
+
+/** As disciplinas da caderneta, na ordem em que o portal as lista. */
+export function listDisciplinasDaCaderneta(
+  db: DatabaseSync,
+  cadernetaId: string,
+): string[] {
+  const rows = db
+    .prepare(
+      `SELECT nome FROM caderneta_disciplinas
+        WHERE caderneta_id = ? ORDER BY posicao ASC`,
+    )
+    .all(cadernetaId) as unknown as { nome: string }[];
+
+  return rows.map((row) => row.nome);
+}
+
+/**
+ * O boletim de uma etapa numa disciplina: os estudantes, as colunas, as notas
+ * já lançadas e as notas por estudante que não são de nenhuma avaliação.
+ *
+ * Sem `disciplina`, usa a primeira da caderneta — é o caso comum de quem tem
+ * uma só e não quer escolher nada.
+ */
+export function getBoletimDaEtapa(
+  db: DatabaseSync,
+  cadernetaId: string,
+  etapa: string,
+  disciplina?: string,
+): BoletimDaEtapa {
+  const disciplinas = listDisciplinasDaCaderneta(db, cadernetaId);
+  const escolhida = disciplina ?? disciplinas[0];
+
+  // Sem nenhuma disciplina não há avaliação cadastrada, e o boletim é vazio:
+  // é o que faz a tela pedir o cadastro em vez de mostrar uma grade sem colunas.
+  if (escolhida === undefined) {
+    return {
+      etapa,
+      disciplina: null,
+      disciplinas,
+      estudantes: listEstudantes(db, cadernetaId),
+      avaliacoes: [],
+      notas: [],
+      notasDoEstudante: [],
+    };
+  }
+
+  const avaliacoes = db
+    .prepare(
+      `SELECT nome, tipo, data, valor, media FROM caderneta_avaliacoes
+        WHERE caderneta_id = ? AND etapa = ? AND disciplina = ?
+        ORDER BY posicao ASC`,
+    )
+    .all(cadernetaId, etapa, escolhida) as unknown as {
+    nome: string;
+    tipo: string | null;
+    data: string | null;
+    valor: number | null;
+    media: number | null;
+  }[];
+
+  const notas = db
+    .prepare(
+      `SELECT matricula, avaliacao, valor FROM caderneta_notas
+        WHERE caderneta_id = ? AND etapa = ? AND disciplina = ?`,
+    )
+    .all(cadernetaId, etapa, escolhida) as unknown as NotaDaCaderneta[];
+
+  const notasDoEstudante = db
+    .prepare(
+      `SELECT matricula, personalizada, final, calculada, parcial
+         FROM caderneta_notas_do_estudante
+        WHERE caderneta_id = ? AND etapa = ? AND disciplina = ?`,
+    )
+    .all(cadernetaId, etapa, escolhida) as unknown as {
+    matricula: string;
+    personalizada: number | null;
+    final: number | null;
+    calculada: number | null;
+    parcial: number | null;
+  }[];
+
+  const numero = (valor: number | null) => (valor === null ? null : Number(valor));
+
+  return {
+    etapa,
+    disciplina: escolhida,
+    disciplinas,
+    estudantes: listEstudantes(db, cadernetaId),
+    avaliacoes: avaliacoes.map((avaliacao) => ({
+      nome: avaliacao.nome,
+      tipo: avaliacao.tipo,
+      data: avaliacao.data,
+      valor: numero(avaliacao.valor),
+      media: numero(avaliacao.media),
+    })),
+    notas: notas.map((nota) => ({
+      matricula: nota.matricula,
+      avaliacao: nota.avaliacao,
+      valor: Number(nota.valor),
+    })),
+    notasDoEstudante: notasDoEstudante.map((nota) => ({
+      matricula: nota.matricula,
+      personalizada: numero(nota.personalizada),
+      final: numero(nota.final),
+      calculada: numero(nota.calculada),
+      parcial: numero(nota.parcial),
+    })),
+  };
+}
+
+/** Uma nota que um envio acabou de gravar no portal. */
+export interface NotaGravada {
+  etapa: string;
+  disciplina: string;
+  matricula: string;
+  avaliacao: string;
+  valor: number;
+}
+
+/** Uma nota da linha do estudante que acabou de ser gravada. */
+export interface NotaDoEstudanteGravada {
+  etapa: string;
+  disciplina: string;
+  matricula: string;
+  personalizada?: number | null;
+  final?: number | null;
+}
+
+/**
+ * Grava as notas que um envio lançou, para a grade refletir o envio sem
+ * esperar uma sincronização. Uma nota de uma avaliação que a caderneta não
+ * conhece é ignorada: quem manda sobre quais avaliações existem é a raspagem,
+ * como acontece com as aulas.
+ */
+export function marcarNotasLancadas(
+  db: DatabaseSync,
+  cadernetaId: string,
+  notas: readonly NotaGravada[],
+  notasDoEstudante: readonly NotaDoEstudanteGravada[] = [],
+): number {
+  const conhece = db.prepare(
+    `SELECT 1 FROM caderneta_avaliacoes
+      WHERE caderneta_id = ? AND etapa = ? AND disciplina = ? AND nome = ?`,
+  );
+  const upsert = db.prepare(
+    `INSERT INTO caderneta_notas
+       (caderneta_id, etapa, disciplina, matricula, avaliacao, valor)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (caderneta_id, etapa, disciplina, matricula, avaliacao)
+     DO UPDATE SET valor = excluded.valor`,
+  );
+  // As calculadas ficam de fora: quem as preenche é o portal, e sobrescrevê-las
+  // com o que a tela achava é apagar o cálculo dele.
+  const upsertDoEstudante = db.prepare(
+    `INSERT INTO caderneta_notas_do_estudante
+       (caderneta_id, etapa, disciplina, matricula, personalizada, final)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (caderneta_id, etapa, disciplina, matricula)
+     DO UPDATE SET
+       personalizada = COALESCE(excluded.personalizada, personalizada),
+       final = COALESCE(excluded.final, final)`,
+  );
+
+  let gravadas = 0;
+
+  db.exec('BEGIN');
+  try {
+    for (const nota of notas) {
+      if (!conhece.get(cadernetaId, nota.etapa, nota.disciplina, nota.avaliacao)) continue;
+
+      upsert.run(
+        cadernetaId,
+        nota.etapa,
+        nota.disciplina,
+        nota.matricula,
+        nota.avaliacao,
+        nota.valor,
+      );
+      gravadas += 1;
+    }
+
+    for (const nota of notasDoEstudante) {
+      upsertDoEstudante.run(
+        cadernetaId,
+        nota.etapa,
+        nota.disciplina,
+        nota.matricula,
+        nota.personalizada ?? null,
+        nota.final ?? null,
+      );
+      gravadas += 1;
+    }
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return gravadas;
 }

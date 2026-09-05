@@ -54,6 +54,11 @@ async function abrir(
 ): Promise<SessaoRastreada> {
   const browser = await getBrowser();
   const context = await browser.newContext({ viewport: null });
+  // Ver o comentário equivalente em `portal-sessions.ts`: o `keepNames` do
+  // esbuild usado pelo `tsx` injeta um `__name` que não existe na página.
+  await context.addInitScript(() => {
+    (window as unknown as { __name?: <T>(fn: T) => T }).__name = (fn) => fn;
+  });
   const page = await context.newPage();
 
   try {

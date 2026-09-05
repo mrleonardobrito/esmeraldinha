@@ -93,31 +93,60 @@ describe('cadernetas store', () => {
     const caderneta = cadastrar(
       [primeiraEtapa],
       [
-        { matricula: '2026001', nome: 'Ana Lima', situacao: 'ATIVO' },
-        { matricula: '2026002', nome: 'Bruno Sá', situacao: null },
+        {
+          matricula: '2026001',
+          nome: 'Ana Lima',
+          situacao: 'ATIVO',
+          dataMatricula: '05/01/2026',
+        },
+        { matricula: '2026002', nome: 'Bruno Sá', situacao: null, dataMatricula: null },
       ],
     );
 
     expect(caderneta.totalDeEstudantes).toBe(2);
     expect(listEstudantes(db, caderneta.id)).toEqual([
-      { matricula: '2026001', nome: 'Ana Lima', situacao: 'ATIVO' },
-      { matricula: '2026002', nome: 'Bruno Sá', situacao: null },
+      {
+        matricula: '2026001',
+        nome: 'Ana Lima',
+        situacao: 'ATIVO',
+        dataMatricula: '05/01/2026',
+      },
+      { matricula: '2026002', nome: 'Bruno Sá', situacao: null, dataMatricula: null },
     ]);
   });
 
   it('substitui os estudantes numa nova sincronização', () => {
     const caderneta = cadastrar(
       [primeiraEtapa],
-      [{ matricula: '2026001', nome: 'Ana Lima', situacao: 'ATIVO' }],
+      [
+        {
+          matricula: '2026001',
+          nome: 'Ana Lima',
+          situacao: 'ATIVO',
+          dataMatricula: '05/01/2026',
+        },
+      ],
     );
 
     syncCaderneta(db, caderneta.id, {
       etapas: [primeiraEtapa],
-      estudantes: [{ matricula: '2026009', nome: 'Rita Melo', situacao: 'ATIVO' }],
+      estudantes: [
+        {
+          matricula: '2026009',
+          nome: 'Rita Melo',
+          situacao: 'ATIVO',
+          dataMatricula: '13/02/2026',
+        },
+      ],
     });
 
     expect(listEstudantes(db, caderneta.id)).toEqual([
-      { matricula: '2026009', nome: 'Rita Melo', situacao: 'ATIVO' },
+      {
+        matricula: '2026009',
+        nome: 'Rita Melo',
+        situacao: 'ATIVO',
+        dataMatricula: '13/02/2026',
+      },
     ]);
   });
 

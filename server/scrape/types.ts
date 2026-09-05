@@ -16,10 +16,21 @@ export interface Aula {
   readonly ferramentas?: string;
 }
 
+/** Uma disciplina da etapa e as avaliações cadastradas nela. */
+export interface DisciplinaOptions {
+  readonly nome: string;
+  readonly avaliacoes: readonly AvaliacaoDoPortal[];
+}
+
 export interface EtapaOptions {
   readonly nome: string;
   readonly turmas: readonly string[];
   readonly meses: readonly string[];
+  /**
+   * As disciplinas da etapa com as avaliações de cada uma. Vazio quando o
+   * professor ainda não as cadastrou no portal — e aí não há nota a lançar.
+   */
+  readonly disciplinas?: readonly DisciplinaOptions[];
 }
 
 /** As opções válidas de Lançamento de Conteúdo para o professor da sessão. */
@@ -27,26 +38,7 @@ export interface ConteudoCatalogo {
   readonly etapas: readonly EtapaOptions[];
 }
 
-export interface LancaConteudoFilter {
-  readonly etapa: string;
-  /** O portal salva sem ela; fica aqui porque a tela a exibe. */
-  readonly reducao?: string;
-  readonly mes: string;
-  readonly turma: string;
-  readonly aulas: readonly Aula[];
-}
-
 export type FieldStatus = 'skipped' | 'disabled' | 'unchanged' | 'updated';
-
-export interface AulaFailure {
-  readonly aula: string;
-  readonly reason: string;
-}
-
-export interface WriteResult {
-  readonly succeeded: readonly string[];
-  readonly failed: readonly AulaFailure[];
-}
 
 /** Uma aula como o portal a mostra na tela de Lançamento de Conteúdo. */
 export interface AulaDoPortal {
@@ -85,9 +77,80 @@ export interface ListaDeAulasFilter {
   readonly turma: string;
 }
 
+/**
+ * Uma avaliação da etapa: é ela que dá as colunas do boletim. O portal exige
+ * que exista antes de qualquer nota ser lançada.
+ */
+export interface AvaliacaoDoPortal {
+  readonly nome: string;
+  readonly tipo?: string;
+  readonly data?: string;
+  /** O valor máximo da avaliação; ausente quando o portal não o informa. */
+  readonly valor?: number;
+  /** A média que o portal exibe junto do valor. */
+  readonly media?: number;
+}
+
+/**
+ * As notas da linha do estudante que não pertencem a nenhuma avaliação. O
+ * portal calcula duas delas — `calculada` e `parcial` chegam desabilitadas e
+ * só são lidas; `personalizada` e `final` é que se escreve.
+ */
+export interface NotaDoEstudante {
+  readonly matricula: string;
+  readonly personalizada?: number;
+  readonly final?: number;
+  readonly calculada?: number;
+  readonly parcial?: number;
+}
+
+/** Uma nota que o portal já tem, chaveada como ele a chaveia. */
+export interface NotaDoPortal {
+  readonly matricula: string;
+  readonly avaliacao: string;
+  readonly valor: number;
+}
+
+/** O boletim de uma etapa como o portal o mostra. */
+export interface BoletimDoPortal {
+  readonly avaliacoes: readonly AvaliacaoDoPortal[];
+  readonly notas: readonly NotaDoPortal[];
+  readonly notasDoEstudante: readonly NotaDoEstudante[];
+}
+
+/**
+ * Onde o boletim mora no portal. A disciplina só tem opções quando a etapa
+ * tem avaliação cadastrada, então ela é opcional: sem avaliação não há nem
+ * disciplina nem tabela.
+ */
+export interface BoletimFilter {
+  readonly etapa: string;
+  readonly turma: string;
+  readonly disciplina?: string;
+}
+
+/** Uma nota a escrever, já resolvida na matrícula do estudante. */
+export interface NotaParaLancar {
+  readonly matricula: string;
+  readonly avaliacao: string;
+  readonly valor: number;
+}
+
+/** Onde as notas moram no portal, mais o que escrever nelas. */
+export interface PreenchimentoDeNotasFilter {
+  readonly etapa: string;
+  readonly turma: string;
+  readonly disciplina?: string;
+  readonly notas: readonly NotaParaLancar[];
+  /** A nota personalizada e a final da etapa, por estudante. */
+  readonly notasDoEstudante?: readonly NotaDoEstudante[];
+}
+
 /** Um estudante como o portal o lista na turma. */
 export interface EstudanteDoPortal {
   readonly matricula: string;
   readonly nome: string;
   readonly situacao?: string;
+  /** Como o portal a escreve, em DD/MM/AAAA. */
+  readonly dataMatricula?: string;
 }

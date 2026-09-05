@@ -22,6 +22,10 @@ export interface EtapaDaCaderneta {
   totalDeAulas: number;
   aulasPreenchidas: number;
   conteudo: StatusDaParte;
+  /** Quantas notas a etapa comporta: estudantes × avaliações. */
+  totalDeNotas: number;
+  notasLancadas: number;
+  boletim: StatusDaParte;
 }
 
 export type SyncStatus = "pendente" | "sincronizando" | "sincronizada" | "falhou";
@@ -57,6 +61,47 @@ export interface AulaDaCaderneta {
   codigoCR: string | null;
   desenvolvimento: string | null;
   ferramentas: string | null;
+}
+
+/** Uma avaliação da etapa: uma coluna do boletim. */
+export interface AvaliacaoDaCaderneta {
+  nome: string;
+  tipo: string | null;
+  data: string | null;
+  /** O valor máximo da avaliação; `null` quando o portal não o informa. */
+  valor: number | null;
+  media: number | null;
+}
+
+/**
+ * As notas da linha do estudante que não são de nenhuma avaliação. O portal
+ * calcula `calculada` e `parcial`; só `personalizada` e `final` se preenche.
+ */
+export interface NotaDoEstudanteDaCaderneta {
+  matricula: string;
+  personalizada: number | null;
+  final: number | null;
+  calculada: number | null;
+  parcial: number | null;
+}
+
+/** Uma nota já lançada no portal. */
+export interface NotaDaCaderneta {
+  matricula: string;
+  avaliacao: string;
+  valor: number;
+}
+
+/** O boletim de uma etapa numa disciplina: quem, em quê, com quanto. */
+export interface BoletimDaEtapa {
+  etapa: string;
+  /** `null` quando a caderneta não tem disciplina — logo, sem avaliação. */
+  disciplina: string | null;
+  disciplinas: string[];
+  estudantes: EstudanteDaCaderneta[];
+  avaliacoes: AvaliacaoDaCaderneta[];
+  notas: NotaDaCaderneta[];
+  notasDoEstudante: NotaDoEstudanteDaCaderneta[];
 }
 
 export async function loadCadernetas(professorId: string): Promise<Caderneta[]> {
@@ -192,4 +237,50 @@ export async function preencherAulaNoPortal(
 
 export async function excluirCaderneta(cadernetaId: string): Promise<void> {
   await requestApi(`/api/cadernetas/${cadernetaId}`, { method: "DELETE" });
+}
+
+/** O boletim de uma etapa: os estudantes, as avaliações e as notas. */
+export async function loadBoletimDaEtapa(
+  cadernetaId: string,
+  etapa: string,
+  disciplina?: string,
+): Promise<BoletimDaEtapa> {
+  const query = disciplina ? `?disciplina=${encodeURIComponent(disciplina)}` : "";
+  const response = await requestApi(
+    `/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/boletim${query}`,
+  );
+
+  return (await response.json()) as BoletimDaEtapa;
+}
+
+/**
+ * Abre o boletim numa janela visível do portal, com as notas editadas já
+ * escritas nos campos. Como no preenchimento de uma aula, a automação para
+ * antes de salvar: conferir e gravar é do auxiliar de ensino.
+ */
+export async function preencherNotasNoPortal(
+  cadernetaId: string,
+  etapa: string,
+  notas: readonly NotaDaCaderneta[],
+  opcoes: {
+    disciplina?: string | null;
+    notasDoEstudante?: readonly {
+      matricula: string;
+      personalizada?: number | null;
+      final?: number | null;
+    }[];
+  } = {},
+): Promise<void> {
+  await requestApi(`/api/cadernetas/${cadernetaId}/boletim/preenchimentos-assistidos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      etapa,
+      notas,
+      ...(opcoes.disciplina ? { disciplina: opcoes.disciplina } : {}),
+      ...(opcoes.notasDoEstudante?.length
+        ? { notasDoEstudante: opcoes.notasDoEstudante }
+        : {}),
+    }),
+  });
 }

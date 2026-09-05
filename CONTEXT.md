@@ -140,6 +140,31 @@ _Avoid_: interaction, participação
 An assessment an etapa's notas are given against, with a nome, tipo (e.g. `OBSERVAÇÃO`, `TRABALHO EM GRUPO`, `AVALIAÇÃO/PROVA`), data and valor. Created on the portal's _Cadastro de Avaliação_ screen before the boletim can be filled in.
 _Avoid_: assessment, prova, atividade
 
+**disciplina**:
+A subject a turma is taught. A caderneta covers one turma and may hold several,
+each with its own boletim. The portal only offers it once the etapa has an
+avaliação, so no disciplina means no avaliação has been registered yet.
+_Avoid_: subject, matéria, componente
+
+**nota**:
+What one estudante scored on one avaliação — one cell of the boletim, where a
+student's row meets an avaliação's column. Keyed by matrícula, disciplina and
+avaliação, never by name: the name is what a professor writes, the matrícula is
+what the portal stores.
+_Avoid_: grade, score, pontuação
+
+**nota personalizada**:
+A grade the professor sets on an estudante's row directly, outside any
+avaliação. Editable, unlike the ones the portal computes.
+_Avoid_: custom grade, nota manual
+
+**nota parcial**:
+A grade the portal computes for an estudante's row and shows read-only,
+alongside the **nota calculada pelas avaliações**. Esmeraldinha reads both and
+writes neither.
+_Avoid_: partial grade, prévia
+
 **nota final da etapa**:
-The grade an estudante closes an etapa with.
-_Avoid_: final grade, média, nota
+The grade an estudante closes an etapa with, written on their row of the
+boletim. Editable, unlike the nota parcial and the nota calculada.
+_Avoid_: final grade, média
