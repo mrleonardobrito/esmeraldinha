@@ -41,8 +41,24 @@ The record a professor must keep for one turma across the school year. Composed 
 _Avoid_: diário, registro, notebook
 
 **turma**:
-A class group. A caderneta belongs to exactly one turma.
+A class group. Discovered on the portal during the cadastro do professor, never
+typed: the portal is what knows which turmas a professor works in. Owns its
+estudantes, and a caderneta belongs to exactly one turma.
 _Avoid_: class, grupo
+
+**nome curto da turma**:
+What a turma is called on screen, derived from the name the portal writes. The
+portal spells a turma as `<série> - <turma> - <turno>`, repeating the série and
+appending the turno — `PRÉ-ESCOLA II - PRÉ-ESCOLA II - C - INTEGRAL`. Only the
+middle identifies it (`PRÉ-ESCOLA II - C`), so that is what is shown; the full
+name stays the stored one, since it is what the portal and the caderneta key on.
+_Avoid_: nome amigável, display name
+
+**turno**:
+The shift a turma runs in — `MATUTINO`, `VESPERTINO` or `INTEGRAL`. The portal
+has no field for it: it writes the turno at the end of the turma's name, so it
+is read from there rather than asked for.
+_Avoid_: shift, período
 
 **etapa**:
 One of the four periods the school year is divided into. Its start and end dates come from the calendário acadêmico.

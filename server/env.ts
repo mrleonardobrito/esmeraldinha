@@ -5,6 +5,14 @@ function readInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** Como `readInt`, mas aceita 0 — domingo e meia-noite são valores válidos. */
+function readIntFromZero(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === '') return fallback;
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 export const env = {
   /** URL do portal do professor. */
   portalUrl: process.env.PORTAL_URL?.trim() || DEFAULT_PORTAL_URL,
@@ -28,6 +36,19 @@ export const env = {
   },
   /** Tamanho máximo de cada arquivo de um envio. */
   maxUploadBytes: readInt(process.env.MAX_UPLOAD_BYTES, 10 * 1024 * 1024),
+  /**
+   * Sincronização semanal das cadernetas de madrugada. Desligada por padrão:
+   * ela loga no portal sem ninguém por perto, e no Linux o `safeStorage`
+   * costuma não decifrar a senha com o keyring da sessão trancado — ligue
+   * depois de conferir que funciona na sua máquina.
+   */
+  sync: {
+    enabled: process.env.SYNC_SEMANAL === 'true',
+    /** 0 = domingo. Padrão: domingo. */
+    weekday: Math.min(6, readIntFromZero(process.env.SYNC_SEMANAL_DIA, 0)),
+    /** Hora local. Padrão: 3h. */
+    hour: Math.min(23, readIntFromZero(process.env.SYNC_SEMANAL_HORA, 3)),
+  },
   /** Uma sessão ociosa é encerrada depois desse tempo. */
   sessionIdleMs: readInt(process.env.PORTAL_SESSION_IDLE_MS, 15 * 60_000),
   /**

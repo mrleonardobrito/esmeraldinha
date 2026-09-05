@@ -187,6 +187,34 @@ describe('professores router', () => {
     expect(updated).not.toHaveProperty('senha');
   });
 
+  it('accepts the null imagem it hands back for a professor without one', async () => {
+    const app = await freshApp();
+
+    const createResponse = await app.fetch(
+      new Request('http://localhost/api/professores', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(novoProfessor()),
+      }),
+    );
+    const created = await createResponse.json();
+    expect(created.imagem).toBeNull();
+
+    // O formulário de edição devolve o professor do jeito que o recebeu:
+    // a imagem ausente volta como null, não como campo omitido.
+    const updateResponse = await app.fetch(
+      new Request(`http://localhost/api/professores/${created.id}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...novoProfessor({ nome: 'Maria Souza' }), imagem: null }),
+      }),
+    );
+
+    expect(updateResponse.status).toBe(200);
+    const updated = await updateResponse.json();
+    expect(updated).toMatchObject({ id: created.id, nome: 'Maria Souza', imagem: null });
+  });
+
   it('leaves the stored senha unchanged when editing without one', async () => {
     const app = await freshApp();
 

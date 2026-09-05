@@ -8,9 +8,13 @@ import {
 } from './primefaces';
 import { LoginError, MissingAulaRowsError } from './errors';
 import type {
+  EstudanteDoPortal,
+  AulaDoPortal,
   ConteudoCatalogo,
   EtapaOptions,
   LancaConteudoFilter,
+  ListaDeAulasFilter,
+  PreenchimentoAssistidoFilter,
   AulaFailure,
   ProfessorCredenciais,
   WriteResult,
@@ -128,6 +132,11 @@ export async function selectFirstReducao(page: Page): Promise<string | undefined
   return primeira;
 }
 
+const MATRICULA_PATTERN = /Matr[íi]cula:?\s*(\S+)/i;
+const SITUACAO_PATTERN = /^(ATIVO|INATIVO|TRANSFERIDO|CANCELADO|CONCLU[ÍI]DO)$/i;
+const DATA_PATTERN = /\d{2}\/\d{2}\/\d{4}/;
+const ORDEM_PATTERN = /Ordem da Aula:\s*(\d+)/;
+
 export function findAulaRow(page: Page, date: string, ordem?: number): Locator {
   const byDate = page
     .locator('tr[data-ri]')
@@ -138,6 +147,175 @@ export function findAulaRow(page: Page, date: string, ordem?: number): Locator {
   return byDate.filter({
     has: page.locator('span.texto1', { hasText: `Ordem da Aula: ${ordem}` }),
   });
+}
+
+/**
+ * O que o portal escreveu num campo da linha, ou `undefined` quando o campo
+ * não existe ali ou está em branco — um campo vazio não é conteúdo lançado.
+ */
+async function readFieldValue(row: Locator, field: string): Promise<string | undefined> {
+  const campo = row.locator(`[id$="${field}"]`);
+
+  if ((await campo.count()) !== 1) return undefined;
+
+  const valor = (await campo.inputValue()).trim();
+
+  return valor === '' ? undefined : valor;
+}
+
+/**
+ * As aulas que o portal já tem para uma etapa/turma/mês, na ordem em que ele
+ * as mostra. É o espelho de `postAulaContent`: mesmos filtros, mesmas linhas,
+ * só que lendo. Uma aula conta como preenchida quando o desenvolvimento dela
+ * não está vazio — o portal é a única fonte de verdade sobre isso.
+ */
+export async function listAulas(
+  page: Page,
+  { etapa, turma, mes }: ListaDeAulasFilter,
+): Promise<AulaDoPortal[]> {
+  await openLancaConteudo(page);
+
+  await selectMenuOption(page, page, FILTER.etapa, etapa);
+  await selectMenuOption(page, page, FILTER.turma, turma);
+  await selectFirstReducao(page);
+  await selectMenuOption(page, page, FILTER.mes, mes);
+
+  const rows = page.locator('tr[data-ri]');
+
+  // Um mês sem aulas é um resultado legítimo, não uma falha: a tabela
+  // simplesmente não aparece. Só esperamos pela primeira linha se houver uma.
+  if ((await rows.count()) === 0) return [];
+
+  const aulas: AulaDoPortal[] = [];
+
+  for (const row of await rows.all()) {
+    const textos = await row.locator('span.texto1').allTextContents();
+    const data = textos
+      .map((texto) => DATA_PATTERN.exec(texto)?.[0])
+      .find((match): match is string => match !== undefined);
+
+    if (!data) continue;
+
+    const ordem = textos
+      .map((texto) => ORDEM_PATTERN.exec(texto)?.[1])
+      .find((match): match is string => match !== undefined);
+
+    const codigoCR = await readFieldValue(row, FIELD.codigoCR);
+    const desenvolvimento = await readFieldValue(row, FIELD.desenvolvimento);
+    const ferramentas = await readFieldValue(row, FIELD.ferramentas);
+
+    aulas.push({
+      data,
+      ...(ordem === undefined ? {} : { ordem: Number(ordem) }),
+      ...(codigoCR === undefined ? {} : { codigoCR }),
+      ...(desenvolvimento === undefined ? {} : { desenvolvimento }),
+      ...(ferramentas === undefined ? {} : { ferramentas }),
+      preenchida: desenvolvimento !== undefined,
+    });
+  }
+
+  return aulas;
+}
+
+/**
+ * Os estudantes matriculados na turma, lidos da tela de Lançamento de
+ * Presença — é ela que lista a turma inteira, uma linha por matrícula.
+ *
+ * Os seletores desta função ainda não foram conferidos contra o portal de
+ * verdade: faltam credenciais para isso. Ela devolve lista vazia quando não
+ * reconhece a tela, em vez de estourar, para que uma raspagem parcial não
+ * derrube o resto — o que ela sabe sobre aulas continua valendo.
+ */
+export async function listEstudantes(
+  page: Page,
+  { etapa, turma }: { etapa: string; turma: string },
+): Promise<EstudanteDoPortal[]> {
+  await page.getByRole('link', { name: 'Etapa' }).click();
+  await page.getByRole('link', { name: 'Lançamento de Presença' }).click();
+  await waitForAjax(page);
+
+  await selectMenuOption(page, page, FILTER.etapa, etapa);
+  await selectMenuOption(page, page, FILTER.turma, turma);
+  await selectFirstReducao(page);
+
+  const rows = page.locator('tr[data-ri]');
+  if ((await rows.count()) === 0) return [];
+
+  const estudantes: EstudanteDoPortal[] = [];
+
+  for (const row of await rows.all()) {
+    const textos = (await row.locator('span.texto1').allTextContents()).map((texto) =>
+      texto.replace(/[\s\u00a0]+/g, ' ').trim(),
+    );
+
+    const matricula = textos
+      .map((texto) => MATRICULA_PATTERN.exec(texto)?.[1])
+      .find((match): match is string => match !== undefined);
+
+    // Sem matrícula não há como chavear o boletim, então a linha não serve.
+    if (!matricula) continue;
+
+    const nome = textos.find(
+      (texto) => texto.length > 0 && !MATRICULA_PATTERN.test(texto) && !/^\d+$/.test(texto),
+    );
+
+    if (!nome) continue;
+
+    const situacao = textos.find((texto) => SITUACAO_PATTERN.test(texto));
+
+    estudantes.push({ matricula, nome, situacao: situacao ?? undefined });
+  }
+
+  return estudantes;
+}
+
+/**
+ * Deixa a tela do portal pronta na linha de uma aula, com o conteúdo editado
+ * já escrito nos campos — e para aí. Não salva: quem confere e decide gravar
+ * é o auxiliar de ensino, na janela que ficou aberta. É por isso que ela não
+ * devolve `WriteResult` como `postAulaContent`: não há gravação para relatar.
+ *
+ * Levanta `MissingAulaRowsError` quando a data não casa com exatamente uma
+ * linha, pelo mesmo motivo que `postAulaContent`: preencher a linha errada é
+ * pior do que não preencher nenhuma.
+ */
+export async function prepararAulaParaPreenchimento(
+  page: Page,
+  { etapa, turma, mes, data, ordem, conteudo }: PreenchimentoAssistidoFilter,
+): Promise<void> {
+  await openLancaConteudo(page);
+
+  await selectMenuOption(page, page, FILTER.etapa, etapa);
+  await selectMenuOption(page, page, FILTER.turma, turma);
+  await selectFirstReducao(page);
+  await selectMenuOption(page, page, FILTER.mes, mes);
+
+  await expect(
+    page.locator('tr[data-ri]').first(),
+    'the diary table did not load',
+  ).toBeVisible({ timeout: AJAX_TIMEOUT_MS });
+
+  const row = findAulaRow(page, data, ordem);
+  const count = await row.count();
+
+  if (count !== 1) {
+    throw new MissingAulaRowsError([
+      count === 0
+        ? `${data} (nenhuma linha)`
+        : `${data} (${count} linhas — informe a ordem da aula)`,
+    ]);
+  }
+
+  await selectMenuOption(page, row, FIELD.isRecuperacao, conteudo.isRecuperacao);
+  await selectMenuOption(page, row, FIELD.isInteracao, conteudo.isInteracao);
+
+  await fillField(page, row, FIELD.codigoCR, conteudo.codigoCR);
+  await fillField(page, row, FIELD.desenvolvimento, conteudo.desenvolvimento);
+  await fillField(page, row, FIELD.ferramentas, conteudo.ferramentas);
+
+  // A linha é o assunto da janela: deixá-la à vista poupa o auxiliar de
+  // procurá-la numa tabela de um mês inteiro.
+  await row.scrollIntoViewIfNeeded().catch(() => {});
 }
 
 export async function postAulaContent(
