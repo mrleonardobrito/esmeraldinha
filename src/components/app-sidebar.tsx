@@ -14,7 +14,7 @@ import {
   IconFileDescription,
   IconFileAi,
   IconChalkboardTeacher,
-  IconBook2
+  IconBook2,
 } from "@tabler/icons-react";
 
 const data = {

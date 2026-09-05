@@ -16,8 +16,14 @@
 # vite
 /dist/
 
-# production
-/build
+# vite (processo principal do Electron)
+/dist-electron/
+
+# release (instaladores do electron-builder)
+/release/
+
+# Chromium baixado por `pnpm playwright:install` para o empacotamento
+/pw-browsers/
 
 # misc
 .DS_Store

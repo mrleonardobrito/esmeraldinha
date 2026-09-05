@@ -23,6 +23,7 @@ vi.mock('../portal-sessions', () => ({
   openSession: (...args: unknown[]) => openSessionMock(...args),
   closeSession: vi.fn(),
   touchSession: vi.fn(),
+  retomarSessao: vi.fn(),
 }));
 
 async function freshApp() {
@@ -96,11 +97,16 @@ describe('POST /api/cadernetas/sessoes', () => {
     expect(body).toMatchObject({ sessionId: 'sessao-1', escola: 'Escola Municipal' });
 
     expect(openSessionMock).toHaveBeenCalledTimes(1);
-    expect(openSessionMock).toHaveBeenCalledWith({
-      login: '11144477735',
-      senha: 'senha-secreta',
-      escola: 'Escola Municipal',
-    });
+    // A sessão nasce sabendo de quem é: é esse vínculo que permite refazer o
+    // login quando ela expira.
+    expect(openSessionMock).toHaveBeenCalledWith(
+      {
+        login: '11144477735',
+        senha: 'senha-secreta',
+        escola: 'Escola Municipal',
+      },
+      { professorId: expect.any(String) },
+    );
   });
 
   it('gives a 404 for an unknown professor, without ever calling the portal', async () => {

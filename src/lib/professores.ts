@@ -37,8 +37,10 @@ export function maskCpf(value: string) {
  * boundary — the API never includes it in a response — so it is optional
  * here rather than on `ProfessorInput`, which the cadastro form uses.
  */
-export type Professor = Omit<ProfessorInput, "senha"> & {
+export type Professor = Omit<ProfessorInput, "senha" | "imagem"> & {
   senha?: string;
+  /** Nulo quando o professor não tem imagem: é assim que o banco a guarda. */
+  imagem: string | null;
   id: string;
   createdAt: string;
 };

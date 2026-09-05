@@ -19,7 +19,7 @@ O glossário do domínio vive em `CONTEXT.md`.
 6. O usuário final do sistema é o auxiliar de ensino, que recebe as solicitações dos professores
 7. Cada professor vai enviar o conteúdo de cada caderneta em formato de texto, imagem(manuscrita/digitada) e/ou pdf
 8. Não existe uma ordem correta de envio de conteúdo, o sistema deve saber qual parte da caderneta preencher apenas interpretando o conteúdo enviado
-9. O portal não oferece acesso delegado, então o professor entrega as próprias credenciais ao auxiliar de ensino e a Esmeraldinha precisa guardá-las com segurança. O `localStorage` usado hoje é apenas andaime de teste, não a solução final
+9. O portal não oferece acesso delegado, então o professor entrega as próprias credenciais ao auxiliar de ensino e o sistema precisa guardá-las com segurança. O `localStorage` usado hoje é apenas andaime de teste, não a solução final
 
 # Instruções
 

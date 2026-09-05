@@ -10,6 +10,12 @@ files:
   - dist/**
   - dist-electron/**
   - package.json
+  - server/codigos-cr/habilidades-ef.csv
+
+publish:
+  provider: github
+  owner: mrleonardobrito
+  repo: esmeraldinha
 
 # O Chromium do Playwright é grande demais para o asar e precisa ser executável
 # em disco. `pnpm playwright:install` o baixa para cá antes do empacotamento.
@@ -45,3 +51,9 @@ linux:
   category: Education
   synopsis: Cadernetas do portal do professor
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
+
+deb:
+  # O safeStorage do Electron precisa de um chaveiro (DBus) pra cifrar a senha
+  # dos professores. O AppImage não tem essa alavanca — só o .deb.
+  depends:
+    - gnome-keyring

@@ -1,4 +1,4 @@
-# Design da Esmeraldinha
+# Design do sistema
 
 Guia do design do produto, escrito a partir do que já existe em `src/`. Serve
 para manter novas telas coerentes com as atuais (`/professores`, `/cadernetas`).
