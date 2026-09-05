@@ -16,13 +16,12 @@
 # vite
 /dist/
 
-# vite (processo principal do Electron)
+# electron (main process bundle + packaged installers)
 /dist-electron/
-
-# release (instaladores do electron-builder)
 /release/
 
-# Chromium baixado por `pnpm playwright:install` para o empacotamento
+# Chromium do Playwright, baixado por `pnpm playwright:install` antes de
+# empacotar — grande demais para versionar.
 /pw-browsers/
 
 # misc

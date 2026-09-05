@@ -67,3 +67,27 @@ AppImage precisa garantir que um chaveiro esteja instalado e destravado.
 - `src/components/ui` — componentes shadcn/ui (`pnpm dlx shadcn@latest add <componente>`)
 - `src/globals.css` — Tailwind, tokens de tema e variáveis de fonte
 - `public/` — arquivos estáticos servidos na raiz
+- `server/` — API Hono, compartilhada entre `pnpm dev:api` e o processo principal
+  do Electron
+- `electron/` — o shell desktop: `main.ts` roteia `app://` e `/api/*` in-process,
+  `build.mjs` bundla o processo principal com esbuild
+
+## Distribuição
+
+O app é distribuído como instalador desktop (Electron), não hospedado. Pra
+empacotar localmente:
+
+```bash
+PLAYWRIGHT_BROWSERS_PATH=$PWD/pw-browsers pnpm playwright:install
+pnpm dist
+```
+
+O Chromium do Playwright precisa estar em `pw-browsers/` antes do empacotamento —
+é grande demais pro asar e o `electron-builder.yml` o copia como recurso externo.
+Buildar o instalador Windows exige rodar no Windows (ou CI); não há cross-build
+via wine/docker configurado.
+
+Os binários **não são assinados** (sem certificado de assinatura de código
+ainda). No Windows, o SmartScreen mostra "Windows protected your PC" — clique em
+*More info* e depois *Run anyway* para instalar.
+
