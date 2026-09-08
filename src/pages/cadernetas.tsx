@@ -25,7 +25,7 @@ import {
   ProfessorPicker,
   ProfessorPickerSkeleton,
 } from "@/components/professor-picker";
-import { Badge } from "@/components/ui/badge";
+import { SinalDeConexao } from "@/components/sinal-de-conexao";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -462,11 +462,18 @@ export function Cadernetas() {
                   </CardDescription>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="outline" onClick={() => setAnalisando(true)}>
+                  <Button
+                    data-tour="upload-inteligente"
+                    variant="outline"
+                    onClick={() => setAnalisando(true)}
+                  >
                     <IconSparkles data-icon="inline-start" />
                     Upload Inteligente
                   </Button>
-                  <Button onClick={() => setCadastrando(true)}>
+                  <Button
+                    data-tour="nova-caderneta"
+                    onClick={() => setCadastrando(true)}
+                  >
                     <IconPlus data-icon="inline-start" />
                     Nova caderneta
                   </Button>
@@ -626,32 +633,13 @@ function ConnectionStatus({
   onDisconnect: () => void;
 }) {
   if (status === "connecting") {
-    return (
-      <Badge
-        variant="outline"
-        className="h-8 gap-2 px-3"
-        role="status"
-        aria-live="polite"
-      >
-        <span className="relative inline-flex size-2" aria-hidden="true">
-          <span className="absolute inline-flex size-2 rounded-full bg-primary/50 animate-ping-ring" />
-          <span className="relative inline-flex size-2 rounded-full bg-primary" />
-        </span>
-        Conectando…
-      </Badge>
-    );
+    return <SinalDeConexao estado="connecting" role="status" aria-live="polite" />;
   }
 
   if (status === "connected") {
     return (
       <div className="flex items-center gap-2">
-        <Badge variant="outline" className="h-8 gap-2 px-3" role="status">
-          <span
-            className="inline-flex size-2 rounded-full bg-primary"
-            aria-hidden="true"
-          />
-          Conectado
-        </Badge>
+        <SinalDeConexao estado="connected" role="status" />
         <Button
           variant="ghost"
           size="icon-sm"
@@ -674,7 +662,10 @@ function ConnectionStatus({
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-w-full flex-1 bg-zinc-50 p-4 font-sans lg:p-6 dark:bg-black">
+    <div
+      data-tour="cadernetas"
+      className="min-w-full flex-1 bg-zinc-50 p-4 font-sans lg:p-6 dark:bg-black"
+    >
       {children}
     </div>
   );

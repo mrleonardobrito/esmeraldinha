@@ -7,7 +7,7 @@ import { TooltipProvider } from "radix-ui/tooltip";
 import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
-import { WelcomeWizard } from "@/components/welcome-wizard";
+import { WelcomeTour } from "@/components/welcome-tour";
 import { Cadernetas } from "@/pages/cadernetas";
 import { Painel } from "@/pages/painel";
 import { Professores } from "@/pages/professores";
@@ -38,9 +38,7 @@ export function App() {
                 <Route path="/cadernetas" element={<Cadernetas />} />
               </Routes>
             </main>
-            {guiaAberto && (
-              <WelcomeWizard onClose={() => setGuiaAberto(false)} />
-            )}
+            {guiaAberto && <WelcomeTour onClose={() => setGuiaAberto(false)} />}
             <Toaster />
           </TooltipProvider>
         </SidebarProvider>

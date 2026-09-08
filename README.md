@@ -64,8 +64,9 @@ AppImage precisa garantir que um chaveiro esteja instalado e destravado.
 
 - `index.html` — entrada do Vite, carrega as fontes do Google Fonts
 - `src/main.tsx` — bootstrap do React
-- `src/components/welcome-wizard.tsx` — guia de boas-vindas, aberto sozinho
-  na primeira execução e depois pelo `?` no cabeçalho
+- `src/components/welcome-tour.tsx` — passeio guiado pelas funcionalidades
+  (react-joyride), aberto sozinho na primeira execução e depois pelo `?` no
+  cabeçalho
 - `src/components/ui` — componentes shadcn/ui (`pnpm dlx shadcn@latest add <componente>`)
 - `src/globals.css` — Tailwind, tokens de tema e variáveis de fonte
 - `public/` — arquivos estáticos servidos na raiz

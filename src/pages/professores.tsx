@@ -190,7 +190,7 @@ export function Professores() {
             Cadastre os professores que terão acesso à Esmeraldinha.
           </CardDescription>
           <CardAction>
-            <Button onClick={openCreateForm}>
+            <Button data-tour="novo-professor" onClick={openCreateForm}>
               <IconPlus data-icon="inline-start" />
               Novo professor
             </Button>
