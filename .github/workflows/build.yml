@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -57,3 +60,44 @@ jobs:
           name: esmeraldinha-${{ matrix.target }}
           path: ${{ matrix.artifact_glob }}
           if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Precisa escrever de volta o bump de versão depois da release.
+          persist-credentials: true
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: esmeraldinha-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Read release version
+        id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.version.outputs.value }}" \
+            artifacts/* \
+            --title "v${{ steps.version.outputs.value }}" \
+            --generate-notes
+
+      # Garante que o próximo merge na main não tente recriar a mesma tag.
+      - name: Bump patch version for next release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version patch --no-git-tag-version
+          new_version=$(node -p "require('./package.json').version")
+          git commit -am "chore: bump version to $new_version [skip ci]"
+          git push
