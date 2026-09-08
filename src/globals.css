@@ -19,6 +19,32 @@
     }
   }
 
+  /* A entrada do painel: cada bloco sobe e aparece, um logo depois do outro. */
+  --animate-rise: rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* Barras de progresso crescem da esquerda, em vez de já estarem cheias. */
+  --animate-grow-x: grow-x 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  @keyframes grow-x {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
@@ -163,6 +189,17 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/*
+ * Movimento é enfeite: quem pediu menos dele ao sistema recebe o painel já
+ * montado, sem percurso nenhum.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise,
+  .animate-grow-x {
+    animation: none;
   }
 }
 /* Utilitários usados por `ui/attachment.tsx`. */

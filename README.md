@@ -11,8 +11,8 @@ pnpm dev
 
 Abra [http://localhost:5173](http://localhost:5173).
 
-A página inicial fica em `src/pages/home.tsx`; o shell da aplicação (tema, sidebar,
-header) em `src/App.tsx`.
+A página inicial é o painel, em `src/pages/painel.tsx`; o shell da aplicação
+(tema, sidebar, header) em `src/App.tsx`.
 
 ## Scripts
 
