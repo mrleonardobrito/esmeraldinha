@@ -15,6 +15,7 @@ import {
   IconFileAi,
   IconChalkboardTeacher,
   IconBook2,
+  IconLayoutDashboard,
 } from "@tabler/icons-react";
 
 const data = {
@@ -24,6 +25,11 @@ const data = {
     avatar: "/esmeralda-light.jpg",
   },
   navMain: [
+    {
+      title: "Painel",
+      url: "/painel",
+      icon: <IconLayoutDashboard />,
+    },
     {
       title: "Professores",
       url: "/professores",

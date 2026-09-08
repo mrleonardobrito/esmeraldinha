@@ -11,8 +11,8 @@ pnpm dev
 
 Abra [http://localhost:5173](http://localhost:5173).
 
-A página inicial fica em `src/pages/home.tsx`; o shell da aplicação (tema, sidebar,
-header) em `src/App.tsx`.
+A página inicial é o painel, em `src/pages/painel.tsx`; o shell da aplicação
+(tema, sidebar, header) em `src/App.tsx`.
 
 ## Scripts
 
@@ -64,8 +64,9 @@ AppImage precisa garantir que um chaveiro esteja instalado e destravado.
 
 - `index.html` — entrada do Vite, carrega as fontes do Google Fonts
 - `src/main.tsx` — bootstrap do React
-- `src/components/welcome-wizard.tsx` — guia de boas-vindas, aberto sozinho
-  na primeira execução e depois pelo `?` no cabeçalho
+- `src/components/welcome-tour.tsx` — passeio guiado pelas funcionalidades
+  (react-joyride), aberto sozinho na primeira execução e depois pelo `?` no
+  cabeçalho
 - `src/components/ui` — componentes shadcn/ui (`pnpm dlx shadcn@latest add <componente>`)
 - `src/globals.css` — Tailwind, tokens de tema e variáveis de fonte
 - `public/` — arquivos estáticos servidos na raiz
