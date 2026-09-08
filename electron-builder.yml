@@ -51,9 +51,8 @@ linux:
   category: Education
   synopsis: Cadernetas do portal do professor
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  maintainer: mrleonardobrito <lbritogit@gmail.com>
 
 deb:
-  # O safeStorage do Electron precisa de um chaveiro (DBus) pra cifrar a senha
-  # dos professores. O AppImage não tem essa alavanca — só o .deb.
   depends:
     - gnome-keyring
