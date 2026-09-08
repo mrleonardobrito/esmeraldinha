@@ -9,6 +9,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { WelcomeWizard } from "@/components/welcome-wizard";
 import { Cadernetas } from "@/pages/cadernetas";
+import { Painel } from "@/pages/painel";
 import { Professores } from "@/pages/professores";
 import { hasSeenWelcome } from "@/lib/welcome";
 
@@ -31,10 +32,8 @@ export function App() {
             <main className="flex min-h-full flex-1 flex-col">
               <SiteHeader onAbrirGuia={() => setGuiaAberto(true)} />
               <Routes>
-                <Route
-                  path="/"
-                  element={<Navigate to="/professores" replace />}
-                />
+                <Route path="/" element={<Navigate to="/painel" replace />} />
+                <Route path="/painel" element={<Painel />} />
                 <Route path="/professores" element={<Professores />} />
                 <Route path="/cadernetas" element={<Cadernetas />} />
               </Routes>
