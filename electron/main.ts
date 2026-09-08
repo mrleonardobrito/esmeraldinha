@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises';
+import { appendFile, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, net, protocol, shell } from 'electron';
@@ -12,6 +12,28 @@ const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 
 const rootDir = join(__dirname, '..');
 const rendererDir = join(rootDir, 'dist');
+
+// O AppImage não deixa stdout/stderr em lugar nenhum: sem isso, um crash do
+// motor do Chromium (GPU, renderer) ou um erro não tratado no Node some sem
+// deixar rastro nenhum, como aconteceu antes desse arquivo existir.
+const logPath = join(app.getPath('userData'), 'crash.log');
+function logToFile(linha: string): void {
+  const stamp = new Date().toISOString();
+  void appendFile(logPath, `[${stamp}] ${linha}\n`, 'utf8').catch(() => {});
+}
+
+process.on('uncaughtException', (error) => {
+  logToFile(`uncaughtException: ${error.stack ?? error}`);
+});
+process.on('unhandledRejection', (reason) => {
+  logToFile(`unhandledRejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`);
+});
+
+// Máquinas de auxiliar de ensino não têm GPU dedicada nem precisam de
+// aceleração gráfica para telas de formulário/tabela; desligar remove o
+// processo GPU do Chromium do caminho crítico — a classe de crash nativo
+// mais comum em Electron empacotado como AppImage no Linux.
+app.disableHardwareAcceleration();
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -89,6 +111,11 @@ async function loadDevServer(window: BrowserWindow, url: string): Promise<void> 
   throw new Error(`Servidor de desenvolvimento não respondeu em ${url}`);
 }
 
+// Se o crash for determinístico (não um flake do driver gráfico), recriar a
+// janela sem limite viraria um loop batendo CPU a 100% em vez de um app morto
+// — pior que o problema original.
+let quedasRecentes = 0;
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1280,
@@ -105,12 +132,32 @@ function createWindow(): void {
     },
   });
 
-  window.once('ready-to-show', () => window.show());
+  window.once('ready-to-show', () => {
+    quedasRecentes = 0;
+    window.show();
+  });
 
   // Links externos abrem no navegador do sistema, nunca dentro do app.
   window.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // Um crash do processo de renderização (o motor Chromium abortando por um
+  // CHECK interno, por exemplo) antes só deixava a janela travada em branco.
+  // Registrar o evento dá evidência real da próxima vez, e recriar a janela
+  // evita que o auxiliar de ensino fique com o app morto sem saber por quê.
+  window.webContents.on('render-process-gone', (_event, details) => {
+    logToFile(`render-process-gone: ${JSON.stringify(details)}`);
+    window.destroy();
+
+    quedasRecentes += 1;
+    if (quedasRecentes > 3) {
+      logToFile('render-process-gone: 3 quedas seguidas, desistindo de recriar a janela.');
+      app.quit();
+      return;
+    }
+    createWindow();
   });
 
   if (devServerUrl) {
@@ -128,6 +175,14 @@ if (!app.requestSingleInstanceLock()) {
     if (!window) return;
     if (window.isMinimized()) window.restore();
     window.focus();
+  });
+
+  // Cobre o processo GPU e utilitários do Chromium: um crash ali (o que o
+  // coredump anterior não conseguiu confirmar por falta de símbolos) some
+  // sem esse log, mesmo com `render-process-gone` capturando o processo de
+  // renderização.
+  app.on('child-process-gone', (_event, details) => {
+    logToFile(`child-process-gone: ${JSON.stringify(details)}`);
   });
 
   void app.whenReady().then(() => {
