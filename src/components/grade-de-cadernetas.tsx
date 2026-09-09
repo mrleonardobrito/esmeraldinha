@@ -275,11 +275,12 @@ function CelulaDaEtapa({
     <div className="inline-flex items-center gap-2.5">
       {PARTES.map(({ chave, nome, icone: Icone, disabled }) => {
         const conteudo = chave === "conteudo";
+        const boletim = chave === "boletim";
         const semNotas = etapa.totalDeNotas === 0;
-        // Uma etapa sem aula não tem conteúdo a lançar. O boletim continua
-        // acionável sem avaliação: é dentro do modal que a tela explica que
-        // elas nascem no portal.
-        const vazia = conteudo && semAulas;
+        // Uma etapa sem aula não tem conteúdo a lançar; uma sem avaliação
+        // cadastrada não tem boletim a lançar — as avaliações nascem no
+        // portal, então até lá o botão fica inabilitado.
+        const vazia = (conteudo && semAulas) || (boletim && semNotas);
         const acionavel = !disabled && !vazia;
 
         if (!acionavel) {
@@ -306,9 +307,11 @@ function CelulaDaEtapa({
               </TooltipTrigger>
               <TooltipContent>
                 {nome} —{" "}
-                {vazia
+                {conteudo && vazia
                   ? "esta etapa não tem aulas para a turma"
-                  : "ainda preenchido à mão no portal"}
+                  : boletim && vazia
+                    ? "esta etapa não tem avaliação cadastrada no portal"
+                    : "ainda preenchido à mão no portal"}
               </TooltipContent>
             </Tooltip>
           );
@@ -351,9 +354,7 @@ function CelulaDaEtapa({
             <TooltipContent>
               {conteudo
                 ? `${nome} — ${etapa.aulasPreenchidas} de ${etapa.totalDeAulas} aula(s)`
-                : semNotas
-                  ? `${nome} — nenhuma avaliação cadastrada nesta etapa`
-                  : `${nome} — ${etapa.notasLancadas} de ${etapa.totalDeNotas} nota(s)`}
+                : `${nome} — ${etapa.notasLancadas} de ${etapa.totalDeNotas} nota(s)`}
             </TooltipContent>
           </Tooltip>
         );

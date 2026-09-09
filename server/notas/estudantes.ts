@@ -13,9 +13,14 @@ export class EstudanteNaoEncontradoError extends Error {
   constructor(
     readonly nome: string,
     readonly conhecidos: readonly string[],
+    /** A matrícula que o material trouxe, quando ela também não era da turma. */
+    readonly matricula?: string,
   ) {
     super(
-      `Nenhum estudante da turma se chama "${nome}". ` +
+      (matricula
+        ? `Nem a matrícula ${matricula} nem o nome "${nome}" são de algum ` +
+          'estudante da turma. '
+        : `Nenhum estudante da turma se chama "${nome}". `) +
         `Estudantes da turma: ${conhecidos.join(', ') || 'nenhum'}.`,
     );
     this.name = 'EstudanteNaoEncontradoError';
@@ -48,6 +53,57 @@ export function normalizarNome(nome: string): string {
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** Uma matrícula comparável: sem espaço, sem pontuação, sem caixa. */
+function normalizarMatricula(matricula: string): string {
+  return matricula.replace(/[^0-9a-zA-Z]/g, '').toLowerCase();
+}
+
+/**
+ * A matrícula do estudante a que a nota pertence.
+ *
+ * A matrícula do material manda: ela é a chave do portal, e o nome que vem
+ * junto erra com frequência — `ALEYF` por `ALEFY`, `IKARO` por `ICARO`.
+ * Quando ela é de um estudante da turma, o nome não chega a ser conferido.
+ *
+ * Uma matrícula que não é de ninguém da turma não descarta a nota: o material
+ * pode ter vindo de uma exportação com a numeração de outro ano, e o nome
+ * ainda achar o estudante. Os dois critérios erram em ocasiões diferentes, e
+ * juntos salvam a nota que qualquer um deles sozinho perderia.
+ *
+ * @throws {EstudanteNaoEncontradoError} quando nem a matrícula nem o nome casam.
+ * @throws {EstudanteAmbiguoError} quando o nome, sem matrícula que valha, serve a mais de um.
+ */
+export function resolverMatriculaDaNota(
+  nota: { readonly matricula?: string; readonly estudante: string },
+  estudantes: readonly EstudanteConhecido[],
+): string {
+  const informada = normalizarMatricula(nota.matricula ?? '');
+
+  if (informada !== '') {
+    const daTurma = estudantes.find(
+      (estudante) => normalizarMatricula(estudante.matricula) === informada,
+    );
+
+    if (daTurma) return daTurma.matricula;
+  }
+
+  try {
+    return resolverMatricula(nota.estudante, estudantes);
+  } catch (error) {
+    // Quem lê o erro precisa saber que a matrícula também foi tentada, ou vai
+    // procurar só pelo nome o que estava errado nos dois.
+    if (informada !== '' && error instanceof EstudanteNaoEncontradoError) {
+      throw new EstudanteNaoEncontradoError(
+        error.nome,
+        error.conhecidos,
+        nota.matricula,
+      );
+    }
+
+    throw error;
+  }
 }
 
 /**

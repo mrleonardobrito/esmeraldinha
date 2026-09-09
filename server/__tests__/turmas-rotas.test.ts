@@ -11,7 +11,6 @@ vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
   retomarSessao: vi.fn(),
   getCatalogo: vi.fn(),
-  getCatalogoComAvaliacoes: vi.fn(),
   openSession: vi.fn(),
   closeSession: vi.fn(),
 }));

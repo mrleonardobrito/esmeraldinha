@@ -5,13 +5,16 @@ import {
   IconArrowRight,
   IconCamera,
   IconCheck,
+  IconChevronDown,
   IconExternalLink,
   IconFile,
   IconFileTypeDoc,
   IconFileTypePdf,
   IconFileTypeXls,
   IconLoader,
+  IconPencil,
   IconPhoto,
+  IconSearch,
   IconSend,
   IconTypography,
   IconUpload,
@@ -20,6 +23,8 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import {
   Attachment,
   AttachmentActions,
@@ -39,10 +44,12 @@ import {
 } from "@/components/ui/card";
 import { ApiError } from "@/lib/api";
 import {
+  achatarNotasResolvidas,
   preencherAulaDoEnvioNoPortal,
   preencherBoletimDoEnvioNoPortal,
   preverEnvio,
-  type ItemDoEnvio,
+  resolverNotasDoEstudante,
+  type EstudanteDaTurma,
   type PreviewDoEnvio,
 } from "@/lib/envios";
 
@@ -97,6 +104,22 @@ function tamanhoLegivel(bytes: number) {
 }
 
 /**
+ * Um nome comparável, para filtrar a lista de estudantes enquanto o auxiliar
+ * digita — sem acento, sem caixa, sem espaço sobrando. A mesma ideia de
+ * `normalizarNome` do servidor, só que aqui é busca, não é quem decide se um
+ * nome bate: a escolha final é sempre um clique do auxiliar num estudante.
+ */
+function normalizarNome(nome: string): string {
+  return nome
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Cada anexo carrega a própria pré-visualização, criada uma vez e revogada
  * quando o anexo sai da lista — sem isso o blob vaza a cada re-render.
  */
@@ -131,7 +154,13 @@ type Estado =
       abrindo: boolean;
       erro: string | null;
     }
-  | { fase: "preenchendo-boletim"; preview: PreviewDoEnvio; aberto: boolean; erro: string | null };
+  | {
+      fase: "preenchendo-boletim";
+      preview: PreviewDoEnvio;
+      aberto: boolean;
+      abrindo: boolean;
+      erro: string | null;
+    };
 
 export interface EnvioDeMaterialProps {
   sessionId: string;
@@ -233,7 +262,7 @@ export function EnvioDeMaterial({
 
   function iniciarPreenchimento(preview: PreviewDoEnvio) {
     if (preview.plano.parte === "boletim") {
-      setEstado({ fase: "preenchendo-boletim", preview, aberto: false, erro: null });
+      void preencherBoletim(preview);
       return;
     }
 
@@ -294,12 +323,25 @@ export function EnvioDeMaterial({
   }
 
   async function preencherBoletim(preview: PreviewDoEnvio) {
-    const notas = (preview.notasResolvidas ?? []).filter(
-      (nota): nota is NonNullable<typeof nota> => nota !== undefined,
-    );
-    if (notas.length === 0) return;
+    const notas = achatarNotasResolvidas(preview.notasResolvidas ?? []);
 
-    setEstado({ fase: "preenchendo-boletim", preview, aberto: false, erro: null });
+    // Sem uma nota casada com estudante não há o que escrever na grade do
+    // portal, e mandar assim voltava como um 400 que não dizia isso.
+    if (notas.length === 0) {
+      setEstado({
+        fase: "preenchendo-boletim",
+        preview,
+        aberto: false,
+        abrindo: false,
+        erro:
+          "Nenhuma nota casou com um estudante da turma, então não há o que " +
+          "levar ao portal. Confira os nomes do material contra a lista de " +
+          "estudantes acima.",
+      });
+      return;
+    }
+
+    setEstado({ fase: "preenchendo-boletim", preview, aberto: false, abrindo: true, erro: null });
 
     try {
       await preencherBoletimDoEnvioNoPortal(sessionId, {
@@ -310,7 +352,7 @@ export function EnvioDeMaterial({
         disciplina: preview.plano.disciplina,
         notas,
       });
-      setEstado({ fase: "preenchendo-boletim", preview, aberto: true, erro: null });
+      setEstado({ fase: "preenchendo-boletim", preview, aberto: true, abrindo: false, erro: null });
       onGravou?.();
     } catch (error) {
       if (error instanceof ApiError && error.status === 404 && onSessaoExpirada) {
@@ -321,6 +363,7 @@ export function EnvioDeMaterial({
         fase: "preenchendo-boletim",
         preview,
         aberto: false,
+        abrindo: false,
         erro:
           error instanceof Error ? error.message : "Não foi possível abrir o boletim no portal.",
       });
@@ -333,7 +376,7 @@ export function EnvioDeMaterial({
         preview={estado.preview}
         semCard={semCard}
         onCancelar={cancelarPreview}
-        onIniciar={() => iniciarPreenchimento(estado.preview)}
+        onIniciar={iniciarPreenchimento}
       />
     );
   }
@@ -358,6 +401,7 @@ export function EnvioDeMaterial({
       <PreenchimentoDeBoletim
         preview={estado.preview}
         aberto={estado.aberto}
+        abrindo={estado.abrindo}
         erro={estado.erro}
         semCard={semCard}
         onAbrir={() => void preencherBoletim(estado.preview)}
@@ -622,6 +666,12 @@ function Moldura({
 }
 
 function CabecalhoDoPlano({ plano }: { plano: PreviewDoEnvio["plano"] }) {
+  const avaliacoes = Array.from(
+    new Set(plano.notas.flatMap((notasDoEstudante) =>
+      notasDoEstudante.notas.map((nota) => nota.avaliacao),
+    )),
+  );
+
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <Badge variant="outline">{plano.turma}</Badge>
@@ -629,7 +679,9 @@ function CabecalhoDoPlano({ plano }: { plano: PreviewDoEnvio["plano"] }) {
       {plano.parte === "boletim" ? (
         <>
           {plano.disciplina && <Badge variant="outline">{plano.disciplina}</Badge>}
-          {plano.avaliacao && <Badge variant="outline">{plano.avaliacao}</Badge>}
+          {avaliacoes.map((avaliacao) => (
+            <Badge key={avaliacao} variant="outline">{avaliacao}</Badge>
+          ))}
         </>
       ) : (
         <Badge variant="outline">{plano.mes}</Badge>
@@ -638,11 +690,26 @@ function CabecalhoDoPlano({ plano }: { plano: PreviewDoEnvio["plano"] }) {
   );
 }
 
+/** Um item já com a correção do auxiliar aplicada, pronto para exibição. */
+interface ItemView {
+  indice: number;
+  status: "pronta" | "falha";
+  rotulo: string;
+  matricula?: string;
+  motivo?: string;
+  candidatos?: string[];
+  quantidadeDeNotas?: number;
+  /** Verdadeiro quando o auxiliar corrigiu ou pareou este item na tela. */
+  corrigido: boolean;
+}
+
 /**
  * O que o agente leu, antes de qualquer janela do portal abrir: a turma, a
  * etapa, e um item por aula ou por estudante, já dizendo quais estão prontos
- * e quais falharam — e por quê. Só depois de conferir isto é que o auxiliar
- * decide levar o material para o portal.
+ * e quais falharam — e por quê. No boletim, um nome que falhou pode ser
+ * corrigido ou pareado com um estudante da turma bem aqui, sem reenviar o
+ * material. Só depois de conferir isto é que o auxiliar decide levar o
+ * material para o portal.
  */
 function PreviewDoEnvioView({
   preview,
@@ -653,11 +720,191 @@ function PreviewDoEnvioView({
   preview: PreviewDoEnvio;
   semCard?: boolean;
   onCancelar: () => void;
-  onIniciar: () => void;
+  onIniciar: (previewCorrigido: PreviewDoEnvio) => void;
 }) {
-  const prontos = preview.itens.filter((item) => item.status === "pronta").length;
-  const falhas = preview.itens.filter((item) => item.status === "falha");
-  const unidade = preview.plano.parte === "boletim" ? "nota" : "aula";
+  const isBoletim = preview.plano.parte === "boletim";
+  // Só o boletim pareia nome com estudante: uma aula não tem a quem parear.
+  const estudantesDaTurma = isBoletim ? preview.estudantes ?? [] : [];
+
+  const [correcoes, setCorrecoes] = React.useState<Record<number, EstudanteDaTurma>>({});
+  const [expandido, setExpandido] = React.useState<number | null>(null);
+  const [busca, setBusca] = React.useState("");
+  const [toast, setToast] = React.useState<string | null>(null);
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  // Fechada quando há pendência — o auxiliar não precisa rolar por uma lista
+  // longa de itens já prontos enquanto ainda tem nome para corrigir — e
+  // aberta assim que a primeira correção acontece, para ele ver onde caiu.
+  const [prontosAbertos, setProntosAbertos] = React.useState(
+    () => preview.itens.every((item) => item.status === "pronta"),
+  );
+
+  const itensView: ItemView[] = preview.itens.map((item, indice) => {
+    const correcao = correcoes[indice];
+    const quantidadeDeNotas = isBoletim
+      ? preview.plano.notas[indice]?.notas.length
+      : undefined;
+    if (correcao) {
+      return {
+        indice,
+        status: "pronta",
+        rotulo: correcao.nome,
+        matricula: correcao.matricula,
+        quantidadeDeNotas,
+        corrigido: true,
+      };
+    }
+    if (item.status === "pronta") {
+      let nome = item.rotulo;
+      let matricula: string | undefined = undefined;
+      if (isBoletim) {
+        const notasResolvidas = preview.notasResolvidas?.[indice];
+        const mat = notasResolvidas?.[0]?.matricula ?? item.rotulo;
+        const est = estudantesDaTurma.find((e) => e.matricula === mat);
+        nome = est?.nome ?? item.rotulo;
+        matricula = est?.matricula ?? mat;
+      }
+      return {
+        indice,
+        status: "pronta",
+        rotulo: nome,
+        matricula,
+        quantidadeDeNotas,
+        corrigido: false,
+      };
+    }
+    return {
+      indice,
+      status: "falha",
+      rotulo: item.rotulo,
+      motivo: item.motivo,
+      candidatos: item.candidatos,
+      quantidadeDeNotas,
+      corrigido: false,
+    };
+  });
+
+  const prontos = itensView.filter((item) => item.status === "pronta");
+  const falhas = itensView.filter((item) => item.status === "falha");
+  const unidade = isBoletim ? "estudante" : "aula";
+
+  // Cada estudante só pode ser escolhido para um item — sem isso dois nomes
+  // que falharam poderiam parear com a mesma pessoa.
+  const matriculasUsadas = new Set(
+    Object.entries(correcoes)
+      .filter(([indiceCorrigido]) => Number(indiceCorrigido) !== expandido)
+      .map(([, estudante]) => estudante.matricula),
+  );
+  preview.notasResolvidas?.forEach((notasDoEstudante, idx) => {
+    if (notasDoEstudante && idx !== expandido && !correcoes[idx]) {
+      const matricula = notasDoEstudante[0]?.matricula;
+      if (matricula) matriculasUsadas.add(matricula);
+    }
+  });
+
+  const itemExpandido = expandido !== null ? falhas.find((f) => f.indice === expandido) : null;
+
+  // Sugestões para o item atualmente expandido
+  const sugestoes = (() => {
+    if (expandido === null || !itemExpandido || !isBoletim) return [];
+
+    const buscaNorm = normalizarNome(busca);
+    const disponiveis = estudantesDaTurma.filter((e) => !matriculasUsadas.has(e.matricula));
+
+    // Candidatos explícitos vindos do backend (ex: EstudanteAmbiguoError)
+    const candidatosIds = new Set(itemExpandido.candidatos ?? []);
+
+    // Se não tiver candidatos explícitos, busca por sobreposição de palavras do nome lido
+    if (candidatosIds.size === 0 && itemExpandido.rotulo) {
+      const palavrasLidas = normalizarNome(itemExpandido.rotulo)
+        .split(/\s+/)
+        .filter((p) => p.length >= 3);
+      for (const est of disponiveis) {
+        const estNorm = normalizarNome(est.nome);
+        const palavrasCasadas = palavrasLidas.filter((p) => estNorm.includes(p));
+        if (palavrasCasadas.length >= 2 || (palavrasLidas.length === 1 && palavrasCasadas.length === 1)) {
+          candidatosIds.add(est.matricula);
+        }
+      }
+    }
+
+    const candidatos = disponiveis.filter((e) => candidatosIds.has(e.matricula));
+    const resto = disponiveis.filter(
+      (e) => !candidatosIds.has(e.matricula) && (buscaNorm === "" || normalizarNome(e.nome).includes(buscaNorm)),
+    );
+
+    const candidatosFiltrados =
+      buscaNorm === "" || buscaNorm === normalizarNome(itemExpandido.rotulo)
+        ? candidatos
+        : candidatos.filter((e) => normalizarNome(e.nome).includes(buscaNorm));
+
+    return [...candidatosFiltrados, ...resto].slice(0, 10).map((e) => ({
+      matricula: e.matricula,
+      nome: e.nome,
+      sugerido: candidatosIds.has(e.matricula),
+      exato: normalizarNome(e.nome) === buscaNorm && buscaNorm !== "",
+      estudante: e,
+    }));
+  })();
+
+  function abrirResolver(indice: number, nomeLido: string) {
+    setExpandido(indice);
+    setBusca(nomeLido);
+  }
+
+  function fecharResolver() {
+    setExpandido(null);
+    setBusca("");
+  }
+
+  function escolherEstudante(indice: number, estudante: EstudanteDaTurma) {
+    const itemAlvo = itensView.find((i) => i.indice === indice);
+    setCorrecoes((atuais) => ({ ...atuais, [indice]: estudante }));
+    setProntosAbertos(true);
+    fecharResolver();
+
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(`"${itemAlvo?.rotulo ?? "Nome"}" pareado com ${estudante.nome}.`);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3200);
+  }
+
+  function confirmarComEnter(indice: number) {
+    const alvoNorm = normalizarNome(busca);
+    const exato = sugestoes.find((s) => normalizarNome(s.nome) === alvoNorm);
+    if (exato) {
+      escolherEstudante(indice, exato.estudante);
+      return;
+    }
+    if (sugestoes.length > 0 && sugestoes[0].sugerido) {
+      escolherEstudante(indice, sugestoes[0].estudante);
+    }
+  }
+
+  function iniciar() {
+    if (Object.keys(correcoes).length === 0) {
+      onIniciar(preview);
+      return;
+    }
+
+    // As correções viram notas resolvidas de verdade, na mesma ordem de
+    // `plano.notas`, usando a nota que o professor mandou para esse índice.
+    const notasResolvidas = preview.notasResolvidas?.map((notas, indice) => {
+      const correcao = correcoes[indice];
+      if (!correcao) return notas;
+      return resolverNotasDoEstudante(
+        correcao.matricula,
+        preview.plano.notas[indice]?.notas ?? [],
+      );
+    });
+
+    onIniciar({ ...preview, notasResolvidas });
+  }
 
   return (
     <Moldura semCard={semCard}>
@@ -667,69 +914,228 @@ function PreviewDoEnvioView({
         <p className="text-sm text-muted-foreground">{preview.plano.observacao}</p>
       )}
 
-      <ListaDeItens itens={preview.itens} unidade={unidade} />
-
-      {falhas.length === 0 && prontos === 0 && (
-        <p className="text-sm text-muted-foreground">
-          O agente não encontrou nenhum item pronto para preencher.
-        </p>
+      {toast && (
+        <div className="flex items-center gap-2 rounded-2xl bg-primary/15 px-3.5 py-2.5 text-xs sm:text-sm font-medium text-primary">
+          <IconCheck className="size-4 shrink-0 text-primary" />
+          <span>{toast}</span>
+        </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" onClick={onCancelar}>
-          <IconArrowLeft data-icon="inline-start" />
-          Cancelar
-        </Button>
-        <Button onClick={onIniciar} disabled={prontos === 0}>
-          <IconExternalLink data-icon="inline-start" />
-          Preencher no sistema
-        </Button>
+      <div className="flex flex-col gap-3.5 rounded-[18px] border border-border p-3.5">
+        {falhas.length === 0 && prontos.length > 0 && (
+          <div className="flex items-center gap-2 py-1 px-1 text-sm font-semibold text-primary">
+            <IconCheck className="size-4.5 shrink-0" />
+            Todos os nomes foram confirmados.
+          </div>
+        )}
+
+        {falhas.length > 0 && (
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center gap-2.5">
+              <span className="flex size-6.5 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+                <IconAlertTriangle className="size-4" />
+              </span>
+              <div>
+                <div className="text-sm font-semibold">Precisam de confirmação ({falhas.length})</div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Não bateram com nenhum estudante da turma — corrija o nome ou escolha quem é.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {falhas.map((item) => (
+                <div
+                  key={item.indice}
+                  className="rounded-[14px] bg-destructive/10 p-3 text-card-foreground"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <span className="mt-0.5 flex size-5.5 shrink-0 items-center justify-center rounded-full text-destructive">
+                      <IconAlertTriangle className="size-3.5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold truncate">{item.rotulo}</div>
+                      {item.quantidadeDeNotas !== undefined && (
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {item.quantidadeDeNotas} {item.quantidadeDeNotas === 1 ? "nota" : "notas"}
+                        </div>
+                      )}
+                      <div className="mt-0.5 text-xs text-muted-foreground">{item.motivo}</div>
+                    </div>
+                    {isBoletim && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 shrink-0 rounded-2xl px-2.5 text-xs font-medium"
+                        onClick={() =>
+                          expandido === item.indice
+                            ? fecharResolver()
+                            : abrirResolver(item.indice, item.rotulo)
+                        }
+                      >
+                        <IconPencil className="size-3.5" />
+                        Corrigir
+                      </Button>
+                    )}
+                  </div>
+
+                  {expandido === item.indice && (
+                    <div className="mt-2.5 flex flex-col gap-2 border-t border-border/50 pt-2.5">
+                      <div className="text-xs text-muted-foreground">
+                        Nome lido: <span className="font-medium text-foreground">&quot;{item.rotulo}&quot;</span>
+                      </div>
+
+                      <div className="relative">
+                        <IconSearch className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          autoFocus
+                          value={busca}
+                          onChange={(e) => setBusca(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              confirmarComEnter(item.indice);
+                            }
+                          }}
+                          placeholder="Digite para corrigir ou buscar um estudante"
+                          className="h-8.5 rounded-2xl bg-background/60 pl-8.5 text-sm"
+                        />
+                      </div>
+                      <p className="-mt-1 text-[11px] text-muted-foreground">
+                        Pressione Enter para confirmar um nome exato, ou clique num estudante da lista.
+                      </p>
+
+                      <div className="flex max-h-48 flex-col gap-0.5 overflow-y-auto pr-0.5">
+                        {sugestoes.map((s) => (
+                          <button
+                            key={s.matricula}
+                            type="button"
+                            onClick={() => escolherEstudante(item.indice, s.estudante)}
+                            className={cn(
+                              "flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted/70 cursor-pointer",
+                              s.sugerido && "bg-primary/15 hover:bg-primary/20",
+                              s.exato && "border border-primary font-medium",
+                            )}
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              {s.sugerido && (
+                                <Badge className="h-5 rounded-full border-0 bg-primary/20 px-2 text-[11px] font-semibold text-primary">
+                                  Sugestão
+                                </Badge>
+                              )}
+                              <span className="truncate">{s.nome}</span>
+                            </span>
+                            <Badge variant="outline" className="shrink-0 text-xs tabular-nums">
+                              {s.matricula}
+                            </Badge>
+                          </button>
+                        ))}
+                        {sugestoes.length === 0 && (
+                          <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                            Nenhum estudante da turma corresponde a esse nome.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 rounded-2xl px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={fecharResolver}
+                        >
+                          Cancelar
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {falhas.length > 0 && prontos.length > 0 && <div className="h-px bg-border my-0.5" />}
+
+        {prontos.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setProntosAbertos(!prontosAbertos)}
+              className="flex w-full items-center justify-between rounded-xl p-1.5 text-left transition-colors hover:bg-muted/50 cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <span className="flex size-5.5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                  <IconCheck className="size-3.5" />
+                </span>
+                <span className="text-sm font-semibold">Prontas para preencher ({prontos.length})</span>
+              </span>
+              <IconChevronDown
+                className={cn(
+                  "size-4 text-muted-foreground transition-transform duration-200",
+                  prontosAbertos && "rotate-180",
+                )}
+              />
+            </button>
+
+            {prontosAbertos && (
+              <div className="mt-1 flex max-h-56 flex-col gap-0.5 overflow-y-auto p-1">
+                {prontos.map((item) => (
+                  <div
+                    key={item.indice}
+                    className="flex items-center gap-2 rounded-xl px-2 py-1.5 text-[13px]"
+                  >
+                    <IconCheck className="size-3.5 shrink-0 text-primary" />
+                    <span className="flex-1 truncate">{item.rotulo}</span>
+                    {item.quantidadeDeNotas !== undefined && (
+                      <Badge variant="secondary" className="text-xs">
+                        {item.quantidadeDeNotas} {item.quantidadeDeNotas === 1 ? "nota" : "notas"}
+                      </Badge>
+                    )}
+                    {item.corrigido && (
+                      <Badge variant="secondary" className="text-xs">
+                        corrigido
+                      </Badge>
+                    )}
+                    {item.matricula && (
+                      <Badge variant="outline" className="text-xs tabular-nums">
+                        {item.matricula}
+                      </Badge>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {falhas.length === 0 && prontos.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            Nenhuma {unidade} encontrada.
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-2 pt-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={onCancelar}>
+            <IconArrowLeft data-icon="inline-start" />
+            Cancelar
+          </Button>
+          <Button onClick={iniciar} disabled={prontos.length === 0}>
+            <IconExternalLink data-icon="inline-start" />
+            Preencher no sistema
+          </Button>
+        </div>
+        {falhas.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            As pendências acima não serão enviadas ao portal até serem confirmadas.
+          </p>
+        )}
       </div>
     </Moldura>
-  );
-}
-
-function ListaDeItens({ itens, unidade }: { itens: ItemDoEnvio[]; unidade: string }) {
-  const prontos = itens.filter((item) => item.status === "pronta");
-  const falhas = itens.filter((item) => item.status === "falha");
-
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl border p-3">
-      {prontos.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <p className="text-sm font-medium">
-            Prontas para preencher ({prontos.length})
-          </p>
-          {prontos.map((item) => (
-            <p key={item.rotulo} className="flex items-center gap-2 text-sm">
-              <IconCheck className="size-4 shrink-0 text-primary" />
-              <span className="tabular-nums">{item.rotulo}</span>
-            </p>
-          ))}
-        </div>
-      )}
-
-      {falhas.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <p className="text-sm font-medium text-destructive">
-            Não puderam ser lidas ({falhas.length})
-          </p>
-          {falhas.map((item) => (
-            <p key={item.rotulo} className="flex items-start gap-2 text-sm">
-              <IconAlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
-              <span>
-                <span className="tabular-nums">{item.rotulo}</span> —{" "}
-                <span className="text-muted-foreground">{item.motivo}</span>
-              </span>
-            </p>
-          ))}
-        </div>
-      )}
-
-      {prontos.length === 0 && falhas.length === 0 && (
-        <p className="text-sm text-muted-foreground">Nenhuma {unidade} encontrada.</p>
-      )}
-    </div>
   );
 }
 
@@ -833,6 +1239,7 @@ function PreenchimentoDeAulas({
 function PreenchimentoDeBoletim({
   preview,
   aberto,
+  abrindo,
   erro,
   semCard,
   onAbrir,
@@ -840,6 +1247,7 @@ function PreenchimentoDeBoletim({
 }: {
   preview: PreviewDoEnvio;
   aberto: boolean;
+  abrindo: boolean;
   erro: string | null;
   semCard?: boolean;
   onAbrir: () => void;
@@ -866,9 +1274,18 @@ function PreenchimentoDeBoletim({
         {aberto ? (
           <Button onClick={onConcluir}>Concluir</Button>
         ) : (
-          <Button onClick={onAbrir}>
-            <IconExternalLink data-icon="inline-start" />
-            Preencher no sistema
+          <Button onClick={onAbrir} disabled={abrindo}>
+            {abrindo ? (
+              <>
+                <IconLoader className="animate-spin" data-icon="inline-start" />
+                Abrindo o portal…
+              </>
+            ) : (
+              <>
+                <IconExternalLink data-icon="inline-start" />
+                Preencher no sistema
+              </>
+            )}
           </Button>
         )}
       </div>

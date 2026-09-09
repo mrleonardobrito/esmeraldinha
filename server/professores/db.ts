@@ -153,17 +153,18 @@ export const SCHEMA = `
     PRIMARY KEY (caderneta_id, etapa, disciplina, matricula, avaliacao)
   );
 
-  -- As notas da linha do estudante que não são de nenhuma avaliação. As
-  -- calculadas o portal preenche sozinho e aqui só são guardadas para exibir.
+  -- As notas da linha do estudante que não são de nenhuma avaliação, com os
+  -- nomes das colunas do portal. A origem e a calculada o portal preenche
+  -- sozinho e aqui só são guardadas para exibir.
   CREATE TABLE IF NOT EXISTS caderneta_notas_do_estudante (
     caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
     etapa TEXT NOT NULL,
     disciplina TEXT NOT NULL,
     matricula TEXT NOT NULL,
-    personalizada REAL,
-    final REAL,
+    origem REAL,
     calculada REAL,
     parcial REAL,
+    personalizada REAL,
     PRIMARY KEY (caderneta_id, etapa, disciplina, matricula)
   );
 `;
@@ -206,10 +207,10 @@ const TABELAS_DO_BOLETIM: readonly { nome: string; colunas: readonly string[] }[
       'etapa',
       'disciplina',
       'matricula',
-      'personalizada',
-      'final',
+      'origem',
       'calculada',
       'parcial',
+      'personalizada',
     ],
   },
   { nome: 'caderneta_disciplinas', colunas: ['caderneta_id', 'nome', 'posicao'] },

@@ -64,16 +64,16 @@ export interface AvaliacaoDaCaderneta {
 }
 
 /**
- * As notas da linha do estudante que não são de nenhuma avaliação. O portal
- * calcula `calculada` e `parcial` — elas chegam desabilitadas e só são
- * exibidas; `personalizada` e `final` é que se preenche.
+ * As notas da linha do estudante que não são de nenhuma avaliação, com os
+ * nomes que o portal lhes dá. `origem` e `calculada` chegam desabilitadas e só
+ * são exibidas; `parcial` e `personalizada` é que se preenche.
  */
 export interface NotaDoEstudanteDaCaderneta {
   matricula: string;
-  personalizada: number | null;
-  final: number | null;
+  origem: number | null;
   calculada: number | null;
   parcial: number | null;
+  personalizada: number | null;
 }
 
 /** Uma nota lançada no portal, chaveada como o portal a chaveia. */
@@ -90,6 +90,8 @@ export interface BoletimDaEtapa {
   disciplina: string | null;
   /** Todas as disciplinas da caderneta, para a tela poder trocar. */
   disciplinas: string[];
+  /** As de `disciplinas` que já têm alguma nota lançada nesta etapa. */
+  disciplinasLancadas: string[];
   estudantes: EstudanteDaCaderneta[];
   avaliacoes: AvaliacaoDaCaderneta[];
   notas: NotaDaCaderneta[];
@@ -314,7 +316,7 @@ function replaceEtapas(
   );
   const insertNotaDoEstudante = db.prepare(
     `INSERT INTO caderneta_notas_do_estudante
-       (caderneta_id, etapa, disciplina, matricula, personalizada, final, calculada, parcial)
+       (caderneta_id, etapa, disciplina, matricula, origem, calculada, parcial, personalizada)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertDisciplina = db.prepare(
@@ -369,17 +371,17 @@ function replaceEtapas(
       }
 
       for (const nota of boletim.notasDoEstudante) {
-        // Uma linha só com calculadas não diz nada que o portal não recalcule;
-        // guardar as quatro mesmo assim mantém a leitura fiel à tela.
+        // Uma linha só com as desabilitadas não diz nada que o portal não
+        // recalcule; guardar as quatro mesmo assim mantém a leitura fiel à tela.
         insertNotaDoEstudante.run(
           cadernetaId,
           etapa.nome,
           boletim.disciplina,
           nota.matricula,
-          nota.personalizada ?? null,
-          nota.final ?? null,
+          nota.origem ?? null,
           nota.calculada ?? null,
           nota.parcial ?? null,
+          nota.personalizada ?? null,
         );
       }
     }
@@ -679,6 +681,89 @@ export function listDisciplinasDaCaderneta(
 }
 
 /**
+ * Uma avaliação como o banco a guarda, com a turma da caderneta junto: é a
+ * turma, e não a etapa, que decide quais avaliações existem.
+ */
+export interface AvaliacaoDaTurma {
+  readonly turma: string;
+  readonly etapa: string;
+  readonly disciplina: string;
+  readonly nome: string;
+  readonly tipo?: string;
+  readonly valor?: number;
+  readonly media?: number;
+}
+
+/**
+ * Todas as avaliações que as cadernetas do professor trouxeram do portal, na
+ * ordem em que o portal as lista. É o que o agente lê para escolher a coluna
+ * do boletim sem precisar de uma nova volta ao portal a cada envio: a
+ * raspagem da caderneta já passou turma por turma, que é a granularidade em
+ * que o portal cadastra a avaliação.
+ */
+export function listAvaliacoesDoProfessor(
+  db: DatabaseSync,
+  professorId: string,
+): AvaliacaoDaTurma[] {
+  const rows = db
+    .prepare(
+      `SELECT c.turma AS turma, a.etapa AS etapa, a.disciplina AS disciplina,
+              a.nome AS nome, a.tipo AS tipo, a.valor AS valor, a.media AS media
+         FROM caderneta_avaliacoes a
+         JOIN cadernetas c ON c.id = a.caderneta_id
+         LEFT JOIN caderneta_disciplinas d
+           ON d.caderneta_id = a.caderneta_id AND d.nome = a.disciplina
+        WHERE c.professor_id = ?
+        ORDER BY c.turma ASC, a.etapa ASC, d.posicao ASC, a.posicao ASC`,
+    )
+    .all(professorId) as unknown as {
+    turma: string;
+    etapa: string;
+    disciplina: string;
+    nome: string;
+    tipo: string | null;
+    valor: number | null;
+    media: number | null;
+  }[];
+
+  return rows.map((row) => ({
+    turma: row.turma,
+    etapa: row.etapa,
+    disciplina: row.disciplina,
+    nome: row.nome,
+    ...(row.tipo === null ? {} : { tipo: row.tipo }),
+    ...(row.valor === null ? {} : { valor: Number(row.valor) }),
+    ...(row.media === null ? {} : { media: Number(row.media) }),
+  }));
+}
+
+/**
+ * As disciplinas da caderneta que já têm alguma nota lançada nesta etapa —
+ * numa avaliação ou na parcial/personalizada da linha do estudante. É o que
+ * separa, na tela, quem ainda falta lançar de quem já foi começado.
+ */
+function listDisciplinasLancadas(
+  db: DatabaseSync,
+  cadernetaId: string,
+  etapa: string,
+): string[] {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT disciplina FROM (
+         SELECT disciplina FROM caderneta_notas
+          WHERE caderneta_id = ? AND etapa = ?
+         UNION
+         SELECT disciplina FROM caderneta_notas_do_estudante
+          WHERE caderneta_id = ? AND etapa = ?
+            AND (parcial IS NOT NULL OR personalizada IS NOT NULL)
+       )`,
+    )
+    .all(cadernetaId, etapa, cadernetaId, etapa) as unknown as { disciplina: string }[];
+
+  return rows.map((row) => row.disciplina);
+}
+
+/**
  * O boletim de uma etapa numa disciplina: os estudantes, as colunas, as notas
  * já lançadas e as notas por estudante que não são de nenhuma avaliação.
  *
@@ -693,6 +778,7 @@ export function getBoletimDaEtapa(
 ): BoletimDaEtapa {
   const disciplinas = listDisciplinasDaCaderneta(db, cadernetaId);
   const escolhida = disciplina ?? disciplinas[0];
+  const disciplinasLancadas = listDisciplinasLancadas(db, cadernetaId, etapa);
 
   // Sem nenhuma disciplina não há avaliação cadastrada, e o boletim é vazio:
   // é o que faz a tela pedir o cadastro em vez de mostrar uma grade sem colunas.
@@ -701,6 +787,7 @@ export function getBoletimDaEtapa(
       etapa,
       disciplina: null,
       disciplinas,
+      disciplinasLancadas,
       estudantes: listEstudantes(db, cadernetaId),
       avaliacoes: [],
       notas: [],
@@ -731,16 +818,16 @@ export function getBoletimDaEtapa(
 
   const notasDoEstudante = db
     .prepare(
-      `SELECT matricula, personalizada, final, calculada, parcial
+      `SELECT matricula, origem, calculada, parcial, personalizada
          FROM caderneta_notas_do_estudante
         WHERE caderneta_id = ? AND etapa = ? AND disciplina = ?`,
     )
     .all(cadernetaId, etapa, escolhida) as unknown as {
     matricula: string;
-    personalizada: number | null;
-    final: number | null;
+    origem: number | null;
     calculada: number | null;
     parcial: number | null;
+    personalizada: number | null;
   }[];
 
   const numero = (valor: number | null) => (valor === null ? null : Number(valor));
@@ -749,6 +836,7 @@ export function getBoletimDaEtapa(
     etapa,
     disciplina: escolhida,
     disciplinas,
+    disciplinasLancadas,
     estudantes: listEstudantes(db, cadernetaId),
     avaliacoes: avaliacoes.map((avaliacao) => ({
       nome: avaliacao.nome,
@@ -764,10 +852,10 @@ export function getBoletimDaEtapa(
     })),
     notasDoEstudante: notasDoEstudante.map((nota) => ({
       matricula: nota.matricula,
-      personalizada: numero(nota.personalizada),
-      final: numero(nota.final),
+      origem: numero(nota.origem),
       calculada: numero(nota.calculada),
       parcial: numero(nota.parcial),
+      personalizada: numero(nota.personalizada),
     })),
   };
 }
@@ -786,8 +874,8 @@ export interface NotaDoEstudanteGravada {
   etapa: string;
   disciplina: string;
   matricula: string;
+  parcial?: number | null;
   personalizada?: number | null;
-  final?: number | null;
 }
 
 /**
@@ -813,16 +901,16 @@ export function marcarNotasLancadas(
      ON CONFLICT (caderneta_id, etapa, disciplina, matricula, avaliacao)
      DO UPDATE SET valor = excluded.valor`,
   );
-  // As calculadas ficam de fora: quem as preenche é o portal, e sobrescrevê-las
-  // com o que a tela achava é apagar o cálculo dele.
+  // As desabilitadas ficam de fora: quem as preenche é o portal, e
+  // sobrescrevê-las com o que a tela achava é apagar o cálculo dele.
   const upsertDoEstudante = db.prepare(
     `INSERT INTO caderneta_notas_do_estudante
-       (caderneta_id, etapa, disciplina, matricula, personalizada, final)
+       (caderneta_id, etapa, disciplina, matricula, parcial, personalizada)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (caderneta_id, etapa, disciplina, matricula)
      DO UPDATE SET
-       personalizada = COALESCE(excluded.personalizada, personalizada),
-       final = COALESCE(excluded.final, final)`,
+       parcial = COALESCE(excluded.parcial, parcial),
+       personalizada = COALESCE(excluded.personalizada, personalizada)`,
   );
 
   let gravadas = 0;
@@ -849,8 +937,8 @@ export function marcarNotasLancadas(
         nota.etapa,
         nota.disciplina,
         nota.matricula,
+        nota.parcial ?? null,
         nota.personalizada ?? null,
-        nota.final ?? null,
       );
       gravadas += 1;
     }

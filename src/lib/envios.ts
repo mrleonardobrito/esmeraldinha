@@ -10,10 +10,17 @@ export interface AulaLida {
   isInteracao: "Sim" | "Não";
 }
 
-/** Uma nota como o agente a leu, antes de virar matrícula no servidor. */
+/** Uma nota como o agente a leu, antes de resolver o estudante no servidor. */
 export interface NotaLida {
-  estudante: string;
+  avaliacao: string;
   valor: number;
+}
+
+/** As notas que o agente leu na linha de um estudante. */
+export interface NotasDoEstudanteLidas {
+  estudante: string;
+  matricula: string;
+  notas: NotaLida[];
 }
 
 export interface EnvioPlan {
@@ -23,11 +30,9 @@ export interface EnvioPlan {
   mes: string;
   observacao: string;
   aulas: AulaLida[];
-  /** A avaliação a que as notas se referem; vazia fora da parte boletim. */
-  avaliacao: string;
   /** A disciplina do boletim; vazia fora da parte boletim. */
   disciplina: string;
-  notas: NotaLida[];
+  notas: NotasDoEstudanteLidas[];
 }
 
 /**
@@ -37,13 +42,19 @@ export interface EnvioPlan {
  */
 export type ItemDoEnvio =
   | { status: "pronta"; rotulo: string }
-  | { status: "falha"; rotulo: string; motivo: string };
+  | { status: "falha"; rotulo: string; motivo: string; candidatos?: string[] };
 
 /** Uma nota já resolvida na matrícula do estudante, pronta para o portal. */
 export interface NotaResolvida {
   matricula: string;
   avaliacao: string;
   valor: number;
+}
+
+/** Um estudante da turma, para o auxiliar escolher a quem pareia um nome lido. */
+export interface EstudanteDaTurma {
+  matricula: string;
+  nome: string;
 }
 
 export interface PreviewDoEnvio {
@@ -53,9 +64,29 @@ export interface PreviewDoEnvio {
   itens: ItemDoEnvio[];
   /**
    * Só presente na parte boletim: as notas resolvidas, na mesma ordem de
-   * `plano.notas` — `undefined` no índice cujo item é `falha`.
+   * `plano.notas` — uma lista por estudante, ou `null` quando o item falhou.
    */
-  notasResolvidas?: (NotaResolvida | undefined)[];
+  notasResolvidas?: (NotaResolvida[] | null)[];
+  /**
+   * Só presente na parte boletim: a turma inteira, para o auxiliar corrigir
+   * ou parear um nome que o agente não achou.
+   */
+  estudantes?: EstudanteDaTurma[];
+}
+
+/** Converte os grupos da preview na lista plana que a grade do portal recebe. */
+export function achatarNotasResolvidas(
+  notasResolvidas: readonly (readonly NotaResolvida[] | null)[],
+): NotaResolvida[] {
+  return notasResolvidas.flatMap((notasDoEstudante) => notasDoEstudante ?? []);
+}
+
+/** Aplica uma matrícula confirmada a todas as avaliações da linha lida. */
+export function resolverNotasDoEstudante(
+  matricula: string,
+  notas: readonly NotaLida[],
+): NotaResolvida[] {
+  return notas.map((nota) => ({ matricula, avaliacao: nota.avaliacao, valor: nota.valor }));
 }
 
 /**

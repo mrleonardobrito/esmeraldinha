@@ -1,32 +1,45 @@
-import type { NotaLida } from '../ai/interpretar-envio';
+import type { NotasDoEstudanteLidas } from '../ai/interpretar-envio';
 import type { NotaParaLancar } from '../scrape/types';
-import { resolverMatricula, type EstudanteConhecido } from './estudantes';
+import {
+  resolverMatriculaDaNota,
+  EstudanteAmbiguoError,
+  type EstudanteConhecido,
+} from './estudantes';
 
 /**
- * Traduz as notas que o agente leu para as notas que o portal aceita: o nome
- * do estudante vira a matrícula dele. Um nome que não casa com exatamente um
- * estudante da turma interrompe tudo — é a mesma escolha que `postAulaContent`
- * faz com as linhas de aula, e pela mesma razão.
+ * Traduz as notas que o agente leu para as notas que o portal aceita: a
+ * matrícula que o material trouxe, ou o nome do estudante quando ela não é da
+ * turma. Uma nota que não casa com exatamente um estudante da turma
+ * interrompe tudo — é a mesma escolha que `postAulaContent` faz com as linhas
+ * de aula, e pela mesma razão.
  *
- * @throws {EstudanteNaoEncontradoError} quando um nome não é da turma.
+ * @throws {EstudanteNaoEncontradoError} quando nem a matrícula nem o nome casam.
  * @throws {EstudanteAmbiguoError} quando um nome serve a mais de um estudante.
  */
 export function resolverNotas(
-  notas: readonly NotaLida[],
-  avaliacao: string,
+  notas: readonly NotasDoEstudanteLidas[],
   estudantes: readonly EstudanteConhecido[],
 ): NotaParaLancar[] {
-  return notas.map((nota) => ({
-    matricula: resolverMatricula(nota.estudante, estudantes),
-    avaliacao,
-    valor: nota.valor,
-  }));
+  return notas.flatMap((notasDoEstudante) => {
+    const matricula = resolverMatriculaDaNota(notasDoEstudante, estudantes);
+
+    return notasDoEstudante.notas.map((nota) => ({
+      matricula,
+      avaliacao: nota.avaliacao,
+      valor: nota.valor,
+    }));
+  });
 }
 
-/** Uma nota já resolvida, ou o motivo de não ter sido. */
+/** As notas de um estudante já resolvidas, ou o motivo de não terem sido. */
 export type NotaResolvida =
-  | { readonly status: 'pronta'; readonly nota: NotaParaLancar }
-  | { readonly status: 'falha'; readonly estudante: string; readonly motivo: string };
+  | { readonly status: 'pronta'; readonly notas: readonly NotaParaLancar[] }
+  | {
+      readonly status: 'falha';
+      readonly estudante: string;
+      readonly motivo: string;
+      readonly candidatos?: readonly string[];
+    };
 
 /**
  * A versão da preview de {@link resolverNotas}: resolve o que dá, e devolve o
@@ -34,25 +47,34 @@ export type NotaResolvida =
  * faz `resolverNotas` na hora de gravar de verdade.
  */
 export function resolverNotasParaPreview(
-  notas: readonly NotaLida[],
-  avaliacao: string,
+  notas: readonly NotasDoEstudanteLidas[],
   estudantes: readonly EstudanteConhecido[],
 ): NotaResolvida[] {
-  return notas.map((nota) => {
+  return notas.map((notasDoEstudante) => {
     try {
+      const matricula = resolverMatriculaDaNota(notasDoEstudante, estudantes);
+
       return {
         status: 'pronta',
-        nota: {
-          matricula: resolverMatricula(nota.estudante, estudantes),
-          avaliacao,
+        notas: notasDoEstudante.notas.map((nota) => ({
+          matricula,
+          avaliacao: nota.avaliacao,
           valor: nota.valor,
-        },
+        })),
       };
     } catch (error) {
+      const candidatos =
+        error instanceof EstudanteAmbiguoError
+          ? estudantes
+              .filter((estudante) => error.candidatos.includes(estudante.nome))
+              .map((estudante) => estudante.matricula)
+          : undefined;
+
       return {
         status: 'falha',
-        estudante: nota.estudante,
+        estudante: notasDoEstudante.estudante,
         motivo: error instanceof Error ? error.message : String(error),
+        ...(candidatos && candidatos.length > 0 ? { candidatos } : {}),
       };
     }
   });
