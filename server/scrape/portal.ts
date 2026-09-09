@@ -17,7 +17,6 @@ import type {
   EstudanteDoPortal,
   AulaDoPortal,
   ConteudoCatalogo,
-  DisciplinaOptions,
   EtapaOptions,
   ListaDeAulasFilter,
   PreenchimentoAssistidoFilter,
@@ -41,8 +40,11 @@ const FILTER = {
   /** O portal chama a redução de _Grupo diário_. */
   reducao: ':grupoDiario-SOM-CP-OBR',
   mes: ':mes-SOM-CP-OBR',
-  /** Só no boletim, e só quando a etapa tem avaliação cadastrada. */
-  disciplina: ':disciplina-SOM-CP-OBR',
+  /**
+   * Só no boletim, e só quando a etapa tem avaliação cadastrada. O portal a
+   * chama de `disciplinaTurma` aqui, não de `disciplina`.
+   */
+  disciplina: ':disciplinaTurma-SOM-CP-OBR',
   /** Só na Ficha Desempenho, e só carrega depois da turma. */
   fichaDesempenho: ':fichaDesempenho-SOM-CP-OBR',
 } as const;
@@ -115,52 +117,6 @@ export async function listConteudoOptions(page: Page): Promise<ConteudoCatalogo>
       turmas,
       meses: turmas[0] ? await readMenuOptions(page, FILTER.mes) : [],
     });
-  }
-
-  return { etapas };
-}
-
-/**
- * Acrescenta ao catálogo as disciplinas de cada etapa e as avaliações de cada
- * disciplina, lidas na tela de _Resultado de Avaliação_. É o que permite ao
- * agente escolher a coluna certa em vez de inventá-la.
- *
- * Feito à parte de `listConteudoOptions` porque custa uma volta por etapa e
- * por disciplina, e só o envio de notas precisa dele.
- */
-export async function comAvaliacoes(
-  page: Page,
-  catalogo: ConteudoCatalogo,
-): Promise<ConteudoCatalogo> {
-  const etapas: EtapaOptions[] = [];
-
-  for (const etapa of catalogo.etapas) {
-    const turma = etapa.turmas[0];
-
-    if (!turma) {
-      etapas.push(etapa);
-      continue;
-    }
-
-    const disciplinas: DisciplinaOptions[] = [];
-
-    try {
-      for (const nome of await listDisciplinas(page, { etapa: etapa.nome, turma })) {
-        const { avaliacoes } = await listBoletim(page, {
-          etapa: etapa.nome,
-          turma,
-          disciplina: nome,
-        });
-
-        disciplinas.push({ nome, avaliacoes });
-      }
-    } catch (error) {
-      // Um catálogo sem avaliações ainda serve para lançar conteúdo; só o
-      // envio de notas é que vai recusar, com a mensagem certa.
-      console.error(`Falha ao ler as avaliações da ${etapa.nome}:`, error);
-    }
-
-    etapas.push({ ...etapa, disciplinas });
   }
 
   return { etapas };
@@ -395,19 +351,27 @@ export async function listEstudantes(
 
 /**
  * Os campos da tela de _Resultado de Avaliação_, como o portal os nomeia.
- * Conferidos contra o HTML real; ver `.scratch/lancamento-de-notas/tela-do-portal.md`.
+ *
+ * Depois das colunas de avaliação vêm cinco colunas fixas, nesta ordem: _Nota
+ * origem_, _Nota calculada pelas avaliações_, _Nota parcial_, _Nota
+ * personalizada_ e _Nota final da etapa_. Os nomes internos não seguem os
+ * rótulos — `notaParcialTexto` é a _Nota origem_ e `notaAvaliacaoNotaParcial` é
+ * a _Nota parcial_ —, então cada sufixo aqui está conferido contra o HTML real
+ * pela posição da coluna; ver `.scratch/lancamento-de-notas/tela-do-portal.md`.
+ *
+ * A _Nota final da etapa_ não tem campo nenhum: o portal só a exibe.
  */
 const NOTA = {
   /** A nota de uma avaliação, uma por coluna dentro da linha do estudante. */
   avaliacao: ':notaAvaliacao-CP_input',
-  /** Calculada pelo portal a partir das avaliações. Sempre desabilitada. */
+  /** _Nota origem_: o que a etapa traz de fora das avaliações. Desabilitada. */
+  origem: ':notaParcialTexto',
+  /** _Nota calculada pelas avaliações_, pelo portal. Desabilitada. */
   calculada: ':notaAvaliacaoCalculada-CP_input',
-  /** Também calculada pelo portal, e desabilitada. */
-  parcialCalculada: ':notaParcialTexto',
-  /** Editável: o que o portal chama de _Nota personalizada_. */
-  personalizada: ':notaAvaliacaoNotaParcial-CP_input',
-  /** Editável: a _Nota final da etapa_. */
-  final: ':notaAvaliacaoNota-CP_input',
+  /** Editável: a _Nota parcial_. */
+  parcial: ':notaAvaliacaoNotaParcial-CP_input',
+  /** Editável: a _Nota personalizada_, que sobrepõe a calculada no boletim. */
+  personalizada: ':notaAvaliacaoNota-CP_input',
 } as const;
 
 /** As linhas do boletim não têm `data-ri`: são os `tr` do corpo da tabela. */
@@ -565,7 +529,8 @@ export async function listDisciplinas(
 /**
  * O boletim de uma etapa numa disciplina: as avaliações que são as colunas, as
  * notas que o portal já tem nelas e as notas por estudante que não pertencem a
- * nenhuma avaliação — a personalizada e a final da etapa.
+ * nenhuma avaliação — a parcial e a personalizada, mais as duas que o portal
+ * calcula sozinho.
  *
  * A tabela só existe quando a etapa tem avaliação cadastrada. Sem ela, o
  * portal não mostra nem a tabela nem a disciplina, e o boletim volta vazio:
@@ -606,18 +571,18 @@ export async function listBoletim(
       notas.push({ matricula, avaliacao: avaliacao.nome, valor });
     }
 
+    const parcial = await lerCampo(row, NOTA.parcial);
     const personalizada = await lerCampo(row, NOTA.personalizada);
-    const final = await lerCampo(row, NOTA.final);
-    // As calculadas são do portal: lidas para exibir, nunca escritas.
+    // As desabilitadas são do portal: lidas para exibir, nunca escritas.
+    const origem = await lerCampo(row, NOTA.origem);
     const calculada = await lerCampo(row, NOTA.calculada);
-    const parcial = await lerCampo(row, NOTA.parcialCalculada);
 
     notasDoEstudante.push({
       matricula,
-      ...(personalizada === undefined ? {} : { personalizada }),
-      ...(final === undefined ? {} : { final }),
-      ...(calculada === undefined ? {} : { calculada }),
       ...(parcial === undefined ? {} : { parcial }),
+      ...(personalizada === undefined ? {} : { personalizada }),
+      ...(origem === undefined ? {} : { origem }),
+      ...(calculada === undefined ? {} : { calculada }),
     });
   }
 
@@ -637,9 +602,10 @@ export function findEstudanteRow(page: Page, matricula: string): Locator {
  * `prepararAulaParaPreenchimento` não salva: conferir e gravar é do auxiliar
  * de ensino.
  *
- * Escreve a nota de cada avaliação e, quando informadas, a nota personalizada
- * e a nota final da etapa. As calculadas o portal preenche sozinho — elas
- * chegam desabilitadas e não são tocadas.
+ * Escreve a nota de cada avaliação e, quando informadas, a nota parcial e a
+ * nota personalizada. A _Nota origem_ e a calculada chegam desabilitadas e não
+ * são tocadas; a _Nota final da etapa_ o portal só exibe, e não tem campo para
+ * receber nada.
  *
  * Levanta `MissingAulaRowsError` quando uma matrícula não casa com exatamente
  * uma linha, ou quando a avaliação não existe na etapa: lançar a nota no
@@ -705,12 +671,12 @@ export async function prepararNotasParaPreenchimento(
   for (const nota of notasDoEstudante) {
     const linha = findEstudanteRow(page, nota.matricula);
 
-    if (nota.personalizada !== undefined) {
-      await escreverNota(page, linha.locator(`[id$="${NOTA.personalizada}"]`), nota.personalizada);
+    if (nota.parcial !== undefined) {
+      await escreverNota(page, linha.locator(`[id$="${NOTA.parcial}"]`), nota.parcial);
     }
 
-    if (nota.final !== undefined) {
-      await escreverNota(page, linha.locator(`[id$="${NOTA.final}"]`), nota.final);
+    if (nota.personalizada !== undefined) {
+      await escreverNota(page, linha.locator(`[id$="${NOTA.personalizada}"]`), nota.personalizada);
     }
   }
 

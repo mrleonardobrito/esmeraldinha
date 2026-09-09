@@ -22,15 +22,23 @@ export interface DisciplinaOptions {
   readonly avaliacoes: readonly AvaliacaoDoPortal[];
 }
 
+/** As disciplinas que uma turma tem numa etapa, com as avaliações de cada uma. */
+export interface DisciplinasDaTurma {
+  readonly turma: string;
+  readonly disciplinas: readonly DisciplinaOptions[];
+}
+
 export interface EtapaOptions {
   readonly nome: string;
   readonly turmas: readonly string[];
   readonly meses: readonly string[];
   /**
-   * As disciplinas da etapa com as avaliações de cada uma. Vazio quando o
-   * professor ainda não as cadastrou no portal — e aí não há nota a lançar.
+   * As disciplinas de cada turma da etapa. O portal cadastra a avaliação por
+   * turma, não por etapa: duas turmas da mesma etapa têm conjuntos diferentes,
+   * e uma delas pode não ter nenhum. Ausente no catálogo cru do portal — só o
+   * envio de notas pede o catálogo enriquecido.
    */
-  readonly disciplinas?: readonly DisciplinaOptions[];
+  readonly disciplinasPorTurma?: readonly DisciplinasDaTurma[];
 }
 
 /** As opções válidas de Lançamento de Conteúdo para o professor da sessão. */
@@ -92,16 +100,17 @@ export interface AvaliacaoDoPortal {
 }
 
 /**
- * As notas da linha do estudante que não pertencem a nenhuma avaliação. O
- * portal calcula duas delas — `calculada` e `parcial` chegam desabilitadas e
- * só são lidas; `personalizada` e `final` é que se escreve.
+ * As notas da linha do estudante que não pertencem a nenhuma avaliação, com os
+ * nomes que o portal lhes dá. Duas chegam desabilitadas e só são lidas —
+ * `origem` e `calculada`; `parcial` e `personalizada` é que se escreve. A
+ * _Nota final da etapa_ não entra aqui: o portal só a exibe, sem campo.
  */
 export interface NotaDoEstudante {
   readonly matricula: string;
-  readonly personalizada?: number;
-  readonly final?: number;
-  readonly calculada?: number;
   readonly parcial?: number;
+  readonly personalizada?: number;
+  readonly origem?: number;
+  readonly calculada?: number;
 }
 
 /** Uma nota que o portal já tem, chaveada como ele a chaveia. */
@@ -142,7 +151,7 @@ export interface PreenchimentoDeNotasFilter {
   readonly turma: string;
   readonly disciplina?: string;
   readonly notas: readonly NotaParaLancar[];
-  /** A nota personalizada e a final da etapa, por estudante. */
+  /** A nota parcial e a personalizada, por estudante. */
   readonly notasDoEstudante?: readonly NotaDoEstudante[];
 }
 
