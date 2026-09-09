@@ -8,6 +8,20 @@ let db: DatabaseSync | undefined;
 
 /** O schema inteiro do app, exportado para os testes montarem um banco em memória. */
 export const SCHEMA = `
+  -- A conta do auxiliar de ensino: uma só, porque é uma pessoa só que usa a
+  -- Esmeraldinha. Nasce no primeiro acesso, com a senha temporária do
+  -- ambiente; senha_hash fica NULL até ela ser trocada pela definitiva, e é
+  -- esse NULL que diz que o primeiro acesso ainda não terminou.
+  CREATE TABLE IF NOT EXISTS conta (
+    id TEXT PRIMARY KEY,
+    login TEXT NOT NULL UNIQUE,
+    senha_hash TEXT,
+    nome TEXT NOT NULL,
+    email TEXT NOT NULL DEFAULT '',
+    imagem TEXT,
+    created_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS professores (
     id TEXT PRIMARY KEY,
     nome TEXT NOT NULL,

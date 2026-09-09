@@ -1,3 +1,5 @@
+import { esquecerToken, lerToken } from "@/lib/sessao-do-auxiliar";
+
 export const API_OFFLINE =
   "A API local não respondeu. Confira se o `pnpm dev` está rodando (ele sobe o Vite e a API juntos).";
 
@@ -33,13 +35,23 @@ async function readApiError(response: Response): Promise<string | null> {
 export async function requestApi(path: string, init?: RequestInit): Promise<Response> {
   let response: Response;
 
+  // Toda rota fora da entrada exige a sessão do auxiliar de ensino, então o
+  // token vai junto daqui em vez de cada chamada lembrar de levá-lo.
+  const headers = new Headers(init?.headers);
+  const token = lerToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
   try {
-    response = await fetch(path, init);
+    response = await fetch(path, { ...init, headers });
   } catch {
     throw new Error(API_OFFLINE);
   }
 
   if (response.ok) return response;
+
+  // Sessão vencida ou derrubada: esquecê-la aqui é o que devolve a tela de
+  // entrada, sem cada chamada ter de tratar isso.
+  if (response.status === 401) esquecerToken();
 
   const apiError = await readApiError(response);
   if (apiError) throw new ApiError(apiError, response.status);

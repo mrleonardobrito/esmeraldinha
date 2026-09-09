@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../app';
+import { autenticar } from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
@@ -73,7 +74,9 @@ async function freshApp() {
     escola: 'Escola',
   });
 
-  return { app, professorId: id };
+  // As rotas do app exigem uma sessão do auxiliar de ensino: o helper entra
+  // uma vez e devolve o mesmo `fetch`, com o token em cada requisição.
+  return { app: await autenticar(app), professorId: id };
 }
 
 async function cadastrarCaderneta(app: Awaited<ReturnType<typeof freshApp>>['app'], id: string) {

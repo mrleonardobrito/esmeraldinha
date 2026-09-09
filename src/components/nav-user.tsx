@@ -1,3 +1,6 @@
+import { useNavigate } from "react-router"
+import { toast } from "sonner"
+
 import {
   Avatar,
   AvatarFallback,
@@ -20,16 +23,45 @@ import {
 } from "@/components/ui/sidebar"
 import { IconDotsVertical, IconUserCircle, IconLogout } from "@tabler/icons-react"
 
-export function NavUser({
-  user,
-}: {
-  user: {
-    name: string
-    email: string
-    avatar: string
-  }
-}) {
+import { useConta } from "@/components/conta-provider"
+import { getInitials } from "@/lib/professores"
+
+/** Quem está usando a Esmeraldinha, com o caminho para a conta e para sair. */
+export function NavUser() {
   const { isMobile } = useSidebar()
+  const { conta, sair } = useConta()
+  const navigate = useNavigate()
+
+  if (!conta) return null
+
+  const iniciais = getInitials(conta.nome)
+  // Sem e-mail cadastrado, o login é a segunda linha: é o que identifica a conta.
+  const identificacao = conta.email || conta.login
+
+  async function handleSair() {
+    try {
+      await sair()
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Não foi possível sair.",
+      )
+    }
+  }
+
+  const identidade = (
+    <>
+      <Avatar className="h-8 w-8 rounded-full">
+        {conta.imagem && <AvatarImage src={conta.imagem} alt="" />}
+        <AvatarFallback className="rounded-lg">{iniciais}</AvatarFallback>
+      </Avatar>
+      <div className="grid flex-1 text-left text-sm leading-tight">
+        <span className="truncate font-medium">{conta.nome}</span>
+        <span className="truncate text-xs text-muted-foreground">
+          {identificacao}
+        </span>
+      </div>
+    </>
+  )
 
   return (
     <SidebarMenu>
@@ -40,16 +72,7 @@ export function NavUser({
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <Avatar className="h-8 w-8 rounded-full">
-                <AvatarImage src={user.avatar} alt={user.name} />
-                <AvatarFallback className="rounded-lg">CN</AvatarFallback>
-              </Avatar>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">{user.name}</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {user.email}
-                </span>
-              </div>
+              {identidade}
               <IconDotsVertical className="ml-auto size-4" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
@@ -61,30 +84,19 @@ export function NavUser({
           >
             <DropdownMenuLabel className="p-0 font-normal">
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                <Avatar className="h-8 w-8 rounded-lg">
-                  <AvatarImage src={user.avatar} alt={user.name} />
-                  <AvatarFallback className="rounded-lg">CN</AvatarFallback>
-                </Avatar>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{user.name}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {user.email}
-                  </span>
-                </div>
+                {identidade}
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem>
-                <IconUserCircle
-                />
+              <DropdownMenuItem onSelect={() => void navigate("/conta")}>
+                <IconUserCircle />
                 Conta
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <IconLogout
-              />
+            <DropdownMenuItem onSelect={() => void handleSair()}>
+              <IconLogout />
               Sair
             </DropdownMenuItem>
           </DropdownMenuContent>

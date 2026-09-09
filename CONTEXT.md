@@ -12,6 +12,22 @@ Domain terms are Portuguese and are never translated — in prose, in code ident
 The person who fills in cadernetas on behalf of professores. The only user of Esmeraldinha.
 _Avoid_: assistant, operador, usuário
 
+**conta do auxiliar de ensino**:
+The single account the auxiliar de ensino signs into Esmeraldinha with. Carries a login, a senha, and the perfil (nome, e-mail, foto). It exists because the app holds the credenciais do professor: only whoever knows the senha gets to them.
+_Avoid_: conta de usuário, account, perfil
+
+**senha temporária**:
+The senha the conta do auxiliar de ensino is born with, read from the environment and identical in every install. It only survives the primeiro acesso: nothing else in the app opens until it is replaced by a senha definitiva, kept as a hash.
+_Avoid_: senha padrão, temporary password
+
+**primeiro acesso**:
+The first entry into Esmeraldinha, where the senha temporária is exchanged for the senha definitiva. The only screen a conta with a senha temporária can reach.
+_Avoid_: onboarding, first login
+
+**sessão do auxiliar**:
+The proof that whoever is at the keyboard has signed into the conta do auxiliar de ensino, expiring after an idle period. Not to be confused with a sessão do portal, which is a browser opened with the credenciais of one professor.
+_Avoid_: login, sessão de usuário
+
 **professor**:
 The teacher a caderneta belongs to. Not a user of Esmeraldinha — a portal identity that Esmeraldinha acts on behalf of.
 _Avoid_: teacher, docente

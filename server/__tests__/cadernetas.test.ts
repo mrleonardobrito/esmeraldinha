@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../app';
+import { autenticar } from './sessao-de-teste';
 
 const originalEnv = {
   dbPath: process.env.ESMERALDINHA_DB_PATH,
@@ -28,7 +29,9 @@ vi.mock('../portal-sessions', () => ({
 
 async function freshApp() {
   const { createApp } = await import('../app');
-  return (createApp as typeof CreateApp)();
+  // As rotas do app exigem uma sessão do auxiliar de ensino: o helper entra
+  // uma vez e devolve o mesmo `fetch`, com o token em cada requisição.
+  return autenticar((createApp as typeof CreateApp)());
 }
 
 function novoProfessor(overrides: Partial<Record<string, string>> = {}) {

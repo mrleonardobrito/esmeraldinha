@@ -86,6 +86,10 @@ extraído como `Shell`). Providers globais: `ThemeProvider`, `BrowserRouter`,
 - **Página = um `Card`**: `CardHeader` com `CardTitle` + `CardDescription`, e a
   ação primária em `CardAction` (canto superior direito). O conteúdo vai em
   `CardContent`.
+- **Telas de acesso**: a entrada e o primeiro acesso não têm sidebar nem
+  cabeçalho — ocupam a janela (`min-h-svh`, mesmo fundo `zinc-50`/`black`) com
+  um único `Card max-w-sm` centralizado, logo, título, descrição e o formulário
+  em `flex flex-col gap-4`.
 - **Empty state**: bloco centralizado
   `flex flex-col items-center gap-3 rounded-2xl border border-dashed px-6 py-12 text-center`,
   com ícone `size-8 text-muted-foreground`, título `text-sm font-medium`,

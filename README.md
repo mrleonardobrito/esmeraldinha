@@ -35,6 +35,45 @@ A página inicial é o painel, em `src/pages/painel.tsx`; o shell da aplicação
 dia. `pnpm dev:electron` sobe o app de verdade, com a API Hono in-process — use
 quando a mudança tocar o processo principal ou o roteamento `app://`.
 
+## Entrar na Esmeraldinha
+
+O app fica atrás de uma conta: só o auxiliar de ensino entra, porque é dele o
+acesso às credenciais dos professores guardadas aqui.
+
+Na primeira execução, o login e a senha vêm do ambiente
+(`ESMERALDINHA_LOGIN` e `ESMERALDINHA_SENHA_TEMPORARIA`, padrões `auxiliar` e
+`esmeraldinha`). Essa senha é temporária: o primeiro acesso obriga a trocá-la
+por uma definitiva, que fica no SQLite como hash `scrypt` e passa a ser a
+única que entra. O perfil (nome, e-mail e foto) e a troca de senha vivem em
+**Conta**, no menu do rodapé da barra lateral, ao lado de **Sair**.
+
+As sessões moram na memória do processo da API: fechar o app já encerra a
+sessão, e uma janela ociosa por `ESMERALDINHA_SESSAO_IDLE_MS` (8 horas por
+padrão) pede a senha de novo.
+
+### Login e senha nos builds do CI
+
+O app instalado não lê `.env` — o instalador é um arquivo só. Por isso o login
+e a senha temporária entram no bundle na hora de empacotar, a partir de dois
+secrets do repositório (Settings → Secrets and variables → Actions):
+
+| Secret | Vira |
+| --- | --- |
+| `ESMERALDINHA_LOGIN` | o login da conta do auxiliar de ensino |
+| `ESMERALDINHA_SENHA_TEMPORARIA` | a senha do primeiro acesso |
+
+Quem faz isso é [electron/build-defines.mjs](electron/build-defines.mjs), lido
+por `pnpm build:electron`: cada variável presente no ambiente vira um `define`
+do esbuild. Sem os secrets configurados, o build sai com os padrões de
+`server/env.ts` (`auxiliar` / `esmeraldinha`) — que estão neste repositório
+público, então configure os dois antes de distribuir. Localmente vale o mesmo
+mecanismo: `ESMERALDINHA_LOGIN=... pnpm dist`.
+
+Um valor embutido no bundle é extraível de dentro do instalador por quem
+souber procurar — é obscuridade, não segredo. Ele serve para o primeiro
+acesso e só: a senha definitiva que o auxiliar de ensino escolhe é a única
+que entra depois, e ela nasce na máquina dele, como hash `scrypt` no SQLite.
+
 ## Distribuição
 
 Esmeraldinha é um app Electron desktop: a API roda dentro do processo
