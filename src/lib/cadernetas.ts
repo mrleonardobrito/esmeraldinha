@@ -74,15 +74,16 @@ export interface AvaliacaoDaCaderneta {
 }
 
 /**
- * As notas da linha do estudante que não são de nenhuma avaliação. O portal
- * calcula `calculada` e `parcial`; só `personalizada` e `final` se preenche.
+ * As notas da linha do estudante que não são de nenhuma avaliação, com os
+ * nomes que o portal lhes dá. O portal preenche `origem` e `calculada`; só
+ * `parcial` e `personalizada` se digita.
  */
 export interface NotaDoEstudanteDaCaderneta {
   matricula: string;
-  personalizada: number | null;
-  final: number | null;
+  origem: number | null;
   calculada: number | null;
   parcial: number | null;
+  personalizada: number | null;
 }
 
 /** Uma nota já lançada no portal. */
@@ -98,6 +99,8 @@ export interface BoletimDaEtapa {
   /** `null` quando a caderneta não tem disciplina — logo, sem avaliação. */
   disciplina: string | null;
   disciplinas: string[];
+  /** As de `disciplinas` que já têm alguma nota lançada nesta etapa. */
+  disciplinasLancadas: string[];
   estudantes: EstudanteDaCaderneta[];
   avaliacoes: AvaliacaoDaCaderneta[];
   notas: NotaDaCaderneta[];
@@ -266,8 +269,8 @@ export async function preencherNotasNoPortal(
     disciplina?: string | null;
     notasDoEstudante?: readonly {
       matricula: string;
+      parcial?: number | null;
       personalizada?: number | null;
-      final?: number | null;
     }[];
   } = {},
 ): Promise<void> {

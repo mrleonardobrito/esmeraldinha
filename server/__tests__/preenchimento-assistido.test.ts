@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../app';
+import { autenticar } from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
   retomarSessao: vi.fn(),
   getCatalogo: vi.fn(),
-  getCatalogoComAvaliacoes: vi.fn(),
   openSession: vi.fn(),
   closeSession: vi.fn(),
 }));
@@ -73,7 +73,9 @@ async function freshApp() {
     escola: 'Escola',
   });
 
-  return { app, professorId: id };
+  // As rotas do app exigem uma sessão do auxiliar de ensino: o helper entra
+  // uma vez e devolve o mesmo `fetch`, com o token em cada requisição.
+  return { app: await autenticar(app), professorId: id };
 }
 
 async function cadastrarCaderneta(app: Awaited<ReturnType<typeof freshApp>>['app'], id: string) {
@@ -100,9 +102,7 @@ describe('preenchimento assistido de uma aula', () => {
     vi.resetModules();
     vi.clearAllMocks();
 
-    const { retomarSessao, getCatalogo, getCatalogoComAvaliacoes } = await import(
-      '../portal-sessions'
-    );
+    const { retomarSessao, getCatalogo } = await import('../portal-sessions');
     const sessao = {
       id: sessionId,
       professorId: '',
@@ -115,7 +115,6 @@ describe('preenchimento assistido de uma aula', () => {
     vi.mocked(retomarSessao).mockResolvedValue(sessao);
     vi.mocked(retomarSessao).mockResolvedValue(sessao);
     vi.mocked(getCatalogo).mockResolvedValue(catalogo);
-    vi.mocked(getCatalogoComAvaliacoes).mockResolvedValue(catalogo);
 
     const { listAulas, listBoletim, listDisciplinas, listEstudantes } = await import(
       '../scrape/portal'
@@ -283,7 +282,7 @@ describe('preenchimento assistido de uma aula', () => {
     expect(prepararNotasParaPreenchimento).not.toHaveBeenCalled();
   });
 
-  it('leva a nota personalizada e a final da etapa junto das avaliações', async () => {
+  it('leva a nota parcial e a personalizada junto das avaliações', async () => {
     const { app, professorId: id } = await freshApp();
     const caderneta = await cadastrarCaderneta(app, id);
 
@@ -294,7 +293,7 @@ describe('preenchimento assistido de uma aula', () => {
           etapa: '1ª Etapa',
           notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }],
           notasDoEstudante: [
-            { matricula: '2026001', personalizada: 8, final: 8.5 },
+            { matricula: '2026001', parcial: 8, personalizada: 8.5 },
           ],
         }),
       ),
@@ -308,11 +307,11 @@ describe('preenchimento assistido de uma aula', () => {
       turma,
       disciplina: 'MATEMÁTICA',
       notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }],
-      notasDoEstudante: [{ matricula: '2026001', personalizada: 8, final: 8.5 }],
+      notasDoEstudante: [{ matricula: '2026001', parcial: 8, personalizada: 8.5 }],
     });
   });
 
-  it('aceita um envio só com a nota final da etapa, sem nota de avaliação', async () => {
+  it('aceita um envio só com a nota personalizada, sem nota de avaliação', async () => {
     const { app, professorId: id } = await freshApp();
     const caderneta = await cadastrarCaderneta(app, id);
 
@@ -322,7 +321,7 @@ describe('preenchimento assistido de uma aula', () => {
         json({
           etapa: '1ª Etapa',
           notas: [],
-          notasDoEstudante: [{ matricula: '2026001', final: 7 }],
+          notasDoEstudante: [{ matricula: '2026001', personalizada: 7 }],
         }),
       ),
     );
@@ -334,7 +333,7 @@ describe('preenchimento assistido de uma aula', () => {
       expect.anything(),
       expect.objectContaining({
         notas: [],
-        notasDoEstudante: [{ matricula: '2026001', final: 7 }],
+        notasDoEstudante: [{ matricula: '2026001', personalizada: 7 }],
       }),
     );
   });

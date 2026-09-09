@@ -6,12 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { utils, write } from 'xlsx';
 
 import type { createApp as CreateApp } from '../app';
+import { autenticar } from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
   retomarSessao: vi.fn(),
   getCatalogo: vi.fn(),
-  getCatalogoComAvaliacoes: vi.fn(),
   openSession: vi.fn(),
   closeSession: vi.fn(),
 }));
@@ -37,7 +37,6 @@ const planoDeConteudo = {
   mes: 'MARÇO',
   observacao: '',
   disciplina: '',
-  avaliacao: '',
   notas: [],
   aulas: [
     {
@@ -61,7 +60,10 @@ function request(path: string, init?: RequestInit) {
 
 async function enviar(body: FormData, id = sessionId): Promise<Response> {
   const { createApp } = await import('../app');
-  return await (createApp as typeof CreateApp)().fetch(
+  // A rota exige uma sessão do auxiliar de ensino: o helper entra uma vez e
+  // devolve o mesmo `fetch`, com o token na requisição.
+  const app = await autenticar((createApp as typeof CreateApp)());
+  return await app.fetch(
     request(`/sessoes/${id}/envios`, { method: 'POST', body }),
   );
 }
@@ -79,9 +81,7 @@ beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
 
-  const { retomarSessao, getCatalogo, getCatalogoComAvaliacoes } = await import(
-    '../portal-sessions'
-  );
+  const { retomarSessao, getCatalogo } = await import('../portal-sessions');
   vi.mocked(retomarSessao).mockResolvedValue({
     id: sessionId,
     professorId,
@@ -95,7 +95,6 @@ beforeEach(async () => {
     etapas: [{ nome: '1ª Etapa', turmas: [turma], meses: ['MARÇO'] }],
   };
   vi.mocked(getCatalogo).mockResolvedValue(catalogo);
-  vi.mocked(getCatalogoComAvaliacoes).mockResolvedValue(catalogo);
 
   const { chatCompletion } = await import('../ai/openrouter');
   vi.mocked(chatCompletion).mockResolvedValue(JSON.stringify(planoDeConteudo));
@@ -115,8 +114,17 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
     expect(response.status).toBe(200);
     // `ordem: null` sai do plano: quem define a ordem da aula é o portal.
     await expect(response.json()).resolves.toEqual({
-      plano: { ...planoDeConteudo, aulas: [{ ...planoDeConteudo.aulas[0], ordem: undefined }] },
-      cadernetaId: undefined,
+      plano: {
+        ...planoDeConteudo,
+        aulas: [{
+          data: planoDeConteudo.aulas[0].data,
+          codigoCR: planoDeConteudo.aulas[0].codigoCR,
+          desenvolvimento: planoDeConteudo.aulas[0].desenvolvimento,
+          ferramentas: planoDeConteudo.aulas[0].ferramentas,
+          isRecuperacao: planoDeConteudo.aulas[0].isRecuperacao,
+          isInteracao: planoDeConteudo.aulas[0].isInteracao,
+        }],
+      },
       itens: [{ status: 'pronta', rotulo: '05/03/2026' }],
     });
 
@@ -254,27 +262,25 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
       mes: 'MARÇO',
       observacao: '',
       disciplina: 'MATEMÁTICA',
-      avaliacao: 'PROVA 1',
       aulas: [],
       notas: [
-        { estudante: 'Ana Lima', valor: 8.5 },
-        { estudante: 'Alguém que não existe', valor: 7 },
+        {
+          estudante: 'Ana Lima',
+          matricula: '',
+          notas: [
+            { avaliacao: 'PROVA 1', valor: 8.5 },
+            { avaliacao: 'TRABALHO INDIVIDUAL', valor: 9 },
+            { avaliacao: 'TRABALHO EM GRUPO', valor: 7.5 },
+            { avaliacao: 'ACOMPANHAMENTO', valor: 10 },
+          ],
+        },
+        {
+          estudante: 'Alguém que não existe',
+          matricula: '',
+          notas: [{ avaliacao: 'PROVA 1', valor: 7 }],
+        },
       ],
     };
-
-    beforeEach(async () => {
-      const { getCatalogoComAvaliacoes } = await import('../portal-sessions');
-      vi.mocked(getCatalogoComAvaliacoes).mockResolvedValue({
-        etapas: [
-          {
-            nome: '1ª Etapa',
-            turmas: [turma],
-            meses: ['MARÇO'],
-            disciplinas: [{ nome: 'MATEMÁTICA', avaliacoes: [{ nome: 'PROVA 1' }] }],
-          },
-        ],
-      });
-    });
 
     async function cadastrarCadernetaComEstudantes() {
       const { getDb } = await import('../professores/db');
@@ -297,6 +303,16 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
         `INSERT INTO caderneta_disciplinas (caderneta_id, nome, posicao)
          VALUES (?, 'MATEMÁTICA', 0)`,
       ).run(caderneta.id);
+
+      // O catálogo que o agente recebe sai daqui: é a sincronização da
+      // caderneta que traz as avaliações da turma.
+      const inserirAvaliacao = db.prepare(
+        `INSERT INTO caderneta_avaliacoes
+           (caderneta_id, etapa, disciplina, nome, tipo, data, valor, media, posicao)
+         VALUES (?, '1ª Etapa', 'MATEMÁTICA', ?, NULL, NULL, NULL, NULL, ?)`,
+      );
+      ['PROVA 1', 'TRABALHO INDIVIDUAL', 'TRABALHO EM GRUPO', 'ACOMPANHAMENTO']
+        .forEach((avaliacao, indice) => inserirAvaliacao.run(caderneta.id, avaliacao, indice));
 
       return caderneta;
     }
@@ -330,13 +346,43 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
       expect(prepararNotasParaPreenchimento).not.toHaveBeenCalled();
     });
 
-    it('devolve 422 quando a turma do boletim ainda não tem caderneta', async () => {
+    it('preserva todas as avaliações e marca com null o estudante que não casou', async () => {
+      const caderneta = await cadastrarCadernetaComEstudantes();
+
+      const { chatCompletion } = await import('../ai/openrouter');
+      vi.mocked(chatCompletion).mockResolvedValue(JSON.stringify(planoDeBoletim));
+
+      const form = new FormData();
+      form.append('texto', 'Notas da prova 1.');
+      form.append('cadernetaId', caderneta.id);
+
+      const response = await enviar(form);
+
+      // O grupo mantém as quatro colunas da planilha. A linha não resolvida
+      // continua no mesmo índice como null para poder ser corrigida na preview.
+      await expect(response.json()).resolves.toMatchObject({
+        notasResolvidas: [
+          [
+            { matricula: '2026001', avaliacao: 'PROVA 1', valor: 8.5 },
+            { matricula: '2026001', avaliacao: 'TRABALHO INDIVIDUAL', valor: 9 },
+            { matricula: '2026001', avaliacao: 'TRABALHO EM GRUPO', valor: 7.5 },
+            { matricula: '2026001', avaliacao: 'ACOMPANHAMENTO', valor: 10 },
+          ],
+          null,
+        ],
+      });
+    });
+
+    it('devolve 422 quando a turma do boletim ainda não foi sincronizada', async () => {
       const { chatCompletion } = await import('../ai/openrouter');
       vi.mocked(chatCompletion).mockResolvedValue(JSON.stringify(planoDeBoletim));
 
       const response = await enviar(comTexto('Notas da prova 1.'));
 
       expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringContaining('avaliação cadastrada'),
+      });
     });
   });
 });

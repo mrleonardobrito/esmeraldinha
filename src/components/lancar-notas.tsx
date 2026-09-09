@@ -22,7 +22,9 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -42,13 +44,13 @@ type Estado =
   | { status: "ready"; boletim: BoletimDaEtapa };
 
 /** As duas notas da linha do estudante que o portal deixa editar. */
-type CampoDoEstudante = "personalizada" | "final";
+type CampoDoEstudante = "parcial" | "personalizada";
 
 /**
  * Cada célula editável da grade, indexada por chave. As colunas de avaliação
- * são `matrícula|avaliação`; as duas do estudante, `matrícula|#personalizada`
- * e `matrícula|#final` — o `#` as separa de uma avaliação que por acaso se
- * chamasse igual.
+ * são `matrícula|avaliação`; as duas do estudante, `matrícula|#parcial` e
+ * `matrícula|#personalizada` — o `#` as separa de uma avaliação que por acaso
+ * se chamasse igual.
  */
 type NotasEditadas = Record<string, string>;
 
@@ -80,7 +82,7 @@ export interface LancarNotasProps {
 
 /**
  * A tela de lançar notas: uma linha por estudante, uma coluna por avaliação da
- * disciplina, mais a nota personalizada e a nota final da etapa. _Preencher no
+ * disciplina, mais a nota parcial e a nota personalizada. _Preencher no
  * sistema_ leva tudo o que está preenchido para uma janela do portal já no
  * boletim certo — e para aí. Salvar continua sendo do auxiliar de ensino.
  */
@@ -143,13 +145,13 @@ export function LancarNotas({
     }
 
     for (const nota of estado.boletim.notasDoEstudante) {
+      if (nota.parcial !== null) {
+        valores[chaveDoEstudante(nota.matricula, "parcial")] = String(nota.parcial);
+      }
       if (nota.personalizada !== null) {
         valores[chaveDoEstudante(nota.matricula, "personalizada")] = String(
           nota.personalizada,
         );
-      }
-      if (nota.final !== null) {
-        valores[chaveDoEstudante(nota.matricula, "final")] = String(nota.final);
       }
     }
 
@@ -189,20 +191,20 @@ export function LancarNotas({
       }
     }
 
-    // A personalizada e a final vão juntas, por estudante: são campos da linha,
-    // não de uma avaliação.
+    // A parcial e a personalizada vão juntas, por estudante: são campos da
+    // linha, não de uma avaliação.
     const notasDoEstudante = boletim.estudantes
       .map((estudante) => {
+        const parcial = paraNumero(
+          valores[chaveDoEstudante(estudante.matricula, "parcial")],
+        );
         const personalizada = paraNumero(
           valores[chaveDoEstudante(estudante.matricula, "personalizada")],
         );
-        const final = paraNumero(
-          valores[chaveDoEstudante(estudante.matricula, "final")],
-        );
 
-        return { matricula: estudante.matricula, personalizada, final };
+        return { matricula: estudante.matricula, parcial, personalizada };
       })
-      .filter((nota) => nota.personalizada !== undefined || nota.final !== undefined);
+      .filter((nota) => nota.parcial !== undefined || nota.personalizada !== undefined);
 
     if (notas.length === 0 && notasDoEstudante.length === 0) {
       setErro("Preencha ao menos uma nota antes de mandar para o portal.");
@@ -301,11 +303,10 @@ export function LancarNotas({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {pronto.disciplinas.map((nome) => (
-                      <SelectItem key={nome} value={nome}>
-                        {nome}
-                      </SelectItem>
-                    ))}
+                    <DisciplinasDoSelect
+                      disciplinas={pronto.disciplinas}
+                      disciplinasLancadas={pronto.disciplinasLancadas}
+                    />
                   </SelectContent>
                 </Select>
               </div>
@@ -369,6 +370,56 @@ export function LancarNotas({
   );
 }
 
+/**
+ * As disciplinas do seletor. Enquanto nenhuma tem nota lançada nesta etapa,
+ * uma lista só; assim que a primeira ganha nota, ela se separa das demais em
+ * "A lançar" e "Já lançado" — do jeito que o auxiliar de ensino acompanha o
+ * que ainda falta.
+ */
+function DisciplinasDoSelect({
+  disciplinas,
+  disciplinasLancadas,
+}: {
+  disciplinas: string[];
+  disciplinasLancadas: string[];
+}) {
+  if (disciplinasLancadas.length === 0) {
+    return disciplinas.map((nome) => (
+      <SelectItem key={nome} value={nome}>
+        {nome}
+      </SelectItem>
+    ));
+  }
+
+  const aLancar = disciplinas.filter((nome) => !disciplinasLancadas.includes(nome));
+  const jaLancado = disciplinas.filter((nome) => disciplinasLancadas.includes(nome));
+
+  return (
+    <>
+      {aLancar.length > 0 && (
+        <SelectGroup>
+          <SelectLabel>A lançar</SelectLabel>
+          {aLancar.map((nome) => (
+            <SelectItem key={nome} value={nome}>
+              {nome}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      )}
+      {jaLancado.length > 0 && (
+        <SelectGroup>
+          <SelectLabel>Já lançado</SelectLabel>
+          {jaLancado.map((nome) => (
+            <SelectItem key={nome} value={nome}>
+              {nome}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      )}
+    </>
+  );
+}
+
 function GradeDeNotas({
   estado,
   editadas,
@@ -417,30 +468,6 @@ function GradeDeNotas({
     );
   }
 
-  /**
-   * O portal só mostra a disciplina e a tabela depois que a etapa tem
-   * avaliação. Não ter nenhuma das duas é exatamente o sinal de que falta
-   * cadastrar avaliação — e é isso que a tela diz, em vez de uma grade vazia.
-   */
-  if (avaliacoes.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed px-6 py-12 text-center">
-        <IconAlertTriangle className="size-8 text-muted-foreground" />
-        <div className="flex flex-col gap-1">
-          <p className="text-sm font-medium">
-            Nenhuma avaliação cadastrada nesta etapa
-          </p>
-          <p className="text-sm text-muted-foreground">
-            O portal só mostra a disciplina e a tabela de notas depois que as
-            avaliações da etapa existem. Cadastre-as no portal, em{" "}
-            <em>Etapa &rsaquo; Cadastro de Avaliação</em>, e depois atualize a
-            caderneta para as colunas aparecerem aqui.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const calculadas = new Map(
     notasDoEstudante.map((nota) => [nota.matricula, nota]),
   );
@@ -469,10 +496,10 @@ function GradeDeNotas({
                 </span>
               </th>
             ))}
+            <ColunaFixa titulo="Nota origem" nota="o portal preenche" />
             <ColunaFixa titulo="Nota calculada" nota="o portal calcula" />
-            <ColunaFixa titulo="Nota parcial" nota="o portal calcula" />
-            <ColunaFixa titulo="Nota personalizada" />
-            <ColunaFixa titulo="Nota final da etapa" />
+            <ColunaFixa titulo="Nota parcial" />
+            <ColunaFixa titulo="Nota personalizada" nota="sobrepõe a calculada" />
           </tr>
         </thead>
         <tbody>
@@ -559,15 +586,15 @@ function LinhaDoEstudante({
         );
       })}
 
-      {/* As calculadas o portal preenche sozinho; aqui elas só se leem. */}
+      {/* A origem e a calculada o portal preenche sozinho; aqui só se leem. */}
+      <td className="px-3 py-2 align-middle">
+        <NotaCalculada valor={calculadas?.origem ?? null} />
+      </td>
       <td className="px-3 py-2 align-middle">
         <NotaCalculada valor={calculadas?.calculada ?? null} />
       </td>
-      <td className="px-3 py-2 align-middle">
-        <NotaCalculada valor={calculadas?.parcial ?? null} />
-      </td>
 
-      {(["personalizada", "final"] as const).map((campo) => {
+      {(["parcial", "personalizada"] as const).map((campo) => {
         const chave = chaveDoEstudante(estudante.matricula, campo);
 
         return (
@@ -577,9 +604,9 @@ function LinhaDoEstudante({
               onChange={(novo) => onEditar(chave, novo)}
               disabled={disabled}
               rotulo={
-                campo === "personalizada"
-                  ? `Nota personalizada de ${estudante.nome}`
-                  : `Nota final da etapa de ${estudante.nome}`
+                campo === "parcial"
+                  ? `Nota parcial de ${estudante.nome}`
+                  : `Nota personalizada de ${estudante.nome}`
               }
             />
           </td>

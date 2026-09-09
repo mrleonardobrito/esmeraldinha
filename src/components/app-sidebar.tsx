@@ -19,11 +19,6 @@ import {
 } from "@tabler/icons-react";
 
 const data = {
-  user: {
-    name: "Esmeraldinha",
-    email: "linda@HOTmail.com",
-    avatar: "/esmeralda-light.jpg",
-  },
   navMain: [
     {
       title: "Painel",
@@ -119,7 +114,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <NavMain items={data.navMain} />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={data.user} />
+        <NavUser />
       </SidebarFooter>
     </Sidebar>
   );

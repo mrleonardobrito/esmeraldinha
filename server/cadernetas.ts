@@ -5,10 +5,10 @@ import { LoginError, MissingAulaRowsError } from './scrape/errors';
 import {
   closeSession,
   getCatalogo,
-  getCatalogoComAvaliacoes,
   openSession,
   retomarSessao,
 } from './portal-sessions';
+import { comAvaliacoesDoBanco } from './cadernetas/catalogo';
 import {
   prepararAulaParaPreenchimento,
   prepararNotasParaPreenchimento,
@@ -33,6 +33,7 @@ import {
   deleteCaderneta,
   getBoletimDaEtapa,
   getCaderneta,
+  listAvaliacoesDoProfessor,
   listDisciplinasDaCaderneta,
   listAulasDaEtapa,
   listCadernetas,
@@ -114,13 +115,13 @@ const preenchimentoDeNotasSchema = z
         }),
       )
       .default([]),
-    /** A nota personalizada e a final da etapa, que não são de avaliação. */
+    /** A nota parcial e a personalizada, que não são de nenhuma avaliação. */
     notasDoEstudante: z
       .array(
         z.object({
           matricula: z.string().trim().min(1),
+          parcial: z.number().min(0).nullish(),
           personalizada: z.number().min(0).nullish(),
-          final: z.number().min(0).nullish(),
         }),
       )
       .default([]),
@@ -207,24 +208,39 @@ cadernetas.delete('/sessoes/:id', async (context) => {
  */
 type ItemDoEnvio =
   | { readonly status: 'pronta'; readonly rotulo: string }
-  | { readonly status: 'falha'; readonly rotulo: string; readonly motivo: string };
+  | {
+      readonly status: 'falha';
+      readonly rotulo: string;
+      readonly motivo: string;
+      readonly candidatos?: readonly string[];
+    };
 
 function rotuloDaAula(aula: EnvioPlan['aulas'][number]): string {
   return aula.ordem === undefined ? aula.data : `${aula.data} #${aula.ordem}`;
 }
 
-/** As notas resolvidas, na mesma ordem de `plano.notas` — a única que casa por índice. */
+/**
+ * As notas resolvidas, na mesma ordem de `plano.notas` — a única que casa por
+ * índice. O índice que falhou vai como `null`, não como `undefined`: o JSON
+ * não carrega `undefined` e o convertia em `null` no meio do caminho, onde
+ * ninguém do outro lado o esperava.
+ */
 function notasResolvidasNaOrdem(
   notas: readonly NotaResolvida[],
-): readonly (NotaParaLancar | undefined)[] {
-  return notas.map((nota) => (nota.status === 'pronta' ? nota.nota : undefined));
+): readonly (readonly NotaParaLancar[] | null)[] {
+  return notas.map((nota) => (nota.status === 'pronta' ? nota.notas : null));
 }
 
 function itensDoBoletim(notas: readonly NotaResolvida[]): ItemDoEnvio[] {
   return notas.map((nota) =>
     nota.status === 'pronta'
-      ? { status: 'pronta', rotulo: nota.nota.matricula }
-      : { status: 'falha', rotulo: nota.estudante, motivo: nota.motivo },
+      ? { status: 'pronta', rotulo: nota.notas[0]?.matricula ?? '' }
+      : {
+          status: 'falha',
+          rotulo: nota.estudante,
+          motivo: nota.motivo,
+          ...(nota.candidatos && nota.candidatos.length > 0 ? { candidatos: nota.candidatos } : {}),
+        },
   );
 }
 
@@ -298,8 +314,12 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
     // O agente escolhe a disciplina e a avaliação de uma lista fechada, então
     // o catálogo já vai enriquecido: uma segunda leitura do material só para
     // descobrir que ele era de notas custaria outra chamada ao modelo, e nada
-    // garante que as duas concordariam. O catálogo fica em cache na sessão.
-    const comAvaliacoes = (await getCatalogoComAvaliacoes(session.id)) ?? catalogo;
+    // garante que as duas concordariam. As avaliações saem do banco, onde a
+    // sincronização da caderneta já as deixou turma por turma.
+    const comAvaliacoes = comAvaliacoesDoBanco(
+      catalogo,
+      listAvaliacoesDoProfessor(getDb(), session.professorId),
+    );
 
     const plano = await interpretarEnvio({ texto, arquivos, catalogo: comAvaliacoes });
 
@@ -332,15 +352,21 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
         );
       }
 
-      const notas = resolverNotasParaPreview(plano.notas, plano.avaliacao, estudantes);
+      const notas = resolverNotasParaPreview(plano.notas, estudantes);
 
       return context.json({
         plano: { ...plano, disciplina },
         cadernetaId: caderneta.id,
         itens: itensDoBoletim(notas),
         // Só os `pronta`, na ordem de `plano.notas` — os índices batem, então
-        // um `undefined` marca o índice cujo item é `falha`.
+        // um `null` marca o índice cujo item é `falha`.
         notasResolvidas: notasResolvidasNaOrdem(notas),
+        // A turma inteira, para a tela oferecer no lugar de um nome que não
+        // bateu — o auxiliar escolhe quem é, em vez de digitar de novo.
+        estudantes: estudantes.map((estudante) => ({
+          matricula: estudante.matricula,
+          nome: estudante.nome,
+        })),
       });
     }
 
@@ -990,12 +1016,12 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
         notas,
         notasDoEstudante: notasDoEstudante.map((nota) => ({
           matricula: nota.matricula,
+          ...(nota.parcial === null || nota.parcial === undefined
+            ? {}
+            : { parcial: nota.parcial }),
           ...(nota.personalizada === null || nota.personalizada === undefined
             ? {}
             : { personalizada: nota.personalizada }),
-          ...(nota.final === null || nota.final === undefined
-            ? {}
-            : { final: nota.final }),
         })),
       }),
     );

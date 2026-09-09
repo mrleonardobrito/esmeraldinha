@@ -10,8 +10,21 @@ const catalogo: ConteudoCatalogo = {
       nome: '1ª Etapa',
       turmas: ['3º ANO A'],
       meses: ['MARÇO', 'ABRIL'],
-      disciplinas: [
-        { nome: 'MATEMÁTICA', avaliacoes: [{ nome: 'PROVA 1', valor: 10 }] },
+      disciplinasPorTurma: [
+        {
+          turma: '3º ANO A',
+          disciplinas: [
+            {
+              nome: 'MATEMÁTICA',
+              avaliacoes: [
+                { nome: 'PROVA 1', valor: 10 },
+                { nome: 'TRABALHO INDIVIDUAL', valor: 10 },
+                { nome: 'TRABALHO EM GRUPO', valor: 10 },
+                { nome: 'ACOMPANHAMENTO', valor: 10 },
+              ],
+            },
+          ],
+        },
       ],
     },
     { nome: '2ª Etapa', turmas: ['3º ANO B'], meses: ['MAIO'] },
@@ -27,20 +40,30 @@ const planoDeNotas = {
   observacao: '',
   aulas: [],
   disciplina: '',
-  avaliacao: 'PROVA 1',
-  notas: [{ estudante: 'José da Silva', valor: 8.5 }],
+  notas: [
+    {
+      estudante: 'José da Silva',
+      matricula: '',
+      notas: [{ avaliacao: 'PROVA 1', valor: 8.5 }],
+    },
+  ],
 };
 
-/** Uma etapa com duas disciplinas: escolher a errada é lançar no boletim errado. */
+/** Uma turma com duas disciplinas: escolher a errada é lançar no boletim errado. */
 const catalogoComDuas: ConteudoCatalogo = {
   etapas: [
     {
       nome: '1ª Etapa',
       turmas: ['3º ANO A'],
       meses: ['MARÇO'],
-      disciplinas: [
-        { nome: 'MATEMÁTICA', avaliacoes: [{ nome: 'PROVA 1', valor: 10 }] },
-        { nome: 'PORTUGUÊS', avaliacoes: [{ nome: 'PROVA 1', valor: 10 }] },
+      disciplinasPorTurma: [
+        {
+          turma: '3º ANO A',
+          disciplinas: [
+            { nome: 'MATEMÁTICA', avaliacoes: [{ nome: 'PROVA 1', valor: 10 }] },
+            { nome: 'PORTUGUÊS', avaliacoes: [{ nome: 'PROVA 1', valor: 10 }] },
+          ],
+        },
       ],
     },
   ],
@@ -177,6 +200,18 @@ describe('buildContentParts', () => {
   });
 });
 
+describe('conteúdo', () => {
+  it('recusa um mês que não existe na etapa', async () => {
+    await expect(
+      interpretarEnvio({
+        texto: 'qualquer coisa',
+        catalogo,
+        complete: completeWith({ ...planoValido, mes: 'MAIO' }),
+      }),
+    ).rejects.toThrow(/não existe na etapa/);
+  });
+});
+
 describe('material de outra turma', () => {
   it('recusa em vez de escolher a turma mais parecida', async () => {
     await expect(
@@ -205,8 +240,47 @@ describe('interpretarEnvio: boletim', () => {
     });
 
     expect(plano.parte).toBe('boletim');
-    expect(plano.avaliacao).toBe('PROVA 1');
-    expect(plano.notas).toEqual([{ estudante: 'José da Silva', valor: 8.5 }]);
+    expect(plano.notas).toEqual([
+      {
+        estudante: 'José da Silva',
+        matricula: '',
+        notas: [{ avaliacao: 'PROVA 1', valor: 8.5 }],
+      },
+    ]);
+  });
+
+  it('preserva todas as avaliações encontradas para o mesmo estudante', async () => {
+    const notas = [
+      { avaliacao: 'PROVA 1', valor: 8.5 },
+      { avaliacao: 'TRABALHO INDIVIDUAL', valor: 9 },
+      { avaliacao: 'TRABALHO EM GRUPO', valor: 7.5 },
+      { avaliacao: 'ACOMPANHAMENTO', valor: 10 },
+    ];
+    const plano = await interpretarEnvio({
+      texto: 'Boletim com quatro avaliações.',
+      catalogo,
+      complete: completeWith({
+        ...planoDeNotas,
+        notas: [{ estudante: 'José da Silva', matricula: '123', notas }],
+      }),
+    });
+
+    expect(plano.notas[0]).toEqual({
+      estudante: 'José da Silva',
+      matricula: '123',
+      notas,
+    });
+  });
+
+  it('aceita o boletim sem mês: um boletim é da etapa inteira', async () => {
+    const plano = await interpretarEnvio({
+      texto: 'Notas da prova 1 do 3º ano A: José da Silva 8,5.',
+      catalogo,
+      complete: completeWith({ ...planoDeNotas, mes: '' }),
+    });
+
+    expect(plano.mes).toBe('');
+    expect(plano.notas).toHaveLength(1);
   });
 
   it('recusa uma avaliação que não existe na etapa', async () => {
@@ -214,7 +288,16 @@ describe('interpretarEnvio: boletim', () => {
       interpretarEnvio({
         texto: 'qualquer coisa',
         catalogo,
-        complete: completeWith({ ...planoDeNotas, avaliacao: 'PROVA SURPRESA' }),
+        complete: completeWith({
+          ...planoDeNotas,
+          notas: [
+            {
+              estudante: 'José da Silva',
+              matricula: '',
+              notas: [{ avaliacao: 'PROVA SURPRESA', valor: 8.5 }],
+            },
+          ],
+        }),
       }),
     ).rejects.toThrow(EnvioInvalidoError);
   });
@@ -226,13 +309,19 @@ describe('interpretarEnvio: boletim', () => {
         catalogo,
         complete: completeWith({
           ...planoDeNotas,
-          notas: [{ estudante: 'José da Silva', valor: 11 }],
+          notas: [
+            {
+              estudante: 'José da Silva',
+              matricula: '',
+              notas: [{ avaliacao: 'PROVA 1', valor: 11 }],
+            },
+          ],
         }),
       }),
     ).rejects.toThrow(/passa do valor/);
   });
 
-  it('recusa a etapa que ainda não tem avaliação cadastrada', async () => {
+  it('recusa a turma que ainda não tem avaliação cadastrada', async () => {
     await expect(
       interpretarEnvio({
         texto: 'qualquer coisa',
@@ -257,7 +346,7 @@ describe('interpretarEnvio: boletim', () => {
     ).rejects.toThrow(EnvioInvalidoError);
   });
 
-  it('usa a única disciplina da etapa sem o material precisar dizê-la', async () => {
+  it('usa a única disciplina da turma sem o material precisar dizê-la', async () => {
     const plano = await interpretarEnvio({
       texto: 'Notas da prova 1.',
       catalogo,
@@ -267,7 +356,7 @@ describe('interpretarEnvio: boletim', () => {
     expect(plano.notas).toHaveLength(1);
   });
 
-  it('recusa quando a etapa tem mais de uma disciplina e o material não diz qual', async () => {
+  it('recusa quando a turma tem mais de uma disciplina e o material não diz qual', async () => {
     await expect(
       interpretarEnvio({
         texto: 'qualquer coisa',
@@ -287,13 +376,43 @@ describe('interpretarEnvio: boletim', () => {
     expect(plano.disciplina).toBe('PORTUGUÊS');
   });
 
-  it('recusa uma disciplina que não existe na etapa', async () => {
+  it('lê as avaliações da turma do material, não as da primeira turma da etapa', async () => {
+    // Foi assim que um boletim válido foi recusado: a etapa oferecia duas
+    // turmas, e só a primeira era consultada.
+    const comTurmaSemAvaliacao: ConteudoCatalogo = {
+      etapas: [
+        {
+          nome: '1ª Etapa',
+          turmas: ['1º ANO D', '3º ANO A'],
+          meses: ['MARÇO'],
+          disciplinasPorTurma: [
+            {
+              turma: '3º ANO A',
+              disciplinas: [
+                { nome: 'MATEMÁTICA', avaliacoes: [{ nome: 'PROVA 1', valor: 10 }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const plano = await interpretarEnvio({
+      texto: 'Notas da prova 1 do 3º ano A.',
+      catalogo: comTurmaSemAvaliacao,
+      complete: completeWith(planoDeNotas),
+    });
+
+    expect(plano.notas).toHaveLength(1);
+  });
+
+  it('recusa uma disciplina que não existe na turma', async () => {
     await expect(
       interpretarEnvio({
         texto: 'qualquer coisa',
         catalogo: catalogoComDuas,
         complete: completeWith({ ...planoDeNotas, disciplina: 'CIÊNCIAS' }),
       }),
-    ).rejects.toThrow(/não existe na etapa/);
+    ).rejects.toThrow(/A disciplina "CIÊNCIAS" não existe em 3º ANO A/);
   });
 });

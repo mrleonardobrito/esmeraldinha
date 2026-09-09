@@ -46,22 +46,38 @@ const planSchema = z.object({
   ),
   /** A disciplina do boletim; vazia quando a turma só tem uma. */
   disciplina: z.string().trim().default(''),
-  /** A avaliação a que as notas se referem; vazia fora da parte boletim. */
-  avaliacao: z.string().trim().default(''),
   notas: z
     .array(
       z.object({
         estudante: z.string().trim(),
-        valor: z.number(),
+        /** A matrícula que o material trouxe; vazia quando ele não traz. */
+        matricula: z.string().trim().default(''),
+        notas: z
+          .array(
+            z.object({
+              avaliacao: z.string().trim(),
+              valor: z.number(),
+            }),
+          )
+          .min(1),
       }),
     )
     .default([]),
 });
 
-/** Uma nota como o agente a leu: o estudante pelo nome, ainda sem matrícula. */
 export interface NotaLida {
-  readonly estudante: string;
+  readonly avaliacao: string;
   readonly valor: number;
+}
+
+/**
+ * As notas que o agente leu na linha de um estudante. A matrícula vem vazia
+ * quando o material não a traz — e aí o nome é o único jeito de encontrá-lo.
+ */
+export interface NotasDoEstudanteLidas {
+  readonly estudante: string;
+  readonly matricula: string;
+  readonly notas: readonly NotaLida[];
 }
 
 export interface EnvioPlan {
@@ -74,9 +90,7 @@ export interface EnvioPlan {
   readonly aulas: readonly Aula[];
   /** A disciplina do boletim; vazia quando a turma só tem uma. */
   readonly disciplina: string;
-  /** A avaliação a que as notas se referem; vazia fora da parte boletim. */
-  readonly avaliacao: string;
-  readonly notas: readonly NotaLida[];
+  readonly notas: readonly NotasDoEstudanteLidas[];
 }
 
 export interface ArquivoEnviado {
@@ -106,7 +120,6 @@ const RESPONSE_SCHEMA = {
     'observacao',
     'aulas',
     'disciplina',
-    'avaliacao',
     'notas',
   ],
   properties: {
@@ -114,12 +127,17 @@ const RESPONSE_SCHEMA = {
     identificado: {
       type: 'boolean',
       description:
-        'true só se a etapa, a turma e o mês do material forem realmente ' +
-        'uma das combinações listadas. false se o material for de outra turma.',
+        'true só se a etapa e a turma do material forem realmente uma das ' +
+        'combinações listadas. false se o material for de outra turma.',
     },
     etapa: { type: 'string' },
     turma: { type: 'string' },
-    mes: { type: 'string' },
+    mes: {
+      type: 'string',
+      description:
+        'Só para a parte "conteudo": o mês das aulas, copiado exatamente da ' +
+        'lista de meses da etapa. String vazia nas outras partes.',
+    },
     observacao: {
       type: 'string',
       description: 'O que ficou ambíguo no material, ou string vazia.',
@@ -159,15 +177,8 @@ const RESPONSE_SCHEMA = {
       type: 'string',
       description:
         'Só para a parte "boletim": a disciplina do boletim, copiada ' +
-        'exatamente da lista da etapa. String vazia quando a etapa só tem ' +
-        'uma disciplina ou nas outras partes.',
-    },
-    avaliacao: {
-      type: 'string',
-      description:
-        'Só para a parte "boletim": o nome da avaliação a que as notas se ' +
-        'referem, copiado exatamente da lista de avaliações da etapa. ' +
-        'String vazia nas outras partes.',
+        'exatamente da lista da turma escolhida. String vazia quando a turma ' +
+        'só tem uma disciplina ou nas outras partes.',
     },
     notas: {
       type: 'array',
@@ -177,7 +188,7 @@ const RESPONSE_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['estudante', 'valor'],
+        required: ['estudante', 'matricula', 'notas'],
         properties: {
           estudante: {
             type: 'string',
@@ -185,7 +196,32 @@ const RESPONSE_SCHEMA = {
               'O nome do estudante como o material o escreve. Não invente ' +
               'nem corrija para um nome que você acha parecido.',
           },
-          valor: { type: 'number', description: 'A nota, com ponto decimal.' },
+          matricula: {
+            type: 'string',
+            description:
+              'A matrícula do estudante, copiada do material — a coluna ' +
+              'Matrícula das planilhas do portal, por exemplo. String vazia ' +
+              'quando o material não traz matrícula nenhuma.',
+          },
+          notas: {
+            type: 'array',
+            minItems: 1,
+            description:
+              'Todas as notas desta linha, uma por avaliação encontrada no material.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['avaliacao', 'valor'],
+              properties: {
+                avaliacao: {
+                  type: 'string',
+                  description:
+                    'Nome da avaliação copiado exatamente da lista da disciplina escolhida.',
+                },
+                valor: { type: 'number', description: 'A nota, com ponto decimal.' },
+              },
+            },
+          },
         },
       },
     },
@@ -199,15 +235,21 @@ function buildSystemPrompt(catalogo: ConteudoCatalogo): string {
         `- Etapa "${etapa.nome}"\n` +
         `  turmas: ${etapa.turmas.join(' | ') || '(nenhuma)'}\n` +
         `  meses: ${etapa.meses.join(' | ') || '(nenhum)'}\n` +
-        `  disciplinas e avaliações:\n` +
-        ((etapa.disciplinas ?? []).length === 0
+        `  disciplinas e avaliações, por turma:\n` +
+        ((etapa.disciplinasPorTurma ?? []).length === 0
           ? '    (nenhuma avaliação cadastrada)'
-          : (etapa.disciplinas ?? [])
+          : (etapa.disciplinasPorTurma ?? [])
               .map(
-                (disciplina) =>
-                  `    ${disciplina.nome}: ${
-                    disciplina.avaliacoes.map((a) => a.nome).join(' | ') || '(nenhuma)'
-                  }`,
+                (daTurma) =>
+                  `    ${daTurma.turma}:\n` +
+                  daTurma.disciplinas
+                    .map(
+                      (disciplina) =>
+                        `      ${disciplina.nome}: ${
+                          disciplina.avaliacoes.map((a) => a.nome).join(' | ') || '(nenhuma)'
+                        }`,
+                    )
+                    .join('\n'),
               )
               .join('\n')),
     )
@@ -222,7 +264,7 @@ function buildSystemPrompt(catalogo: ConteudoCatalogo): string {
     '1. Qual parte da caderneta ele preenche — conteudo (o que foi ensinado em',
     '   cada aula), frequencia (presença), ficha-desempenho, ficha-descritiva',
     '   ou boletim (notas).',
-    '2. A qual etapa, turma e mês ele se refere.',
+    '2. A qual etapa e turma ele se refere — e, na parte "conteudo", a qual mês.',
     '',
     'Etapa, turma e mês DEVEM ser copiados exatamente de uma das combinações',
     'abaixo, que são as únicas que existem para este professor. A turma e o mês',
@@ -252,15 +294,23 @@ function buildSystemPrompt(catalogo: ConteudoCatalogo): string {
     'disser, e use "Não" para recuperação e interação quando não houver menção.',
     'Para as outras partes, devolva a lista de aulas vazia.',
     '',
-    'Para a parte "boletim", devolva uma entrada em notas por estudante com',
-    'nota no material, e em avaliacao o nome da avaliação a que elas se',
-    'referem — copiado exatamente da lista de avaliações da etapa escolhida.',
-    'Escreva o nome do estudante como o material o escreve: quem casa o nome',
-    'com a matrícula é o sistema, não você. Se o material não disser a qual',
-    'avaliação as notas pertencem e a etapa tiver mais de uma, devolva',
+    'Para a parte "boletim", devolva uma entrada em notas por estudante. Dentro',
+    'dela, devolva em notas uma entrada para CADA avaliação que tiver nota no',
+    'material. Em cada nota, copie avaliacao exatamente da lista de avaliações',
+    'da disciplina escolhida. Uma planilha com quatro colunas de avaliação deve',
+    'produzir quatro notas para cada estudante que tiver valores nas quatro.',
+    'Colunas chamadas "Valor Máx.", "Valor Máximo" ou equivalentes descrevem o',
+    'limite da avaliação: NUNCA devolva esses valores como notas do estudante.',
+    'Copie também a matrícula de cada estudante sempre que o material a',
+    'trouxer: é ela que identifica o estudante no portal, e é o que salva a',
+    'nota quando o nome vem com erro de digitação. Escreva o nome como o',
+    'material o escreve: quem casa nome e matrícula com o estudante é o',
+    'sistema, não você. Se o material não disser a qual avaliação um valor',
+    'pertence e a turma tiver mais de uma, devolva',
     'identificado: false e diga isso em observacao — lançar a nota na',
     'avaliação errada é tão ruim quanto lançá-la no estudante errado.',
-    'Para as outras partes, devolva avaliacao vazia e a lista de notas vazia.',
+    'Um boletim é da etapa inteira, não de um mês: devolva mes vazio nele.',
+    'Para as outras partes, devolva a lista de notas vazia.',
     '',
     'Se algo ficou ambíguo, diga em observacao. Responda só o JSON do schema.',
   ].join('\n');
@@ -359,22 +409,34 @@ function assertNoCatalogo(plan: z.infer<typeof planSchema>, catalogo: ConteudoCa
   }
   plan.turma = turma;
 
-  const mes = encontraIgualIgnorandoCaixaEAcento(etapa.meses, plan.mes);
-  if (!mes) {
-    throw new EnvioInvalidoError(
-      `O mês "${plan.mes}" não existe na etapa "${etapa.nome}". ` +
-        `Meses disponíveis: ${etapa.meses.join(', ')}.`,
-    );
+  // O mês só existe no caminho de conteúdo: é ele que filtra a lista de aulas
+  // no portal. Um boletim é da etapa inteira, então cobrar um mês dele recusava
+  // a planilha de notas por um campo que ninguém iria usar.
+  if (plan.parte === 'conteudo') {
+    const mes = encontraIgualIgnorandoCaixaEAcento(etapa.meses, plan.mes);
+    if (!mes) {
+      throw new EnvioInvalidoError(
+        `O mês "${plan.mes}" não existe na etapa "${etapa.nome}". ` +
+          `Meses disponíveis: ${etapa.meses.join(', ')}.`,
+      );
+    }
+    plan.mes = mes;
   }
-  plan.mes = mes;
 
   if (plan.parte !== 'boletim') return;
 
-  const disciplinas = etapa.disciplinas ?? [];
+  // A avaliação é cadastrada por turma, não por etapa: a turma vizinha ter as
+  // suas não diz nada sobre esta.
+  const disciplinas =
+    (etapa.disciplinasPorTurma ?? []).find(
+      (daTurma) => normalizar(daTurma.turma) === normalizar(plan.turma),
+    )?.disciplinas ?? [];
+
   if (disciplinas.length === 0) {
     throw new EnvioInvalidoError(
-      `A etapa "${etapa.nome}" não tem nenhuma avaliação cadastrada no portal. ` +
-        'Cadastre a avaliação em Cadastro de Avaliação antes de lançar notas.',
+      `A turma "${plan.turma}" não tem nenhuma avaliação cadastrada na etapa ` +
+        `"${etapa.nome}". Cadastre a avaliação em Cadastro de Avaliação no ` +
+        'portal e sincronize a caderneta antes de lançar notas.',
     );
   }
 
@@ -389,40 +451,55 @@ function assertNoCatalogo(plan: z.infer<typeof planSchema>, catalogo: ConteudoCa
   if (!disciplina) {
     throw new EnvioInvalidoError(
       plan.disciplina
-        ? `A disciplina "${plan.disciplina}" não existe na etapa "${etapa.nome}". ` +
+        ? `A disciplina "${plan.disciplina}" não existe em ${plan.turma} na ` +
+          `etapa "${etapa.nome}". ` +
           `Disciplinas disponíveis: ${disciplinas.map((d) => d.nome).join(', ')}.`
-        : `A etapa "${etapa.nome}" tem mais de uma disciplina e o material não ` +
-          `diz de qual é. Disciplinas: ${disciplinas.map((d) => d.nome).join(', ')}.`,
+        : `${plan.turma} tem mais de uma disciplina na etapa "${etapa.nome}" e ` +
+          `o material não diz de qual é. ` +
+          `Disciplinas: ${disciplinas.map((d) => d.nome).join(', ')}.`,
     );
   }
   plan.disciplina = disciplina.nome;
 
   const avaliacoes = disciplina.avaliacoes;
-  const avaliacao = encontraPorNome(avaliacoes, plan.avaliacao);
 
-  if (!avaliacao) {
-    throw new EnvioInvalidoError(
-      `A avaliação "${plan.avaliacao}" não existe em ${disciplina.nome} na ` +
-        `etapa "${etapa.nome}". ` +
-        `Avaliações disponíveis: ${avaliacoes.map((a) => a.nome).join(', ')}.`,
-    );
-  }
-  plan.avaliacao = avaliacao.nome;
+  for (const notasDoEstudante of plan.notas) {
+    const avaliacoesEncontradas = new Set<string>();
 
-  // Uma nota fora do valor da avaliação é erro de leitura do material, e o
-  // portal a recusaria de qualquer jeito.
-  for (const nota of plan.notas) {
-    if (nota.valor < 0) {
-      throw new EnvioInvalidoError(
-        `A nota de ${nota.estudante} veio negativa (${nota.valor}).`,
-      );
-    }
+    for (const nota of notasDoEstudante.notas) {
+      const avaliacao = encontraPorNome(avaliacoes, nota.avaliacao);
 
-    if (avaliacao.valor !== undefined && nota.valor > avaliacao.valor) {
-      throw new EnvioInvalidoError(
-        `A nota de ${nota.estudante} (${nota.valor}) passa do valor da ` +
-          `avaliação "${avaliacao.nome}", que vale ${avaliacao.valor}.`,
-      );
+      if (!avaliacao) {
+        throw new EnvioInvalidoError(
+          `A avaliação "${nota.avaliacao}" não existe em ${disciplina.nome} de ` +
+            `${plan.turma} na etapa "${etapa.nome}". ` +
+            `Avaliações disponíveis: ${avaliacoes.map((a) => a.nome).join(', ')}.`,
+        );
+      }
+      nota.avaliacao = avaliacao.nome;
+
+      if (avaliacoesEncontradas.has(avaliacao.nome)) {
+        throw new EnvioInvalidoError(
+          `A avaliação "${avaliacao.nome}" aparece mais de uma vez para ` +
+            `${notasDoEstudante.estudante}.`,
+        );
+      }
+      avaliacoesEncontradas.add(avaliacao.nome);
+
+      // Uma nota fora do valor da avaliação é erro de leitura do material, e
+      // o portal a recusaria de qualquer jeito.
+      if (nota.valor < 0) {
+        throw new EnvioInvalidoError(
+          `A nota de ${notasDoEstudante.estudante} veio negativa (${nota.valor}).`,
+        );
+      }
+
+      if (avaliacao.valor !== undefined && nota.valor > avaliacao.valor) {
+        throw new EnvioInvalidoError(
+          `A nota de ${notasDoEstudante.estudante} (${nota.valor}) passa do valor da ` +
+            `avaliação "${avaliacao.nome}", que vale ${avaliacao.valor}.`,
+        );
+      }
     }
   }
 }

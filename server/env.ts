@@ -52,6 +52,20 @@ export const env = {
   /** Uma sessão ociosa é encerrada depois desse tempo. */
   sessionIdleMs: readInt(process.env.PORTAL_SESSION_IDLE_MS, 15 * 60_000),
   /**
+   * A conta do auxiliar de ensino, a única pessoa que usa a Esmeraldinha.
+   * O login e a senha temporária vêm daqui porque no primeiro acesso não há
+   * banco nenhum a consultar: é com eles que a conta nasce. A senha
+   * temporária vale uma vez — o primeiro acesso obriga a trocá-la, e a
+   * definitiva (guardada como hash no SQLite) é a única que loga depois.
+   */
+  conta: {
+    login: process.env.ESMERALDINHA_LOGIN?.trim() || 'auxiliar',
+    senhaTemporaria:
+      process.env.ESMERALDINHA_SENHA_TEMPORARIA?.trim() || 'esmeraldinha',
+    /** Uma sessão do auxiliar ociosa por esse tempo pede login de novo. */
+    sessaoIdleMs: readInt(process.env.ESMERALDINHA_SESSAO_IDLE_MS, 8 * 60 * 60_000),
+  },
+  /**
    * Onde os metadados da sessão do portal (id, professor, login, escola)
    * ficam guardados fora do processo, com o mesmo prazo de vida da sessão
    * em memória. A `Page`/`BrowserContext` do Playwright não viaja para lá —

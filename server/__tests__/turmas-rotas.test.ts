@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../app';
+import { autenticar } from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
   retomarSessao: vi.fn(),
   getCatalogo: vi.fn(),
-  getCatalogoComAvaliacoes: vi.fn(),
   openSession: vi.fn(),
   closeSession: vi.fn(),
 }));
@@ -65,7 +65,9 @@ async function freshApp() {
 
   getDb().prepare('UPDATE professores SET id = ? WHERE id = ?').run(professorId, professor.id);
 
-  return app;
+  // As rotas do app exigem uma sessão do auxiliar de ensino: o helper entra
+  // uma vez e devolve o mesmo `fetch`, com o token em cada requisição.
+  return autenticar(app);
 }
 
 async function stubSession() {

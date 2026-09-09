@@ -45,6 +45,9 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/pw-browsers
 
+      # O login e a senha temporária da conta do auxiliar de ensino entram no
+      # bundle aqui (electron/build-defines.mjs): o app instalado não lê .env.
+      # Sem os secrets configurados, valem os padrões de server/env.ts.
       - name: Build and package (${{ matrix.target }})
         run: |
           pnpm build
@@ -52,6 +55,8 @@ jobs:
           npx electron-builder --${{ matrix.target }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          ESMERALDINHA_LOGIN: ${{ secrets.ESMERALDINHA_LOGIN }}
+          ESMERALDINHA_SENHA_TEMPORARIA: ${{ secrets.ESMERALDINHA_SENHA_TEMPORARIA }}
 
       - name: Upload installers
         uses: actions/upload-artifact@v4

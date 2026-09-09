@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../app';
+import { autenticar } from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
   retomarSessao: vi.fn(),
   getCatalogo: vi.fn(),
-  getCatalogoComAvaliacoes: vi.fn(),
   openSession: vi.fn(),
   closeSession: vi.fn(),
 }));
@@ -67,13 +67,13 @@ async function freshApp() {
     )
     .run(professorId, senhaEncrypted);
 
-  return app;
+  // As rotas do app exigem uma sessão do auxiliar de ensino: o helper entra
+  // uma vez e devolve o mesmo `fetch`, com o token em cada requisição.
+  return autenticar(app);
 }
 
 async function stubSession() {
-  const { retomarSessao, getCatalogo, getCatalogoComAvaliacoes } = await import(
-    '../portal-sessions'
-  );
+  const { retomarSessao, getCatalogo } = await import('../portal-sessions');
   vi.mocked(retomarSessao).mockResolvedValue({
     id: sessionId,
     professorId,
@@ -84,7 +84,6 @@ async function stubSession() {
     lastUsedAt: Date.now(),
   });
   vi.mocked(getCatalogo).mockResolvedValue(catalogo);
-  vi.mocked(getCatalogoComAvaliacoes).mockResolvedValue(catalogo);
 }
 
 /** Toda aula que o portal devolve, para qualquer mês pedido. */
@@ -614,9 +613,41 @@ describe('cadernetas CRUD', () => {
       etapa: '1ª Etapa',
       disciplina: 'MATEMÁTICA',
       disciplinas: ['MATEMÁTICA'],
+      // A raspagem já trouxe nota nesta disciplina: ela nasce "lançada".
+      disciplinasLancadas: ['MATEMÁTICA'],
       estudantes: [{ matricula: '2026001', nome: 'Ana Lima' }],
       avaliacoes: [{ nome: 'PROVA 1', valor: 10 }],
       notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 7.5 }],
+    });
+  });
+
+  it('separa, no boletim, as disciplinas com nota lançada das que ainda não têm', async () => {
+    await stubBoletim(
+      { avaliacoes: [{ nome: 'PROVA 1', valor: 10 }], notas: [] },
+      ['MATEMÁTICA', 'CIÊNCIAS'],
+    );
+
+    const app = await freshApp();
+    const { id } = (await (await cadastrar(app)).json()) as { id: string };
+    await esperarSincronizacao(app, id);
+
+    // Só MATEMÁTICA ganha nota lançada; CIÊNCIAS continua sem nenhuma.
+    await app.fetch(
+      request(
+        `/${id}/boletim/preenchimentos-assistidos`,
+        json({
+          etapa: '1ª Etapa',
+          disciplina: 'MATEMÁTICA',
+          notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }],
+        }),
+      ),
+    );
+
+    const response = await app.fetch(request(`/${id}/etapas/1%C2%AA%20Etapa/boletim`));
+
+    await expect(response.json()).resolves.toMatchObject({
+      disciplinas: ['MATEMÁTICA', 'CIÊNCIAS'],
+      disciplinasLancadas: ['MATEMÁTICA'],
     });
   });
 

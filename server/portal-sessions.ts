@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
-import { comAvaliacoes, listConteudoOptions, login } from './scrape/portal';
+import { listConteudoOptions, login } from './scrape/portal';
 import type { ConteudoCatalogo, ProfessorCredenciais } from './scrape/types';
 import { env } from './env';
 import { createEncryptionPort } from './encryption';
@@ -32,8 +32,6 @@ interface TrackedSession extends PortalSession {
   timer: NodeJS.Timeout;
   /** Raspar o catálogo custa uma volta por etapa, e ele não muda na sessão. */
   catalogo?: Promise<ConteudoCatalogo>;
-  /** O mesmo catálogo, mais as disciplinas e avaliações. Só o boletim o pede. */
-  catalogoComAvaliacoes?: Promise<ConteudoCatalogo>;
 }
 
 const sessions = new Map<string, TrackedSession>();
@@ -190,30 +188,6 @@ export async function getCatalogo(id: string): Promise<ConteudoCatalogo | undefi
   });
 
   return session.catalogo;
-}
-
-/**
- * O catálogo com as disciplinas e as avaliações de cada etapa. Fica à parte de
- * `getCatalogo` porque custa uma volta ao portal por etapa e por disciplina:
- * quem só vai lançar conteúdo não paga por isso.
- */
-export async function getCatalogoComAvaliacoes(
-  id: string,
-): Promise<ConteudoCatalogo | undefined> {
-  const base = await getCatalogo(id);
-  if (!base) return undefined;
-
-  const session = sessions.get(id);
-  if (!session) return undefined;
-
-  session.catalogoComAvaliacoes ??= comAvaliacoes(session.page, base).catch(
-    (error: unknown) => {
-      session.catalogoComAvaliacoes = undefined;
-      throw error;
-    },
-  );
-
-  return session.catalogoComAvaliacoes;
 }
 
 /**

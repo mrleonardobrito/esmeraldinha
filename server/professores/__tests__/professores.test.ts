@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { createApp as CreateApp } from '../../app';
+import { autenticar } from '../../__tests__/sessao-de-teste';
 
 const originalEnv = {
   dbPath: process.env.ESMERALDINHA_DB_PATH,
@@ -18,7 +19,9 @@ let dbPath: string;
 
 async function freshApp() {
   const { createApp } = await import('../../app');
-  return (createApp as typeof CreateApp)();
+  // As rotas do app exigem uma sessão do auxiliar de ensino: o helper entra
+  // uma vez e devolve o mesmo `fetch`, com o token em cada requisição.
+  return autenticar((createApp as typeof CreateApp)());
 }
 
 function novoProfessor(overrides: Partial<Record<string, string>> = {}) {

@@ -168,7 +168,7 @@ export function Painel() {
         />
       </div>
 
-      <ProgressoDoAnoLetivo resumo={resumo} />
+      {/* <ProgressoDoAnoLetivo resumo={resumo} /> */}
 
       {retomar.length > 0 && <ParaRetomar cadernetas={retomar} />}
     </Shell>

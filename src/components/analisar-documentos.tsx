@@ -26,7 +26,7 @@ export function AnalisarDocumentos({
 }: AnalisarDocumentosProps) {
   return (
     <Dialog open onOpenChange={(aberto) => !aberto && onClose()}>
-      <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-lg">
+      <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle className="font-heading">Upload Inteligente</DialogTitle>
           <DialogDescription>
