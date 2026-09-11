@@ -75,7 +75,8 @@ export async function login(
   await waitForAjax(page);
 
   await page.locator('[id*="periodoLetivo-SOM-CP-OBR_label"]').click();
-  await page.getByRole('option', { name: '2026' }).click();
+  // Um professor da EJA vê "2026 EJA" ao lado de "2026"; sem `exact` os dois casam.
+  await page.getByRole('option', { name: '2026', exact: true }).click();
 
   await waitForAjax(page);
 
