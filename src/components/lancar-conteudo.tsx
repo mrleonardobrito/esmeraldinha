@@ -3,9 +3,11 @@ import {
   IconAlertTriangle,
   IconArrowLeft,
   IconLoader,
+  IconSparkles,
   IconUpload,
 } from "@tabler/icons-react";
 
+import { ChatDeConteudos } from "@/components/chat-de-conteudos";
 import { EnvioDeMaterial } from "@/components/envio-de-material";
 import {
   Accordion,
@@ -22,6 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { loadAulasDaEtapa, type AulaDaCaderneta, type Caderneta } from "@/lib/cadernetas";
 import { cn } from "@/lib/utils";
 
@@ -40,9 +43,19 @@ export interface LancarConteudoProps {
 }
 
 /**
+ * O escopo de uma conversa com o agente: um mês da etapa, ou a etapa inteira
+ * (`mes` nulo).
+ */
+interface Conversa {
+  mes: string | null;
+}
+
+/**
  * A tela de lançar conteúdo: as aulas datadas da etapa, uma por linha, com o
  * que já está preenchido no portal. O checkbox é só leitura — quem decide se
- * uma aula está feita é o portal, não esta tela.
+ * uma aula está feita é o portal, não esta tela. Dali o auxiliar de ensino
+ * manda material de uma aula, ou abre o chat que escreve o que falta num mês
+ * ou na etapa inteira.
  */
 export function LancarConteudo({
   caderneta,
@@ -53,6 +66,7 @@ export function LancarConteudo({
 }: LancarConteudoProps) {
   const [estado, setEstado] = React.useState<Estado>({ status: "loading" });
   const [enviandoPara, setEnviandoPara] = React.useState<AulaDaCaderneta | null>(null);
+  const [conversa, setConversa] = React.useState<Conversa | null>(null);
   const [reloadToken, setReloadToken] = React.useState(0);
 
   React.useEffect(() => {
@@ -80,9 +94,18 @@ export function LancarConteudo({
     setReloadToken((atual) => atual + 1);
   }
 
+  const conversando = conversa !== null && estado.status === "ready";
+
   return (
     <Dialog open onOpenChange={(aberto) => !aberto && onClose()}>
-      <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-lg">
+      <DialogContent
+        className={cn(
+          "flex max-h-[85vh] flex-col gap-4",
+          // A conversa precisa de duas colunas — e de toda a altura, para a
+          // lista de aulas e o chat rolarem cada um por si.
+          conversando ? "h-[85vh] sm:max-w-6xl" : "sm:max-w-lg",
+        )}
+      >
         <DialogHeader>
           <DialogTitle className="font-heading">Lançar Conteúdo</DialogTitle>
           <DialogDescription>
@@ -90,7 +113,20 @@ export function LancarConteudo({
           </DialogDescription>
         </DialogHeader>
 
-        {enviandoPara ? (
+        {conversando ? (
+          <ChatDeConteudos
+            caderneta={caderneta}
+            etapa={etapa}
+            aulas={estado.aulas}
+            mesInicial={conversa.mes}
+            sessionId={sessionId}
+            onVoltar={() => setConversa(null)}
+            onGravou={() => {
+              recarregar();
+              onGravou();
+            }}
+          />
+        ) : enviandoPara ? (
           <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
             <Button
               variant="ghost"
@@ -123,6 +159,7 @@ export function LancarConteudo({
           <ListaDeAulas
             estado={estado}
             onEnviar={setEnviandoPara}
+            onConversar={(mes) => setConversa({ mes })}
             onTentarDeNovo={recarregar}
           />
         )}
@@ -134,10 +171,13 @@ export function LancarConteudo({
 function ListaDeAulas({
   estado,
   onEnviar,
+  onConversar,
   onTentarDeNovo,
 }: {
   estado: Estado;
   onEnviar: (aula: AulaDaCaderneta) => void;
+  /** Abre o chat sobre um mês, ou sobre a etapa inteira quando nulo. */
+  onConversar: (mes: string | null) => void;
   onTentarDeNovo: () => void;
 }) {
   if (estado.status === "loading") {
@@ -174,19 +214,49 @@ function ListaDeAulas({
   }
 
   const meses = agruparPorMes(estado.aulas);
+  const pendentes = estado.aulas.filter((aula) => !aula.conteudoPreenchido).length;
 
   return (
-    <Accordion type="multiple" className="min-h-0 overflow-y-auto">
+    <div className="flex min-h-0 flex-col gap-4">
+      <ConviteAoChat pendentes={pendentes} onConversar={() => onConversar(null)} />
+
+      <Accordion type="multiple" className="min-h-0 overflow-y-auto">
       {meses.map((mes) => (
         <AccordionItem key={mes.nome} value={mes.nome}>
-          <AccordionTrigger>
-            <span className="flex items-baseline gap-2">
-              {mes.nome}
-              <span className="text-xs font-normal text-muted-foreground tabular-nums">
-                {mes.preenchidas}/{mes.aulas.length} preenchidas
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1">
+            <AccordionTrigger>
+              <span className="flex items-baseline gap-2">
+                {mes.nome}
+                <span className="text-xs font-normal text-muted-foreground tabular-nums">
+                  {mes.preenchidas}/{mes.aulas.length} preenchidas
+                </span>
               </span>
-            </span>
-          </AccordionTrigger>
+            </AccordionTrigger>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className={cn(
+                    "shrink-0",
+                    mes.preenchidas < mes.aulas.length
+                      ? "text-caderneta-parte"
+                      : "text-muted-foreground",
+                  )}
+                  onClick={() => onConversar(mes.nome)}
+                  aria-label={`Conversar sobre ${mes.nome}`}
+                >
+                  <IconSparkles />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {mes.preenchidas < mes.aulas.length
+                  ? `Gerar ${mes.aulas.length - mes.preenchidas === 1 ? "a aula pendente" : `as ${mes.aulas.length - mes.preenchidas} aulas pendentes`} de ${mes.nome}`
+                  : `Conversar sobre ${mes.nome}`}
+              </TooltipContent>
+            </Tooltip>
+          </div>
 
           <AccordionContent>
             <ul className="flex flex-col gap-2">
@@ -239,7 +309,44 @@ function ListaDeAulas({
           </AccordionContent>
         </AccordionItem>
       ))}
-    </Accordion>
+      </Accordion>
+    </div>
+  );
+}
+
+/**
+ * A porta de entrada do chat pela etapa inteira. Quando não falta nada, ela
+ * continua ali — a conversa também serve para conferir o que já está no
+ * portal —, só que sem alarde.
+ */
+function ConviteAoChat({
+  pendentes,
+  onConversar,
+}: {
+  pendentes: number;
+  onConversar: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-2xl border border-dashed px-3 py-2.5">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-caderneta-parte">
+          <IconSparkles className="size-4" />
+        </span>
+        <div className="flex min-w-0 flex-col">
+          <span className="text-sm font-medium">
+            {pendentes > 0 ? "Gerar o que falta com o chat" : "Conversar sobre a etapa"}
+          </span>
+          <span className="truncate text-xs text-muted-foreground">
+            {pendentes > 0
+              ? `${pendentes === 1 ? "1 aula pendente" : `${pendentes} aulas pendentes`} na etapa · use arquivos ou outras aulas de base`
+              : "Todas as aulas da etapa já estão no portal"}
+          </span>
+        </div>
+      </div>
+      <Button variant="outline" size="sm" onClick={onConversar}>
+        Etapa inteira
+      </Button>
+    </div>
   );
 }
 

@@ -34,6 +34,12 @@ export const env = {
     baseUrl:
       process.env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1',
   },
+  /**
+   * A planilha de habilidades de onde o catálogo de códigos CR é lido na
+   * primeira vez que alguém precisa dele. No Electron aponta para os recursos
+   * do app; em desenvolvimento, para o arquivo na raiz do repositório.
+   */
+  codigosCRCsvPath: process.env.CODIGOS_CR_CSV?.trim() || './habilidades-ef.csv',
   /** Tamanho máximo de cada arquivo de um envio. */
   maxUploadBytes: readInt(process.env.MAX_UPLOAD_BYTES, 10 * 1024 * 1024),
   /**

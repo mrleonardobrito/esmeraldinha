@@ -184,3 +184,31 @@ _Avoid_: partial grade, prévia
 The grade an estudante closes an etapa with, written on their row of the
 boletim. Editable, unlike the nota parcial and the nota calculada.
 _Avoid_: final grade, média
+
+### Chat de conteúdos
+
+**chat de conteúdos**:
+The conversation the auxiliar de ensino has with the agent, from the _Lançar
+Conteúdo_ screen, to write the conteúdo of the aulas still empty in one mês or
+in a whole etapa. The agent reads the conversation, the anexos and the aulas
+de referência; the portal is never touched from it.
+_Avoid_: assistente, gerador, IA
+
+**escopo da conversa**:
+What a chat de conteúdos is about: one mês of an etapa, or the etapa inteira.
+Only the aulas in the escopo get rascunhos.
+_Avoid_: filtro, período
+
+**rascunho de conteúdo**:
+The conteúdo of one aula as the agent wrote it — código CR, desenvolvimento
+and ferramentas — before the auxiliar de ensino reviews it. Lives only on the
+screen: it reaches the portal one aula at a time, through the preenchimento
+assistido, and only for the aulas the auxiliar keeps marked.
+_Avoid_: sugestão, geração, draft
+
+**aula de referência**:
+An aula that already has conteúdo, from another mês or etapa, that the auxiliar
+de ensino picks as a base for the agent — the professor's way of writing and
+the thread of what was taught. The aulas of the escopo already in the portal
+are a base by themselves, without being picked.
+_Avoid_: exemplo, template, modelo
