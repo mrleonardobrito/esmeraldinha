@@ -10,7 +10,6 @@ files:
   - dist/**
   - dist-electron/**
   - package.json
-  - server/codigos-cr/habilidades-ef.csv
 
 publish:
   provider: github
@@ -22,6 +21,9 @@ publish:
 extraResources:
   - from: pw-browsers
     to: pw-browsers
+  # O catálogo de códigos CR, lido para o banco na primeira vez que é pedido.
+  - from: habilidades-ef.csv
+    to: habilidades-ef.csv
 
 # O Playwright lê arquivos próprios (drivers, browsers.json) em tempo de execução.
 asarUnpack:

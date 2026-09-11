@@ -155,7 +155,7 @@ describe('conta do auxiliar de ensino', () => {
       }),
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(422);
   });
 
   it('derruba as outras sessões ao trocar a senha', async () => {

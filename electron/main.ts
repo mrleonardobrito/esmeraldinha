@@ -56,6 +56,9 @@ function getApi(): Promise<Hono> {
     process.env.PLAYWRIGHT_BROWSERS_PATH ||= app.isPackaged
       ? join(process.resourcesPath, 'pw-browsers')
       : join(rootDir, 'pw-browsers');
+    process.env.CODIGOS_CR_CSV ||= app.isPackaged
+      ? join(process.resourcesPath, 'habilidades-ef.csv')
+      : join(rootDir, 'habilidades-ef.csv');
 
     apiPromise = import('../server/app')
       .then(({ createApp }) => {

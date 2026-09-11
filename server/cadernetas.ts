@@ -27,6 +27,13 @@ import {
   type EnvioPlan,
 } from './ai/interpretar-envio';
 import {
+  gerarConteudos,
+  type AulaDeReferencia,
+  type MensagemDaConversa,
+  type RascunhoDeConteudo,
+} from './ai/gerar-conteudos';
+import { garantirCatalogoDeCodigosCR } from './codigos-cr/catalogo';
+import {
   CadernetaNotFoundError,
   TurmaJaCadastradaError,
   createCaderneta,
@@ -79,28 +86,10 @@ const sincronizarSchema = z.object({
 const simNaoSchema = z.enum(['Sim', 'Não']);
 
 /**
- * O preenchimento assistido não passa pela sessão headless: ele precisa de uma
- * janela que o auxiliar de ensino veja. Etapa, mês e ordem vêm da tela porque
- * é de lá que veio a aula clicada; o conteúdo também, porque o ponto é lançar
- * o que ele acabou de editar, não o que está no banco.
- */
-const preenchimentoAssistidoSchema = z.object({
-  etapa: z.string().trim().min(1),
-  mes: z.string().trim().min(1),
-  data: z.string().trim().min(1),
-  ordem: z.number().int().nonnegative().nullish(),
-  codigoCR: z.string().optional(),
-  desenvolvimento: z.string().optional(),
-  ferramentas: z.string().optional(),
-  isRecuperacao: simNaoSchema.optional(),
-  isInteracao: simNaoSchema.optional(),
-});
-
-/**
- * O preenchimento assistido do boletim, como o da aula: uma janela visível,
- * as notas escritas nos campos, e a decisão de salvar deixada para o auxiliar
- * de ensino. As notas vêm da tela porque é lá que elas acabaram de ser
- * editadas.
+ * O preenchimento assistido do boletim não passa pela sessão headless: ele
+ * precisa de uma janela que o auxiliar de ensino veja, com as notas escritas
+ * nos campos e a decisão de salvar deixada para ele. As notas vêm da tela
+ * porque é lá que elas acabaram de ser editadas.
  */
 const preenchimentoDeNotasSchema = z
   .object({
@@ -162,7 +151,7 @@ cadernetas.post('/sessoes', async (context) => {
     );
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
 
     console.error('Falha ao abrir sessão no portal:', error);
@@ -259,7 +248,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
     session = await retomarSessao(context.req.param('id'));
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
     throw error;
   }
@@ -426,9 +415,9 @@ const preenchimentoDeAulaDoEnvioSchema = z.object({
 
 /**
  * O preenchimento assistido de uma aula do plano que o agente leu no _Analisar
- * documentos_ — o mesmo trato do preenchimento assistido manual, uma aula por
- * vez: abre a janela headed, escreve o conteúdo, e para aí. O auxiliar de
- * ensino confere, salva, e só então a tela pede a próxima aula.
+ * documentos_, uma aula por vez: abre a janela headed, escreve o conteúdo, e
+ * para aí. O auxiliar de ensino confere, salva, e só então a tela pede a
+ * próxima aula.
  */
 cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (context) => {
   const body = await context.req.json().catch(() => null);
@@ -473,7 +462,7 @@ cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (co
     return context.json({ etapa, mes, data, ordem: ordem ?? null });
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
 
     if (error instanceof MissingAulaRowsError) {
@@ -555,7 +544,7 @@ cadernetas.post('/sessoes/:id/envios/boletim/preenchimentos-assistidos', async (
     return context.json({ etapa, disciplina, notas });
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
 
     if (error instanceof MissingAulaRowsError) {
@@ -633,7 +622,7 @@ cadernetas.post('/', async (context) => {
     session = await retomarSessao(sessionId);
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
     throw error;
   }
@@ -796,6 +785,176 @@ cadernetas.get('/:id/etapas/:etapa/aulas', (context) => {
   return context.json({ etapa, aulas: listAulasDaEtapa(getDb(), id, etapa) });
 });
 
+const rascunhosDeConteudoSchema = z.object({
+  mes: z.string().trim().min(1).nullable().default(null),
+  mensagens: z
+    .array(
+      z.object({
+        papel: z.enum(['auxiliar', 'assistente']),
+        texto: z.string().trim().min(1),
+      }),
+    )
+    .nonempty(),
+  rascunhos: z
+    .array(
+      z.object({
+        data: z.string().trim().min(1),
+        ordem: z.number().int().nonnegative().nullable(),
+        codigoCR: z.string(),
+        desenvolvimento: z.string(),
+        ferramentas: z.string(),
+      }),
+    )
+    .default([]),
+  referencias: z
+    .array(
+      z.object({
+        etapa: z.string().trim().min(1),
+        data: z.string().trim().min(1),
+        ordem: z.number().int().nonnegative().nullable(),
+      }),
+    )
+    .default([]),
+});
+
+/** Lê um campo JSON do multipart; `undefined` quando ele não veio. */
+function campoJson(valor: unknown): unknown {
+  if (typeof valor !== 'string' || !valor.trim()) return undefined;
+  try {
+    return JSON.parse(valor) as unknown;
+  } catch {
+    return Symbol('json inválido');
+  }
+}
+
+/**
+ * O chat de conteúdos: a partir da conversa com o auxiliar de ensino, dos
+ * arquivos anexados e das aulas escolhidas como referência, o agente escreve
+ * um rascunho para cada aula pendente do escopo — um mês, ou a etapa inteira.
+ *
+ * Não precisa da sessão do portal: tudo o que o agente lê já está no banco,
+ * deixado lá pela sincronização. E não grava nada: cada rascunho só vai ao
+ * portal quando o auxiliar o leva pelo preenchimento assistido.
+ */
+cadernetas.post('/:id/etapas/:etapa/conteudos/rascunhos', async (context) => {
+  const id = context.req.param('id');
+  const etapa = decodeURIComponent(context.req.param('etapa'));
+
+  let caderneta: Caderneta;
+  try {
+    caderneta = getCaderneta(getDb(), id);
+  } catch (error) {
+    if (error instanceof CadernetaNotFoundError) {
+      return context.json({ error: error.message }, 404);
+    }
+    throw error;
+  }
+
+  let body: Record<string, string | File | (string | File)[]>;
+  try {
+    body = await context.req.parseBody({ all: true });
+  } catch {
+    return context.json({ error: 'Envio malformado.' }, 400);
+  }
+
+  const parsed = rascunhosDeConteudoSchema.safeParse({
+    mes: typeof body.mes === 'string' && body.mes.trim() ? body.mes : null,
+    mensagens: campoJson(body.mensagens),
+    rascunhos: campoJson(body.rascunhos),
+    referencias: campoJson(body.referencias),
+  });
+
+  if (!parsed.success) {
+    return context.json({ error: 'Informe a conversa com o agente.' }, 400);
+  }
+
+  const uploads = [body.arquivos ?? []]
+    .flat()
+    .filter((entry): entry is File => entry instanceof File);
+
+  const tooLarge = uploads.find((file) => file.size > env.maxUploadBytes);
+  if (tooLarge) {
+    const limitMb = Math.round(env.maxUploadBytes / (1024 * 1024));
+    return context.json(
+      { error: `O arquivo "${tooLarge.name}" passa do limite de ${limitMb} MB.` },
+      413,
+    );
+  }
+
+  const { mes, mensagens, rascunhos, referencias } = parsed.data;
+  const aulasDaEtapa = listAulasDaEtapa(getDb(), id, etapa);
+  const noEscopo = aulasDaEtapa.filter((aula) => mes === null || aula.mes === mes);
+
+  if (noEscopo.length === 0) {
+    return context.json(
+      { error: 'O portal não lista aulas para este escopo. Sincronize a caderneta.' },
+      422,
+    );
+  }
+
+  // As referências vêm como endereço (etapa, data, ordem) e são lidas do banco
+  // aqui: o cliente não carrega o texto de uma aula só para mandá-lo de volta.
+  const porEtapa = new Map<string, ReturnType<typeof listAulasDaEtapa>>();
+  const aulasDeReferencia: AulaDeReferencia[] = [];
+  for (const referencia of referencias) {
+    let aulas = porEtapa.get(referencia.etapa);
+    if (!aulas) {
+      aulas =
+        referencia.etapa === etapa ? aulasDaEtapa : listAulasDaEtapa(getDb(), id, referencia.etapa);
+      porEtapa.set(referencia.etapa, aulas);
+    }
+    const aula = aulas.find(
+      (candidata) => candidata.data === referencia.data && candidata.ordem === referencia.ordem,
+    );
+    if (aula) aulasDeReferencia.push(aula);
+  }
+
+  const arquivos: ArquivoEnviado[] = await Promise.all(
+    uploads.map(async (file) => ({
+      filename: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      data: new Uint8Array(await file.arrayBuffer()),
+    })),
+  );
+
+  try {
+    const gerados = await gerarConteudos({
+      turma: caderneta.turma,
+      etapa,
+      mes,
+      aulasPendentes: noEscopo
+        .filter((aula) => !aula.conteudoPreenchido)
+        .map((aula) => ({ data: aula.data, ordem: aula.ordem })),
+      aulasPreenchidas: noEscopo.filter((aula) => aula.conteudoPreenchido),
+      referencias: aulasDeReferencia,
+      rascunhos: rascunhos as RascunhoDeConteudo[],
+      mensagens: mensagens as MensagemDaConversa[],
+      arquivos,
+      codigosCR: garantirCatalogoDeCodigosCR(getDb()),
+    });
+
+    return context.json(gerados);
+  } catch (error) {
+    if (error instanceof OpenRouterNotConfiguredError) {
+      return context.json({ error: error.message }, 503);
+    }
+
+    if (error instanceof EnvioInvalidoError || error instanceof ArquivoIlegivelError) {
+      return context.json({ error: error.message }, 422);
+    }
+
+    if (error instanceof OpenRouterError) {
+      return context.json({ error: `O agente falhou: ${error.message}` }, 502);
+    }
+
+    console.error('Falha ao gerar os conteúdos:', error);
+    return context.json(
+      { error: 'Não foi possível gerar os conteúdos. Tente novamente.' },
+      502,
+    );
+  }
+});
+
 /** O boletim de uma etapa: os estudantes, as avaliações e as notas. */
 cadernetas.get('/:id/etapas/:etapa/boletim', (context) => {
   const id = context.req.param('id');
@@ -846,7 +1005,7 @@ cadernetas.post('/:id/sincronizacoes', async (context) => {
     session = await retomarSessao(parsed.data.sessionId);
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
     throw error;
   }
@@ -886,81 +1045,9 @@ cadernetas.post('/:id/sincronizacoes', async (context) => {
 });
 
 /**
- * Abre a aula numa janela visível do portal, com o conteúdo editado já escrito
- * nos campos, e para aí. Salvar é decisão do auxiliar de ensino: a automação
- * só o poupa dos quatro filtros e da procura pela linha.
- */
-cadernetas.post('/:id/aulas/preenchimentos-assistidos', async (context) => {
-  const body = await context.req.json().catch(() => null);
-  const parsed = preenchimentoAssistidoSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return context.json({ error: 'Informe a etapa, o mês e a data da aula.' }, 400);
-  }
-
-  const { etapa, mes, data, ordem, ...conteudo } = parsed.data;
-
-  let caderneta: Caderneta;
-  try {
-    caderneta = getCaderneta(getDb(), context.req.param('id'));
-  } catch (error) {
-    if (error instanceof CadernetaNotFoundError) {
-      return context.json({ error: error.message }, 404);
-    }
-    throw error;
-  }
-
-  const credenciais = await getProfessorCredenciais(
-    getDb(),
-    createEncryptionPort(),
-    caderneta.professorId,
-  );
-
-  if (!credenciais) {
-    return context.json({ error: 'Professor não encontrado.' }, 404);
-  }
-
-  try {
-    await naSessaoHeaded(caderneta.professorId, credenciais, (page) =>
-      prepararAulaParaPreenchimento(page, {
-        etapa,
-        mes,
-        turma: caderneta.turma,
-        data,
-        ...(ordem === null || ordem === undefined ? {} : { ordem }),
-        conteudo,
-      }),
-    );
-
-    return context.json({ etapa, mes, data, ordem: ordem ?? null });
-  } catch (error) {
-    if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
-    }
-
-    if (error instanceof MissingAulaRowsError) {
-      return context.json(
-        {
-          error:
-            `O portal não tem a aula de ${data} nesta turma. ` +
-            'Sincronize a caderneta e tente de novo.',
-        },
-        422,
-      );
-    }
-
-    console.error('Falha ao preparar o preenchimento da aula:', error);
-    return context.json(
-      { error: 'Não foi possível abrir a aula no portal. Tente novamente.' },
-      502,
-    );
-  }
-});
-
-/**
  * Abre o boletim numa janela visível do portal, com as notas editadas já
- * escritas nos campos, e para aí — o mesmo trato do preenchimento assistido de
- * uma aula. Salvar continua sendo do auxiliar de ensino.
+ * escritas nos campos, e para aí. Salvar é decisão do auxiliar de ensino: a
+ * automação só o poupa dos filtros e da procura pelas células.
  */
 cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
   const body = await context.req.json().catch(() => null);
@@ -1040,7 +1127,7 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
     return context.json({ etapa, disciplina: escolhida, notas, notasDoEstudante });
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
 
     if (error instanceof MissingAulaRowsError) {

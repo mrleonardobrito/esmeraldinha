@@ -198,46 +198,6 @@ export async function sincronizarCaderneta(
   return (await response.json()) as Caderneta;
 }
 
-/** O conteúdo de uma aula como a tela o edita. */
-export interface ConteudoEditado {
-  codigoCR: string;
-  desenvolvimento: string;
-  ferramentas: string;
-  isRecuperacao: "Sim" | "Não" | null;
-  isInteracao: "Sim" | "Não" | null;
-}
-
-/**
- * Abre a aula numa janela visível do portal, com o conteúdo editado já escrito
- * nos campos. A automação para antes de salvar: conferir e gravar é do
- * auxiliar de ensino, na janela que fica aberta.
- */
-export async function preencherAulaNoPortal(
-  cadernetaId: string,
-  aula: Pick<AulaDaCaderneta, "etapa" | "mes" | "data" | "ordem">,
-  conteudo: ConteudoEditado,
-): Promise<void> {
-  await requestApi(`/api/cadernetas/${cadernetaId}/aulas/preenchimentos-assistidos`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      etapa: aula.etapa,
-      mes: aula.mes,
-      data: aula.data,
-      ordem: aula.ordem,
-      // Um campo em branco é deixado de fora: o portal não deve receber uma
-      // string vazia onde a tela apenas não tinha nada a dizer.
-      ...(conteudo.codigoCR.trim() ? { codigoCR: conteudo.codigoCR } : {}),
-      ...(conteudo.desenvolvimento.trim()
-        ? { desenvolvimento: conteudo.desenvolvimento }
-        : {}),
-      ...(conteudo.ferramentas.trim() ? { ferramentas: conteudo.ferramentas } : {}),
-      ...(conteudo.isRecuperacao ? { isRecuperacao: conteudo.isRecuperacao } : {}),
-      ...(conteudo.isInteracao ? { isInteracao: conteudo.isInteracao } : {}),
-    }),
-  });
-}
-
 export async function excluirCaderneta(cadernetaId: string): Promise<void> {
   await requestApi(`/api/cadernetas/${cadernetaId}`, { method: "DELETE" });
 }
@@ -258,8 +218,8 @@ export async function loadBoletimDaEtapa(
 
 /**
  * Abre o boletim numa janela visível do portal, com as notas editadas já
- * escritas nos campos. Como no preenchimento de uma aula, a automação para
- * antes de salvar: conferir e gravar é do auxiliar de ensino.
+ * escritas nos campos. A automação para antes de salvar: conferir e gravar é
+ * do auxiliar de ensino, na janela que fica aberta.
  */
 export async function preencherNotasNoPortal(
   cadernetaId: string,
