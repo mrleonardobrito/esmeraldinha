@@ -86,14 +86,7 @@ async function cadastrarCaderneta(app: Awaited<ReturnType<typeof freshApp>>['app
   return (await response.json()) as { id: string };
 }
 
-const aula = {
-  etapa: '1ª Etapa',
-  mes: 'MARÇO',
-  data: '05/03/2026',
-  ordem: 1,
-};
-
-describe('preenchimento assistido de uma aula', () => {
+describe('preenchimento assistido do boletim', () => {
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'esmeraldinha-assistido-'));
     process.env.ESMERALDINHA_DB_PATH = join(tempDir, 'esmeraldinha.db');
@@ -147,96 +140,6 @@ describe('preenchimento assistido de uma aula', () => {
     else process.env.ESMERALDINHA_ENCRYPTION_KEY = originalKey;
 
     rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  it('leva o conteúdo editado para a aula na sessão headed', async () => {
-    const { app, professorId: id } = await freshApp();
-    const caderneta = await cadastrarCaderneta(app, id);
-
-    const response = await app.fetch(
-      request(
-        `/${caderneta.id}/aulas/preenchimentos-assistidos`,
-        json({ ...aula, desenvolvimento: 'Roda de conversa.', isInteracao: 'Sim' }),
-      ),
-    );
-
-    expect(response.status).toBe(200);
-
-    const { naSessaoHeaded } = await import('../sessoes-headed');
-    expect(naSessaoHeaded).toHaveBeenCalledWith(
-      id,
-      expect.objectContaining({ login: '111', senha: 'segredo', escola: 'Escola' }),
-      expect.any(Function),
-    );
-
-    const { prepararAulaParaPreenchimento } = await import('../scrape/portal');
-    expect(prepararAulaParaPreenchimento).toHaveBeenCalledWith(expect.anything(), {
-      etapa: '1ª Etapa',
-      mes: 'MARÇO',
-      turma,
-      data: '05/03/2026',
-      ordem: 1,
-      conteudo: { desenvolvimento: 'Roda de conversa.', isInteracao: 'Sim' },
-    });
-  });
-
-  it('não filtra por ordem quando a aula não tem uma', async () => {
-    const { app, professorId: id } = await freshApp();
-    const caderneta = await cadastrarCaderneta(app, id);
-
-    await app.fetch(
-      request(
-        `/${caderneta.id}/aulas/preenchimentos-assistidos`,
-        json({ ...aula, ordem: null }),
-      ),
-    );
-
-    const { prepararAulaParaPreenchimento } = await import('../scrape/portal');
-    expect(prepararAulaParaPreenchimento).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.not.objectContaining({ ordem: expect.anything() }),
-    );
-  });
-
-  it('404 numa caderneta que não existe', async () => {
-    const { app } = await freshApp();
-
-    const response = await app.fetch(
-      request('/nao-existe/aulas/preenchimentos-assistidos', json(aula)),
-    );
-
-    expect(response.status).toBe(404);
-  });
-
-  it('400 sem a etapa da aula', async () => {
-    const { app, professorId: id } = await freshApp();
-    const caderneta = await cadastrarCaderneta(app, id);
-
-    const response = await app.fetch(
-      request(
-        `/${caderneta.id}/aulas/preenchimentos-assistidos`,
-        json({ mes: 'MARÇO', data: '05/03/2026' }),
-      ),
-    );
-
-    expect(response.status).toBe(400);
-  });
-
-  it('422 quando o portal não tem a aula', async () => {
-    const { app, professorId: id } = await freshApp();
-    const caderneta = await cadastrarCaderneta(app, id);
-
-    const { MissingAulaRowsError } = await import('../scrape/errors');
-    const { naSessaoHeaded } = await import('../sessoes-headed');
-    vi.mocked(naSessaoHeaded).mockRejectedValue(
-      new MissingAulaRowsError(['05/03/2026 (nenhuma linha)']),
-    );
-
-    const response = await app.fetch(
-      request(`/${caderneta.id}/aulas/preenchimentos-assistidos`, json(aula)),
-    );
-
-    expect(response.status).toBe(422);
   });
 
   it('leva as notas editadas para o boletim na sessão headed', async () => {

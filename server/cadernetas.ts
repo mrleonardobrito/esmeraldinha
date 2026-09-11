@@ -79,28 +79,10 @@ const sincronizarSchema = z.object({
 const simNaoSchema = z.enum(['Sim', 'Não']);
 
 /**
- * O preenchimento assistido não passa pela sessão headless: ele precisa de uma
- * janela que o auxiliar de ensino veja. Etapa, mês e ordem vêm da tela porque
- * é de lá que veio a aula clicada; o conteúdo também, porque o ponto é lançar
- * o que ele acabou de editar, não o que está no banco.
- */
-const preenchimentoAssistidoSchema = z.object({
-  etapa: z.string().trim().min(1),
-  mes: z.string().trim().min(1),
-  data: z.string().trim().min(1),
-  ordem: z.number().int().nonnegative().nullish(),
-  codigoCR: z.string().optional(),
-  desenvolvimento: z.string().optional(),
-  ferramentas: z.string().optional(),
-  isRecuperacao: simNaoSchema.optional(),
-  isInteracao: simNaoSchema.optional(),
-});
-
-/**
- * O preenchimento assistido do boletim, como o da aula: uma janela visível,
- * as notas escritas nos campos, e a decisão de salvar deixada para o auxiliar
- * de ensino. As notas vêm da tela porque é lá que elas acabaram de ser
- * editadas.
+ * O preenchimento assistido do boletim não passa pela sessão headless: ele
+ * precisa de uma janela que o auxiliar de ensino veja, com as notas escritas
+ * nos campos e a decisão de salvar deixada para ele. As notas vêm da tela
+ * porque é lá que elas acabaram de ser editadas.
  */
 const preenchimentoDeNotasSchema = z
   .object({
@@ -426,9 +408,9 @@ const preenchimentoDeAulaDoEnvioSchema = z.object({
 
 /**
  * O preenchimento assistido de uma aula do plano que o agente leu no _Analisar
- * documentos_ — o mesmo trato do preenchimento assistido manual, uma aula por
- * vez: abre a janela headed, escreve o conteúdo, e para aí. O auxiliar de
- * ensino confere, salva, e só então a tela pede a próxima aula.
+ * documentos_, uma aula por vez: abre a janela headed, escreve o conteúdo, e
+ * para aí. O auxiliar de ensino confere, salva, e só então a tela pede a
+ * próxima aula.
  */
 cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (context) => {
   const body = await context.req.json().catch(() => null);
@@ -886,81 +868,9 @@ cadernetas.post('/:id/sincronizacoes', async (context) => {
 });
 
 /**
- * Abre a aula numa janela visível do portal, com o conteúdo editado já escrito
- * nos campos, e para aí. Salvar é decisão do auxiliar de ensino: a automação
- * só o poupa dos quatro filtros e da procura pela linha.
- */
-cadernetas.post('/:id/aulas/preenchimentos-assistidos', async (context) => {
-  const body = await context.req.json().catch(() => null);
-  const parsed = preenchimentoAssistidoSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return context.json({ error: 'Informe a etapa, o mês e a data da aula.' }, 400);
-  }
-
-  const { etapa, mes, data, ordem, ...conteudo } = parsed.data;
-
-  let caderneta: Caderneta;
-  try {
-    caderneta = getCaderneta(getDb(), context.req.param('id'));
-  } catch (error) {
-    if (error instanceof CadernetaNotFoundError) {
-      return context.json({ error: error.message }, 404);
-    }
-    throw error;
-  }
-
-  const credenciais = await getProfessorCredenciais(
-    getDb(),
-    createEncryptionPort(),
-    caderneta.professorId,
-  );
-
-  if (!credenciais) {
-    return context.json({ error: 'Professor não encontrado.' }, 404);
-  }
-
-  try {
-    await naSessaoHeaded(caderneta.professorId, credenciais, (page) =>
-      prepararAulaParaPreenchimento(page, {
-        etapa,
-        mes,
-        turma: caderneta.turma,
-        data,
-        ...(ordem === null || ordem === undefined ? {} : { ordem }),
-        conteudo,
-      }),
-    );
-
-    return context.json({ etapa, mes, data, ordem: ordem ?? null });
-  } catch (error) {
-    if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
-    }
-
-    if (error instanceof MissingAulaRowsError) {
-      return context.json(
-        {
-          error:
-            `O portal não tem a aula de ${data} nesta turma. ` +
-            'Sincronize a caderneta e tente de novo.',
-        },
-        422,
-      );
-    }
-
-    console.error('Falha ao preparar o preenchimento da aula:', error);
-    return context.json(
-      { error: 'Não foi possível abrir a aula no portal. Tente novamente.' },
-      502,
-    );
-  }
-});
-
-/**
  * Abre o boletim numa janela visível do portal, com as notas editadas já
- * escritas nos campos, e para aí — o mesmo trato do preenchimento assistido de
- * uma aula. Salvar continua sendo do auxiliar de ensino.
+ * escritas nos campos, e para aí. Salvar é decisão do auxiliar de ensino: a
+ * automação só o poupa dos filtros e da procura pelas células.
  */
 cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
   const body = await context.req.json().catch(() => null);

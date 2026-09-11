@@ -6,7 +6,6 @@ import {
   IconUpload,
 } from "@tabler/icons-react";
 
-import { EditarAula } from "@/components/editar-aula";
 import { EnvioDeMaterial } from "@/components/envio-de-material";
 import {
   Accordion,
@@ -54,7 +53,6 @@ export function LancarConteudo({
 }: LancarConteudoProps) {
   const [estado, setEstado] = React.useState<Estado>({ status: "loading" });
   const [enviandoPara, setEnviandoPara] = React.useState<AulaDaCaderneta | null>(null);
-  const [editando, setEditando] = React.useState<AulaDaCaderneta | null>(null);
   const [reloadToken, setReloadToken] = React.useState(0);
 
   React.useEffect(() => {
@@ -125,19 +123,10 @@ export function LancarConteudo({
           <ListaDeAulas
             estado={estado}
             onEnviar={setEnviandoPara}
-            onEditar={setEditando}
             onTentarDeNovo={recarregar}
           />
         )}
       </DialogContent>
-
-      {editando && (
-        <EditarAula
-          caderneta={caderneta}
-          aula={editando}
-          onClose={() => setEditando(null)}
-        />
-      )}
     </Dialog>
   );
 }
@@ -145,12 +134,10 @@ export function LancarConteudo({
 function ListaDeAulas({
   estado,
   onEnviar,
-  onEditar,
   onTentarDeNovo,
 }: {
   estado: Estado;
   onEnviar: (aula: AulaDaCaderneta) => void;
-  onEditar: (aula: AulaDaCaderneta) => void;
   onTentarDeNovo: () => void;
 }) {
   if (estado.status === "loading") {
@@ -212,12 +199,7 @@ function ListaDeAulas({
                   )}
                 >
                   <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => onEditar(aula)}
-                      className="flex min-w-0 flex-1 flex-col items-start rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
-                      aria-label={`Editar o conteúdo da aula de ${aula.data}`}
-                    >
+                    <div className="flex min-w-0 flex-1 flex-col items-start">
                       <span className="text-sm font-medium tabular-nums">
                         Aula {aula.data}
                       </span>
@@ -226,7 +208,7 @@ function ListaDeAulas({
                           ordem {aula.ordem}
                         </span>
                       )}
-                    </button>
+                    </div>
 
                     <div className="flex shrink-0 items-center gap-3">
                       <Button
