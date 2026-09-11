@@ -50,7 +50,9 @@ export async function requestApi(path: string, init?: RequestInit): Promise<Resp
   if (response.ok) return response;
 
   // Sessão vencida ou derrubada: esquecê-la aqui é o que devolve a tela de
-  // entrada, sem cada chamada ter de tratar isso.
+  // entrada, sem cada chamada ter de tratar isso. Por isso o 401 é só da
+  // sessão do auxiliar: outra recusa de senha (a do professor no portal, a
+  // senha atual na troca) vem como 422, senão ela derrubaria o auxiliar.
   if (response.status === 401) esquecerToken();
 
   const apiError = await readApiError(response);

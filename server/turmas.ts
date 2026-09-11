@@ -54,8 +54,10 @@ turmas.post('/validacoes', async (context) => {
 
     return context.json({ valida: true, escola: session.escola });
   } catch (error) {
+    // 422, não 401: o 401 é da sessão do auxiliar, e o cliente a derruba ao
+    // vê-lo. Aqui quem foi recusado é o professor, no portal.
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
 
     console.error('Falha ao validar as credenciais no portal:', error);
@@ -126,7 +128,7 @@ turmas.post('/buscas', async (context) => {
     return context.json({ turmas: listTurmas(getDb(), professorId) });
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
 
     console.error('Falha ao buscar as turmas do professor:', error);
@@ -177,7 +179,7 @@ turmas.post('/:id/estudantes/buscas', async (context) => {
     session = await retomarSessao(parsed.data.sessionId);
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
     throw error;
   }

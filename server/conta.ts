@@ -107,7 +107,7 @@ conta.put('/senha', exigirSessao, async (context) => {
     ? textoConfere(senhaAtual, env.conta.senhaTemporaria)
     : await conferirSenhaDefinitiva(db, senhaAtual);
 
-  if (!confere) return context.json({ error: 'A senha atual está incorreta.' }, 401);
+  if (!confere) return context.json({ error: 'A senha atual está incorreta.' }, 422);
 
   if (textoConfere(senha, env.conta.senhaTemporaria)) {
     return context.json(

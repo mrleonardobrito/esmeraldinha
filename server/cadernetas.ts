@@ -151,7 +151,7 @@ cadernetas.post('/sessoes', async (context) => {
     );
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
 
     console.error('Falha ao abrir sessão no portal:', error);
@@ -248,7 +248,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
     session = await retomarSessao(context.req.param('id'));
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
     throw error;
   }
@@ -462,7 +462,7 @@ cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (co
     return context.json({ etapa, mes, data, ordem: ordem ?? null });
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
 
     if (error instanceof MissingAulaRowsError) {
@@ -544,7 +544,7 @@ cadernetas.post('/sessoes/:id/envios/boletim/preenchimentos-assistidos', async (
     return context.json({ etapa, disciplina, notas });
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
 
     if (error instanceof MissingAulaRowsError) {
@@ -622,7 +622,7 @@ cadernetas.post('/', async (context) => {
     session = await retomarSessao(sessionId);
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
     throw error;
   }
@@ -1005,7 +1005,7 @@ cadernetas.post('/:id/sincronizacoes', async (context) => {
     session = await retomarSessao(parsed.data.sessionId);
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
     throw error;
   }
@@ -1127,7 +1127,7 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
     return context.json({ etapa, disciplina: escolhida, notas, notasDoEstudante });
   } catch (error) {
     if (error instanceof LoginError) {
-      return context.json({ error: error.message }, 401);
+      return context.json({ error: error.message }, 422);
     }
 
     if (error instanceof MissingAulaRowsError) {

@@ -144,7 +144,7 @@ describe('POST /api/cadernetas/sessoes', () => {
     expect(openSessionMock).not.toHaveBeenCalled();
   });
 
-  it('still surfaces a portal rejection as a clear 401, distinct from an unknown professor', async () => {
+  it('still surfaces a portal rejection as a clear 422, distinct from an unknown professor', async () => {
     const app = await freshApp();
 
     const createResponse = await app.fetch(
@@ -167,7 +167,7 @@ describe('POST /api/cadernetas/sessoes', () => {
       }),
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(422);
     const body = await response.json();
     expect(body.error).toBe('Usuário ou senha inválidos.');
   });

@@ -169,7 +169,7 @@ describe('rotas de turmas', () => {
         request('/validacoes', json({ login: '111', senha: 'errada', escola: 'Escola' })),
       );
 
-      expect(response.status).toBe(401);
+      expect(response.status).toBe(422);
     });
   });
 
