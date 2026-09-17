@@ -32,11 +32,12 @@ const catalogo = {
   etapas: [
     {
       nome: '1ª Etapa',
+      periodoLetivo: '2026',
       turmas: ['9º ANO - 9º ANO A - VESPERTINO', '9º ANO - 9º ANO B - MATUTINO'],
       meses: ['MARÇO'],
     },
     // A mesma turma em duas etapas não vira duas turmas.
-    { nome: '2ª Etapa', turmas: ['9º ANO - 9º ANO A - VESPERTINO'], meses: ['JUNHO'] },
+    { nome: '2ª Etapa', periodoLetivo: '2026', turmas: ['9º ANO - 9º ANO A - VESPERTINO'], meses: ['JUNHO'] },
   ],
 };
 
@@ -186,6 +187,42 @@ describe('rotas de turmas', () => {
       expect(body.turmas.map((turma) => [turma.nome, turma.turno])).toEqual([
         ['9º ANO - 9º ANO A - VESPERTINO', 'VESPERTINO'],
         ['9º ANO - 9º ANO B - MATUTINO', 'MATUTINO'],
+      ]);
+    });
+
+    it('lê as turmas de todos os períodos letivos e busca os estudantes no período de cada uma', async () => {
+      const app = await freshApp();
+      const { getCatalogo } = await import('../portal-sessions');
+      // Uma professora da EJA: o portal separa as turmas dela em dois períodos.
+      vi.mocked(getCatalogo).mockResolvedValue({
+        etapas: [
+          ...catalogo.etapas,
+          {
+            nome: '1ª Etapa',
+            periodoLetivo: '2026 EJA',
+            turmas: ['EJA - 1ª FASE - NOTURNO'],
+            meses: ['MARÇO'],
+          },
+        ],
+      });
+
+      const response = await app.fetch(request('/buscas', json({ professorId })));
+      const body = (await response.json()) as {
+        turmas: { nome: string; periodoLetivo: string | null }[];
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.turmas.map((turma) => [turma.nome, turma.periodoLetivo])).toEqual([
+        ['9º ANO - 9º ANO A - VESPERTINO', '2026'],
+        ['9º ANO - 9º ANO B - MATUTINO', '2026'],
+        ['EJA - 1ª FASE - NOTURNO', '2026 EJA'],
+      ]);
+
+      const { listEstudantes } = await import('../scrape/portal');
+      expect(vi.mocked(listEstudantes).mock.calls.map(([, filtro]) => filtro)).toEqual([
+        { turma: '9º ANO - 9º ANO A - VESPERTINO', periodoLetivo: '2026' },
+        { turma: '9º ANO - 9º ANO B - MATUTINO', periodoLetivo: '2026' },
+        { turma: 'EJA - 1ª FASE - NOTURNO', periodoLetivo: '2026 EJA' },
       ]);
     });
 

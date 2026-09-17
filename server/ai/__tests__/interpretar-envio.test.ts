@@ -8,6 +8,7 @@ const catalogo: ConteudoCatalogo = {
   etapas: [
     {
       nome: '1ª Etapa',
+      periodoLetivo: '2026',
       turmas: ['3º ANO A'],
       meses: ['MARÇO', 'ABRIL'],
       disciplinasPorTurma: [
@@ -27,7 +28,7 @@ const catalogo: ConteudoCatalogo = {
         },
       ],
     },
-    { nome: '2ª Etapa', turmas: ['3º ANO B'], meses: ['MAIO'] },
+    { nome: '2ª Etapa', periodoLetivo: '2026', turmas: ['3º ANO B'], meses: ['MAIO'] },
   ],
 };
 
@@ -54,6 +55,7 @@ const catalogoComDuas: ConteudoCatalogo = {
   etapas: [
     {
       nome: '1ª Etapa',
+      periodoLetivo: '2026',
       turmas: ['3º ANO A'],
       meses: ['MARÇO'],
       disciplinasPorTurma: [
@@ -104,6 +106,30 @@ describe('interpretarEnvio', () => {
     expect(plano.turma).toBe('3º ANO A');
     expect(plano.aulas).toHaveLength(1);
     expect(plano.aulas[0].data).toBe('05/03/2026');
+  });
+
+  it('acha a etapa pelo período letivo da turma quando o nome se repete', async () => {
+    // Uma professora da EJA: "I ETAPA" existe em "2026" e em "2026 EJA", e a
+    // turma do material só está na segunda.
+    const doisPeriodos: ConteudoCatalogo = {
+      etapas: [
+        { nome: '1ª Etapa', periodoLetivo: '2026', turmas: ['3º ANO A'], meses: ['MARÇO'] },
+        {
+          nome: '1ª Etapa',
+          periodoLetivo: '2026 EJA',
+          turmas: ['EJA - 1ª FASE'],
+          meses: ['MARÇO'],
+        },
+      ],
+    };
+
+    const plano = await interpretarEnvio({
+      texto: 'qualquer coisa',
+      catalogo: doisPeriodos,
+      complete: completeWith({ ...planoValido, turma: 'eja - 1ª fase' }),
+    });
+
+    expect(plano.turma).toBe('EJA - 1ª FASE');
   });
 
   it('recusa uma turma que não pertence à etapa detectada', async () => {
@@ -383,6 +409,7 @@ describe('interpretarEnvio: boletim', () => {
       etapas: [
         {
           nome: '1ª Etapa',
+          periodoLetivo: '2026',
           turmas: ['1º ANO D', '3º ANO A'],
           meses: ['MARÇO'],
           disciplinasPorTurma: [

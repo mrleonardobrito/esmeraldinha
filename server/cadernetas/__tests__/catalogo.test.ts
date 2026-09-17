@@ -8,10 +8,11 @@ const catalogo: ConteudoCatalogo = {
   etapas: [
     {
       nome: 'I ETAPA',
+      periodoLetivo: '2026',
       turmas: ['1º ANO D', '3º ANO A'],
       meses: ['FEVEREIRO', 'MARÇO'],
     },
-    { nome: 'II ETAPA', turmas: ['3º ANO A'], meses: ['MAIO'] },
+    { nome: 'II ETAPA', periodoLetivo: '2026', turmas: ['3º ANO A'], meses: ['MAIO'] },
   ],
 };
 

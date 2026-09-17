@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import {
+  closeMenuPanel,
   fillField,
   readMenuOptions,
   selectMenuOption,
@@ -15,6 +16,7 @@ import type {
   NotaDoPortal,
   PreenchimentoDeNotasFilter,
   EstudanteDoPortal,
+  EstudantesFilter,
   AulaDoPortal,
   ConteudoCatalogo,
   EtapaOptions,
@@ -37,6 +39,8 @@ const FIELD = {
 const FILTER = {
   etapa: ':etapaPeriodo-SOM-CP-OBR',
   turma: ':turma-SOM-CP-OBR',
+  /** O menu de turma num período letivo da EJA. Veja `filtroDeTurma`. */
+  turmaComMulti: ':turmaComMulti-SOM-CP-OBR',
   /** O portal chama a redução de _Grupo diário_. */
   reducao: ':grupoDiario-SOM-CP-OBR',
   mes: ':mes-SOM-CP-OBR',
@@ -48,6 +52,36 @@ const FILTER = {
   /** Só na Ficha Desempenho, e só carrega depois da turma. */
   fichaDesempenho: ':fichaDesempenho-SOM-CP-OBR',
 } as const;
+
+/**
+ * O menu do diálogo de _Configurações de ambiente_ em que o professor escolhe
+ * o período letivo. É o mesmo diálogo do login e o da barra do topo.
+ */
+const AMBIENTE = {
+  periodoLetivo: ':periodoLetivo-SOM-CP-OBR',
+} as const;
+
+const DIALOGO_DE_AMBIENTE = '#dialogConfiguracoesAmbiente';
+
+/**
+ * A turma da EJA é multisseriada, e o portal a serve por outro componente:
+ * nas telas de um período letivo da EJA o menu de turma é o `turmaComMulti`,
+ * não o `turma`. Para quem raspa é o mesmo menu, só o id muda — então quem
+ * diz qual usar é a página, depois que a etapa foi escolhida e a tela
+ * carregou.
+ */
+async function filtroDeTurma(page: Page): Promise<string> {
+  const multi = page.locator(`[id$="${FILTER.turmaComMulti}"]`);
+
+  return (await multi.count()) > 0 ? FILTER.turmaComMulti : FILTER.turma;
+}
+
+/**
+ * Em qual período letivo cada página está, e quais o portal lhe oferece. O
+ * portal não escreve o período em lugar nenhum fora do diálogo, então quem o
+ * escolheu é quem lembra dele.
+ */
+const ambienteDaPagina = new WeakMap<Page, { atual: string; disponiveis: string[] }>();
 
 export async function login(
   page: Page,
@@ -74,13 +108,99 @@ export async function login(
   await page.getByRole('option', { name: credentials.escola, exact: true }).click();
   await waitForAjax(page);
 
-  await page.locator('[id*="periodoLetivo-SOM-CP-OBR_label"]').click();
-  // Um professor da EJA vê "2026 EJA" ao lado de "2026"; sem `exact` os dois casam.
-  await page.getByRole('option', { name: '2026', exact: true }).click();
+  // O portal exige um período para entrar, mas qual deles não importa aqui:
+  // cada leitura vai para o período da turma que lê. Sem nenhum, o professor
+  // não tem turma em lugar algum e o portal não deixa passar do diálogo.
+  const disponiveis = await readMenuOptions(page, AMBIENTE.periodoLetivo);
+  const [primeiro] = disponiveis;
 
+  if (!primeiro) {
+    throw new LoginError('O portal não oferece nenhum período letivo para esta escola.');
+  }
+
+  await acessarPeriodoLetivo(page, primeiro);
+  ambienteDaPagina.set(page, { atual: primeiro, disponiveis });
+}
+
+/** Escolhe o período no diálogo de ambiente já aberto e entra nele. */
+async function acessarPeriodoLetivo(page: Page, periodoLetivo: string): Promise<void> {
+  await page.locator(`[id$="${AMBIENTE.periodoLetivo}_label"]`).click();
+  // Um professor da EJA vê "2026 EJA" ao lado de "2026"; sem `exact` os dois casam.
+  await page.getByRole('option', { name: periodoLetivo, exact: true }).click();
+  await waitForAjax(page);
+  // No diálogo reaberto o painel fica aberto por cima do Acessar.
+  await closeMenuPanel(page, AMBIENTE.periodoLetivo);
+
+  await page.getByRole('button', { name: ' Acessar' }).click();
+  await expect(page.locator(DIALOGO_DE_AMBIENTE)).toBeHidden({ timeout: AJAX_TIMEOUT_MS });
+  await waitForAjax(page);
+}
+
+/**
+ * Reabre o diálogo de _Configurações de ambiente_ pela barra do topo. O item
+ * mora num submenu que só aparece com o mouse em cima, então o clique é
+ * despachado direto no link, sem depender de o submenu estar à vista.
+ */
+async function abrirConfiguracoesDeAmbiente(page: Page): Promise<void> {
   await waitForAjax(page);
 
-  await page.getByRole('button', { name: ' Acessar' }).click();
+  await page
+    .locator('.poseidon-menu a.ui-commandlink', { hasText: 'Configurações de ambiente' })
+    .dispatchEvent('click');
+
+  await expect(page.locator(`[id$="${AMBIENTE.periodoLetivo}_label"]`)).toBeVisible({
+    timeout: AJAX_TIMEOUT_MS,
+  });
+  await waitForAjax(page);
+}
+
+/**
+ * Os períodos letivos que o portal oferece ao professor, como o login os leu.
+ * Uma página que não passou pelo `login` daqui os lê do diálogo e entra de
+ * novo no período em que já estava — é o jeito de fechar o diálogo sem
+ * mudar nada.
+ */
+export async function listPeriodosLetivos(page: Page): Promise<string[]> {
+  const lembrado = ambienteDaPagina.get(page);
+  if (lembrado) return [...lembrado.disponiveis];
+
+  await abrirConfiguracoesDeAmbiente(page);
+  const disponiveis = await readMenuOptions(page, AMBIENTE.periodoLetivo);
+  const rotulo = (
+    await page.locator(`[id$="${AMBIENTE.periodoLetivo}_label"]`).innerText()
+  ).trim();
+  const atual = disponiveis.includes(rotulo) ? rotulo : disponiveis[0];
+
+  if (!atual) {
+    throw new LoginError('O portal não oferece nenhum período letivo para esta escola.');
+  }
+
+  await acessarPeriodoLetivo(page, atual);
+  ambienteDaPagina.set(page, { atual, disponiveis });
+
+  return [...disponiveis];
+}
+
+/**
+ * Deixa a sessão no período letivo pedido. Trocar de período é trocar de
+ * ambiente no portal: a tela volta ao início e os filtros de etapa, turma e
+ * mês passam a oferecer as turmas daquele período. Sem período, ou já nele,
+ * não mexe em nada.
+ */
+export async function selecionarPeriodoLetivo(
+  page: Page,
+  periodoLetivo: string | undefined,
+): Promise<void> {
+  if (!periodoLetivo) return;
+
+  const ambiente = ambienteDaPagina.get(page);
+  if (ambiente?.atual === periodoLetivo) return;
+
+  await abrirConfiguracoesDeAmbiente(page);
+  const disponiveis = ambiente?.disponiveis ?? (await readMenuOptions(page, AMBIENTE.periodoLetivo));
+  await acessarPeriodoLetivo(page, periodoLetivo);
+
+  ambienteDaPagina.set(page, { atual: periodoLetivo, disponiveis });
 }
 
 export async function openLancaConteudo(page: Page): Promise<void> {
@@ -91,33 +211,41 @@ export async function openLancaConteudo(page: Page): Promise<void> {
 
 /**
  * As opções válidas do professor, para que o agente escolha entre elas em vez
- * de inventar uma turma. A etapa manda: o portal recarrega turmas e meses a
- * cada troca, então cada etapa é selecionada uma vez.
+ * de inventar uma turma. O período letivo manda primeiro: as turmas de cada
+ * um só aparecem com a sessão nele. Dentro dele, a etapa manda: o portal
+ * recarrega turmas e meses a cada troca, então cada etapa é selecionada uma
+ * vez.
  */
 export async function listConteudoOptions(page: Page): Promise<ConteudoCatalogo> {
-  await openLancaConteudo(page);
-
-  const nomes = await readMenuOptions(page, FILTER.etapa);
   const etapas: EtapaOptions[] = [];
 
-  for (const nome of nomes) {
-    await selectMenuOption(page, page, FILTER.etapa, nome);
+  for (const periodoLetivo of await listPeriodosLetivos(page)) {
+    await selecionarPeriodoLetivo(page, periodoLetivo);
+    await openLancaConteudo(page);
 
-    const turmas = await readMenuOptions(page, FILTER.turma);
+    const nomes = await readMenuOptions(page, FILTER.etapa);
 
-    // Os meses só carregam depois da turma e da redução. São os meses do
-    // calendário da etapa, iguais para todas as turmas dela, então basta
-    // escolher a primeira.
-    if (turmas[0]) {
-      await selectMenuOption(page, page, FILTER.turma, turmas[0]);
-      await selectFirstReducao(page);
+    for (const nome of nomes) {
+      await selectMenuOption(page, page, FILTER.etapa, nome);
+
+      const turma = await filtroDeTurma(page);
+      const turmas = await readMenuOptions(page, turma);
+
+      // Os meses só carregam depois da turma e da redução. São os meses do
+      // calendário da etapa, iguais para todas as turmas dela, então basta
+      // escolher a primeira.
+      if (turmas[0]) {
+        await selectMenuOption(page, page, turma, turmas[0]);
+        await selectFirstReducao(page);
+      }
+
+      etapas.push({
+        nome,
+        periodoLetivo,
+        turmas,
+        meses: turmas[0] ? await readMenuOptions(page, FILTER.mes) : [],
+      });
     }
-
-    etapas.push({
-      nome,
-      turmas,
-      meses: turmas[0] ? await readMenuOptions(page, FILTER.mes) : [],
-    });
   }
 
   return { etapas };
@@ -182,12 +310,13 @@ async function readFieldValue(row: Locator, field: string): Promise<string | und
  */
 export async function listAulas(
   page: Page,
-  { etapa, turma, mes }: ListaDeAulasFilter,
+  { periodoLetivo, etapa, turma, mes }: ListaDeAulasFilter,
 ): Promise<AulaDoPortal[]> {
+  await selecionarPeriodoLetivo(page, periodoLetivo);
   await openLancaConteudo(page);
 
   await selectMenuOption(page, page, FILTER.etapa, etapa);
-  await selectMenuOption(page, page, FILTER.turma, turma);
+  await selectMenuOption(page, page, await filtroDeTurma(page), turma);
   await selectFirstReducao(page);
   await selectMenuOption(page, page, FILTER.mes, mes);
 
@@ -308,13 +437,14 @@ async function textoDaCelula(celula: Locator): Promise<string> {
  */
 export async function listEstudantes(
   page: Page,
-  { turma }: { turma: string },
+  { periodoLetivo, turma }: EstudantesFilter,
 ): Promise<EstudanteDoPortal[]> {
+  await selecionarPeriodoLetivo(page, periodoLetivo);
   await page.getByRole('link', { name: 'Etapa' }).click();
   await page.getByRole('link', { name: 'Ficha Desempenho' }).click();
   await waitForAjax(page);
 
-  await selectMenuOption(page, page, FILTER.turma, turma);
+  await selectMenuOption(page, page, await filtroDeTurma(page), turma);
 
   // A ficha só é oferecida depois da turma; sem nenhuma, não há tabela.
   const [primeiraFicha] = await readMenuOptions(page, FILTER.fichaDesempenho);
@@ -409,12 +539,13 @@ export async function openResultadoDeAvaliacao(page: Page): Promise<void> {
  */
 async function irParaOBoletim(
   page: Page,
-  { etapa, turma, disciplina }: BoletimFilter,
+  { periodoLetivo, etapa, turma, disciplina }: BoletimFilter,
 ): Promise<void> {
+  await selecionarPeriodoLetivo(page, periodoLetivo);
   await openResultadoDeAvaliacao(page);
 
   await selectMenuOption(page, page, FILTER.etapa, etapa);
-  await selectMenuOption(page, page, FILTER.turma, turma);
+  await selectMenuOption(page, page, await filtroDeTurma(page), turma);
 
   if (disciplina) {
     await selectMenuOption(page, page, FILTER.disciplina, disciplina);
@@ -512,12 +643,13 @@ async function lerCampo(row: Locator, sufixo: string): Promise<number | undefine
  */
 export async function listDisciplinas(
   page: Page,
-  { etapa, turma }: BoletimFilter,
+  { periodoLetivo, etapa, turma }: BoletimFilter,
 ): Promise<string[]> {
+  await selecionarPeriodoLetivo(page, periodoLetivo);
   await openResultadoDeAvaliacao(page);
 
   await selectMenuOption(page, page, FILTER.etapa, etapa);
-  await selectMenuOption(page, page, FILTER.turma, turma);
+  await selectMenuOption(page, page, await filtroDeTurma(page), turma);
 
   // O seletor pode nem existir na tela quando não há avaliação nenhuma.
   const menu = page.locator(`[id$="${FILTER.disciplina}_input"]`);
@@ -614,13 +746,20 @@ export function findEstudanteRow(page: Page, matricula: string): Locator {
  */
 export async function prepararNotasParaPreenchimento(
   page: Page,
-  { etapa, turma, disciplina, notas, notasDoEstudante = [] }: PreenchimentoDeNotasFilter,
+  {
+    periodoLetivo,
+    etapa,
+    turma,
+    disciplina,
+    notas,
+    notasDoEstudante = [],
+  }: PreenchimentoDeNotasFilter,
 ): Promise<void> {
   if (notas.length === 0 && notasDoEstudante.length === 0) {
     throw new Error('No notas provided.');
   }
 
-  await irParaOBoletim(page, { etapa, turma, disciplina });
+  await irParaOBoletim(page, { periodoLetivo, etapa, turma, disciplina });
 
   await expect(
     page.locator(LINHA_DO_BOLETIM).first(),
@@ -710,12 +849,13 @@ async function escreverNota(page: Page, campo: Locator, valor: number): Promise<
  */
 export async function prepararAulaParaPreenchimento(
   page: Page,
-  { etapa, turma, mes, data, ordem, conteudo }: PreenchimentoAssistidoFilter,
+  { periodoLetivo, etapa, turma, mes, data, ordem, conteudo }: PreenchimentoAssistidoFilter,
 ): Promise<void> {
+  await selecionarPeriodoLetivo(page, periodoLetivo);
   await openLancaConteudo(page);
 
   await selectMenuOption(page, page, FILTER.etapa, etapa);
-  await selectMenuOption(page, page, FILTER.turma, turma);
+  await selectMenuOption(page, page, await filtroDeTurma(page), turma);
   await selectFirstReducao(page);
   await selectMenuOption(page, page, FILTER.mes, mes);
 

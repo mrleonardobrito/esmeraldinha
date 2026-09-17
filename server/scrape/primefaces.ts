@@ -4,7 +4,10 @@ import type { FieldStatus } from './types';
 
 declare global {
   interface Window {
-    PrimeFaces?: { ajax?: { Queue?: { isEmpty?: () => boolean } } };
+    PrimeFaces?: {
+      ajax?: { Queue?: { isEmpty?: () => boolean } };
+      widgets?: Record<string, { id?: string; hide?: () => void }>;
+    };
     jQuery?: { active: number };
   }
 }
@@ -158,6 +161,26 @@ async function selecionarPeloPainel(
 
   await panel.getByRole('option', { name: label, exact: true }).click();
   await waitForAjax(page);
+}
+
+/**
+ * Fecha o painel de um `selectOneMenu` que ficou aberto depois da escolha.
+ *
+ * Acontece no diálogo de ambiente reaberto pela barra do topo: a opção
+ * clicada entra, mas o painel — preso ao `<body>`, com efeito de fade — não
+ * some, e fica por cima do botão que confirma o diálogo. `Escape` fecharia,
+ * mas o PrimeFaces desfaz a escolha junto; só o próprio widget fecha sem
+ * mexer no valor.
+ */
+export async function closeMenuPanel(page: Page, idSuffix: string): Promise<void> {
+  const panel = page.locator(`[id$="${idSuffix}_panel"]`);
+  if (!(await panel.isVisible())) return;
+
+  await page.locator(`[id$="${idSuffix}"]`).evaluate((el: Element) => {
+    const widgets = Object.values(window.PrimeFaces?.widgets ?? {});
+    widgets.find((widget) => widget.id === el.id)?.hide?.();
+  });
+  await expect(panel, `panel for ${idSuffix} did not close`).toBeHidden();
 }
 
 export async function fillField(

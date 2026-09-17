@@ -42,8 +42,8 @@ const professorId = 'prof-1';
 
 const catalogo = {
   etapas: [
-    { nome: '1ª Etapa', turmas: ['9º ANO - 9º ANO A - VESPERTINO', '9º ANO - 9º ANO B - MATUTINO'], meses: ['MARÇO'] },
-    { nome: '2ª Etapa', turmas: ['9º ANO - 9º ANO A - VESPERTINO'], meses: ['JUNHO'] },
+    { nome: '1ª Etapa', periodoLetivo: '2026', turmas: ['9º ANO - 9º ANO A - VESPERTINO', '9º ANO - 9º ANO B - MATUTINO'], meses: ['MARÇO'] },
+    { nome: '2ª Etapa', periodoLetivo: '2026', turmas: ['9º ANO - 9º ANO A - VESPERTINO'], meses: ['JUNHO'] },
   ],
 };
 

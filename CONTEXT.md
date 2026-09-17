@@ -84,6 +84,15 @@ _Avoid_: term, período, bimestre
 The external academic calendar that dictates each etapa's start and end dates.
 _Avoid_: calendar, cronograma
 
+**período letivo**:
+The portal's own partition of a school's year, chosen on its _Configurações de
+ambiente_ dialog before anything else — `2026` for the regular turmas, `2026
+EJA` for the EJA ones. Each período letivo has its own etapas and turmas, and
+the portal session lives in one at a time, so every turma is remembered with
+the período letivo it was found in and the session moves there before reading
+or writing it. A professor may have turmas in more than one.
+_Avoid_: calendário letivo, ano letivo, ambiente
+
 **mês**:
 A month within an etapa. An etapa spans two or three of them. Purely a way of narrowing what you are looking at — it carries no completeness of its own.
 _Avoid_: month, período

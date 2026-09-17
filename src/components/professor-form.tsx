@@ -432,6 +432,11 @@ type TurmasState =
   | { status: "error"; message: string }
   | { status: "ready"; turmas: Turma[] };
 
+/** Os períodos letivos distintos entre as turmas, na ordem em que aparecem. */
+function periodosLetivos(turmas: readonly Turma[]): string[] {
+  return [...new Set(turmas.map((turma) => turma.periodoLetivo).filter(Boolean))] as string[];
+}
+
 function BuscarTurmas({
   professor,
   onVoltar,
@@ -502,13 +507,18 @@ function BuscarTurmas({
               <span className="font-heading text-sm font-medium">
                 {nomeCurtoDaTurma(turma.nome)}
               </span>
-              <span>
+              <span className="flex flex-wrap gap-1">
                 {turma.turno ? (
                   <Badge variant="outline">{turma.turno}</Badge>
                 ) : (
                   <span className="text-xs text-muted-foreground">
                     O portal não escreveu o turno desta turma.
                   </span>
+                )}
+                {/* Só quando o professor tem turmas em mais de um período
+                    letivo — é o que separa uma turma da EJA das outras. */}
+                {turma.periodoLetivo && periodosLetivos(estado.turmas).length > 1 && (
+                  <Badge variant="outline">{turma.periodoLetivo}</Badge>
                 )}
               </span>
             </div>

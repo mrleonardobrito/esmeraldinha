@@ -14,8 +14,19 @@ export interface Turma {
   nome: string;
   /** Lido do fim do nome da turma; nulo quando o portal não o escreveu. */
   turno: string | null;
+  /**
+   * O período letivo em que o portal oferece a turma ("2026", "2026 EJA").
+   * Nulo nas turmas lidas antes de o cadastro guardá-lo: uma rebusca preenche.
+   */
+  periodoLetivo: string | null;
   totalDeEstudantes: number;
   createdAt: string;
+}
+
+/** Uma turma como a busca no portal a traz: o nome e o período em que mora. */
+export interface TurmaEncontrada {
+  readonly nome: string;
+  readonly periodoLetivo?: string | null;
 }
 
 /** Um estudante matriculado na turma, como o portal o lista. */
@@ -39,6 +50,7 @@ interface TurmaRow {
   professor_id: string;
   nome: string;
   turno: string | null;
+  periodo_letivo: string | null;
   created_at: string;
   total_de_estudantes: number;
 }
@@ -49,6 +61,7 @@ function toTurma(row: TurmaRow): Turma {
     professorId: row.professor_id,
     nome: row.nome,
     turno: row.turno,
+    periodoLetivo: row.periodo_letivo,
     totalDeEstudantes: Number(row.total_de_estudantes),
     createdAt: row.created_at,
   };
@@ -59,6 +72,7 @@ const SELECT_TURMA = `
          t.professor_id,
          t.nome,
          t.turno,
+         t.periodo_letivo,
          t.created_at,
          COUNT(e.matricula) AS total_de_estudantes
     FROM turmas t
@@ -96,19 +110,24 @@ export function getTurma(db: DatabaseSync, id: string): Turma {
 /**
  * Guarda as turmas que a busca no portal trouxe, substituindo as que o
  * professor tinha. O nome vem inteiro do portal e o turno é lido do fim dele:
- * nenhum dos dois é digitado.
+ * nenhum dos dois é digitado. O período letivo também é do portal — é nele
+ * que a turma tem de ser procurada de novo.
  *
  * Uma turma que continua no portal mantém o id e os estudantes que já tinha —
- * é a mesma turma, relida. Uma que sumiu do portal sai daqui junto com eles.
+ * é a mesma turma, relida, só com o período atualizado. Uma que sumiu do
+ * portal sai daqui junto com eles.
  */
 export function replaceTurmas(
   db: DatabaseSync,
   professorId: string,
-  nomes: readonly string[],
+  turmas: readonly TurmaEncontrada[],
 ): Turma[] {
+  const nomes = turmas.map((turma) => turma.nome);
   const insert = db.prepare(
-    'INSERT INTO turmas (id, professor_id, nome, turno, created_at) VALUES (?, ?, ?, ?, ?)',
+    `INSERT INTO turmas (id, professor_id, nome, turno, periodo_letivo, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   );
+  const update = db.prepare('UPDATE turmas SET periodo_letivo = ? WHERE id = ?');
   const existentes = new Map(
     listTurmas(db, professorId).map((turma) => [turma.nome, turma]),
   );
@@ -123,9 +142,22 @@ export function replaceTurmas(
       }
     }
 
-    for (const nome of nomes) {
-      if (existentes.has(nome)) continue;
-      insert.run(randomUUID(), professorId, nome, turnoDaTurma(nome), createdAt);
+    for (const { nome, periodoLetivo } of turmas) {
+      const existente = existentes.get(nome);
+
+      if (existente) {
+        update.run(periodoLetivo ?? null, existente.id);
+        continue;
+      }
+
+      insert.run(
+        randomUUID(),
+        professorId,
+        nome,
+        turnoDaTurma(nome),
+        periodoLetivo ?? null,
+        createdAt,
+      );
     }
 
     db.exec('COMMIT');
@@ -135,6 +167,24 @@ export function replaceTurmas(
   }
 
   return listTurmas(db, professorId);
+}
+
+/**
+ * O período letivo em que a turma do professor mora, como o cadastro o
+ * guardou. `undefined` quando a turma não é conhecida ou foi lida antes de o
+ * período ser guardado: nesse caso a sessão fica no período em que está, que
+ * é o comportamento de antes.
+ */
+export function periodoLetivoDaTurma(
+  db: DatabaseSync,
+  professorId: string,
+  nome: string,
+): string | undefined {
+  const row = db
+    .prepare('SELECT periodo_letivo FROM turmas WHERE professor_id = ? AND nome = ?')
+    .get(professorId, nome) as unknown as { periodo_letivo: string | null } | undefined;
+
+  return row?.periodo_letivo ?? undefined;
 }
 
 /** Os estudantes da turma, na ordem em que o portal os lista. */

@@ -28,8 +28,21 @@ export interface DisciplinasDaTurma {
   readonly disciplinas: readonly DisciplinaOptions[];
 }
 
+/**
+ * O que a tela do portal precisa saber para chegar numa turma. O portal
+ * separa as turmas por período letivo — um professor da EJA vê "2026 EJA" ao
+ * lado de "2026", cada um com as suas turmas —, e a sessão fica em um por
+ * vez: quem raspa precisa dizer em qual deles a turma mora. Ausente, a
+ * sessão continua no período em que está.
+ */
+export interface NoPeriodoLetivo {
+  readonly periodoLetivo?: string;
+}
+
 export interface EtapaOptions {
   readonly nome: string;
+  /** O período letivo em que a etapa e as turmas dela existem. */
+  readonly periodoLetivo: string;
   readonly turmas: readonly string[];
   readonly meses: readonly string[];
   /**
@@ -41,7 +54,12 @@ export interface EtapaOptions {
   readonly disciplinasPorTurma?: readonly DisciplinasDaTurma[];
 }
 
-/** As opções válidas de Lançamento de Conteúdo para o professor da sessão. */
+/**
+ * As opções válidas de Lançamento de Conteúdo para o professor da sessão,
+ * de todos os períodos letivos que o portal lhe oferece. Cada etapa diz de
+ * qual período é: duas etapas de mesmo nome em períodos diferentes são
+ * etapas diferentes, com turmas diferentes.
+ */
 export interface ConteudoCatalogo {
   readonly etapas: readonly EtapaOptions[];
 }
@@ -70,7 +88,7 @@ export interface ConteudoDaAula {
 }
 
 /** Onde a aula mora no portal, mais o que escrever nela. */
-export interface PreenchimentoAssistidoFilter {
+export interface PreenchimentoAssistidoFilter extends NoPeriodoLetivo {
   readonly etapa: string;
   readonly mes: string;
   readonly turma: string;
@@ -79,7 +97,7 @@ export interface PreenchimentoAssistidoFilter {
   readonly conteudo: ConteudoDaAula;
 }
 
-export interface ListaDeAulasFilter {
+export interface ListaDeAulasFilter extends NoPeriodoLetivo {
   readonly etapa: string;
   readonly mes: string;
   readonly turma: string;
@@ -132,7 +150,7 @@ export interface BoletimDoPortal {
  * tem avaliação cadastrada, então ela é opcional: sem avaliação não há nem
  * disciplina nem tabela.
  */
-export interface BoletimFilter {
+export interface BoletimFilter extends NoPeriodoLetivo {
   readonly etapa: string;
   readonly turma: string;
   readonly disciplina?: string;
@@ -146,13 +164,18 @@ export interface NotaParaLancar {
 }
 
 /** Onde as notas moram no portal, mais o que escrever nelas. */
-export interface PreenchimentoDeNotasFilter {
+export interface PreenchimentoDeNotasFilter extends NoPeriodoLetivo {
   readonly etapa: string;
   readonly turma: string;
   readonly disciplina?: string;
   readonly notas: readonly NotaParaLancar[];
   /** A nota parcial e a personalizada, por estudante. */
   readonly notasDoEstudante?: readonly NotaDoEstudante[];
+}
+
+/** Onde a turma mora no portal, para a tela de _Ficha Desempenho_. */
+export interface EstudantesFilter extends NoPeriodoLetivo {
+  readonly turma: string;
 }
 
 /** Um estudante como o portal o lista na turma. */
