@@ -13,6 +13,11 @@ export interface Turma {
   nome: string;
   /** Lido do fim do nome da turma; nulo quando o portal não o escreveu. */
   turno: string | null;
+  /**
+   * O período letivo em que o portal oferece a turma ("2026", "2026 EJA");
+   * nulo nas turmas lidas antes de o cadastro guardá-lo.
+   */
+  periodoLetivo: string | null;
   totalDeEstudantes: number;
   createdAt: string;
 }

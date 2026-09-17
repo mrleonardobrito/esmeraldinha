@@ -41,6 +41,10 @@ export const SCHEMA = `
     nome TEXT NOT NULL,
     -- Lido do fim do nome; nulo quando o portal não o escreveu.
     turno TEXT,
+    -- O período letivo em que o portal oferece a turma ("2026", "2026 EJA").
+    -- É nele que a sessão precisa estar para achá-la. Nulo nas turmas lidas
+    -- antes de o cadastro guardá-lo.
+    periodo_letivo TEXT,
     created_at TEXT NOT NULL,
     UNIQUE (professor_id, nome)
   );
@@ -180,6 +184,7 @@ const COLUNAS_NOVAS: readonly { tabela: string; coluna: string; tipo: string }[]
   { tabela: 'caderneta_aulas', coluna: 'ferramentas', tipo: 'TEXT' },
   { tabela: 'caderneta_estudantes', coluna: 'data_matricula', tipo: 'TEXT' },
   { tabela: 'turma_estudantes', coluna: 'data_matricula', tipo: 'TEXT' },
+  { tabela: 'turmas', coluna: 'periodo_letivo', tipo: 'TEXT' },
 ];
 
 /**

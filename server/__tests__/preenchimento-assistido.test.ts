@@ -37,7 +37,7 @@ const sessionId = 'sessao-1';
 const turma = '9º ANO - 9º ANO B - MATUTINO';
 
 const catalogo = {
-  etapas: [{ nome: '1ª Etapa', turmas: [turma], meses: ['MARÇO'] }],
+  etapas: [{ nome: '1ª Etapa', periodoLetivo: '2026', turmas: [turma], meses: ['MARÇO'] }],
 };
 
 const originalDbPath = process.env.ESMERALDINHA_DB_PATH;
@@ -166,6 +166,34 @@ describe('preenchimento assistido do boletim', () => {
       notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }],
       notasDoEstudante: [],
     });
+  });
+
+  it('leva a sessão headed ao período letivo em que a turma mora', async () => {
+    const { app, professorId: id } = await freshApp();
+    const caderneta = await cadastrarCaderneta(app, id);
+
+    // O cadastro do professor guardou a turma como uma turma da EJA.
+    const { getDb } = await import('../professores/db');
+    const { replaceTurmas } = await import('../turmas/store');
+    replaceTurmas(getDb(), id, [{ nome: turma, periodoLetivo: '2026 EJA' }]);
+
+    const response = await app.fetch(
+      request(
+        `/${caderneta.id}/boletim/preenchimentos-assistidos`,
+        json({
+          etapa: '1ª Etapa',
+          notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+
+    const { prepararNotasParaPreenchimento } = await import('../scrape/portal');
+    expect(prepararNotasParaPreenchimento).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ periodoLetivo: '2026 EJA', turma }),
+    );
   });
 
   it('recusa um preenchimento de notas sem nenhuma nota', async () => {

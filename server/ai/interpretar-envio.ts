@@ -229,10 +229,16 @@ const RESPONSE_SCHEMA = {
 } as const;
 
 function buildSystemPrompt(catalogo: ConteudoCatalogo): string {
+  // Um professor da EJA tem "2026 EJA" ao lado de "2026", e cada período tem
+  // etapas de mesmo nome com turmas diferentes: o período só entra na lista
+  // quando há mais de um, para o agente não confundir as duas "I ETAPA".
+  const periodos = new Set(catalogo.etapas.map((etapa) => etapa.periodoLetivo));
   const opcoes = catalogo.etapas
     .map(
       (etapa) =>
-        `- Etapa "${etapa.nome}"\n` +
+        `- Etapa "${etapa.nome}"` +
+        (periodos.size > 1 ? ` (período letivo ${etapa.periodoLetivo})` : '') +
+        '\n' +
         `  turmas: ${etapa.turmas.join(' | ') || '(nenhuma)'}\n` +
         `  meses: ${etapa.meses.join(' | ') || '(nenhum)'}\n` +
         `  disciplinas e avaliações, por turma:\n` +
@@ -390,21 +396,30 @@ function encontraIgualIgnorandoCaixaEAcento(
  * exata com as opções do PrimeFaces.
  */
 function assertNoCatalogo(plan: z.infer<typeof planSchema>, catalogo: ConteudoCatalogo): void {
-  const etapa = encontraPorNome(catalogo.etapas, plan.etapa);
+  // A etapa de mesmo nome existe uma vez por período letivo, cada uma com as
+  // suas turmas: a que vale é a que oferece a turma do plano.
+  const homonimas = catalogo.etapas.filter(
+    (candidata) => normalizar(candidata.nome) === normalizar(plan.etapa),
+  );
 
-  if (!etapa) {
+  if (homonimas.length === 0) {
     throw new EnvioInvalidoError(
       `A etapa "${plan.etapa}" não existe para este professor. ` +
-        `Etapas disponíveis: ${catalogo.etapas.map((e) => e.nome).join(', ')}.`,
+        `Etapas disponíveis: ${[...new Set(catalogo.etapas.map((e) => e.nome))].join(', ')}.`,
     );
   }
+
+  const etapa =
+    homonimas.find((candidata) =>
+      encontraIgualIgnorandoCaixaEAcento(candidata.turmas, plan.turma),
+    ) ?? homonimas[0];
   plan.etapa = etapa.nome;
 
   const turma = encontraIgualIgnorandoCaixaEAcento(etapa.turmas, plan.turma);
   if (!turma) {
     throw new EnvioInvalidoError(
       `A turma "${plan.turma}" não existe na etapa "${etapa.nome}". ` +
-        `Turmas disponíveis: ${etapa.turmas.join(', ')}.`,
+        `Turmas disponíveis: ${homonimas.flatMap((e) => e.turmas).join(', ')}.`,
     );
   }
   plan.turma = turma;

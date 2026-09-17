@@ -92,7 +92,7 @@ beforeEach(async () => {
     lastUsedAt: Date.now(),
   });
   const catalogo = {
-    etapas: [{ nome: '1ª Etapa', turmas: [turma], meses: ['MARÇO'] }],
+    etapas: [{ nome: '1ª Etapa', periodoLetivo: '2026', turmas: [turma], meses: ['MARÇO'] }],
   };
   vi.mocked(getCatalogo).mockResolvedValue(catalogo);
 

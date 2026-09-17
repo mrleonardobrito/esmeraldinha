@@ -7,7 +7,7 @@ import {
   listEstudantes,
 } from '../scrape/portal';
 import type { ConteudoCatalogo } from '../scrape/types';
-import { turmasDoCatalogo } from '../turmas/busca';
+import { etapasDaTurma, periodoLetivoDaTurma, turmasDoCatalogo } from '../turmas/busca';
 import type { BoletimRaspado, EtapaRaspada, RaspagemDaTurma } from './store';
 
 export class TurmaNaoEncontradaError extends Error {
@@ -41,13 +41,17 @@ export async function rasparCaderneta(
     throw new TurmaNaoEncontradaError(turma, disponiveis);
   }
 
+  // A turma mora num período letivo só, e as etapas dela são as desse
+  // período: as de outro não entram na grade, mesmo com o mesmo nome.
+  const periodoLetivo = periodoLetivoDaTurma(catalogo, turma);
+  const etapasDoPeriodo = etapasDaTurma(catalogo, turma);
   const etapas: EtapaRaspada[] = [];
 
   // As aulas primeiro, todas elas. Ler aula e boletim alternadamente obrigaria
   // o portal a trocar de tela a cada etapa — _Lançamento de Conteúdo_ e
   // _Resultado de Avaliação_ —, e é no meio dessa troca que os menus do
   // PrimeFaces deixam de responder ao clique. Uma tela por vez.
-  for (const etapa of catalogo.etapas) {
+  for (const etapa of etapasDoPeriodo) {
     // Uma etapa que não oferece a turma não tem aulas dela: entra vazia para a
     // grade continuar mostrando as quatro colunas.
     if (!etapa.turmas.includes(turma)) {
@@ -58,7 +62,7 @@ export async function rasparCaderneta(
     const aulas: EtapaRaspada['aulas'] = [];
 
     for (const mes of etapa.meses) {
-      const doMes = await listAulas(page, { etapa: etapa.nome, turma, mes });
+      const doMes = await listAulas(page, { periodoLetivo, etapa: etapa.nome, turma, mes });
       aulas.push(...doMes.map((aula) => ({ ...aula, mes })));
     }
 
@@ -69,7 +73,7 @@ export async function rasparCaderneta(
   // aulas que acabaram de ser lidas — o mesmo cuidado que a lista de
   // estudantes recebe logo abaixo.
   for (const etapa of etapas) {
-    if (!catalogo.etapas.find((atual) => atual.nome === etapa.nome)?.turmas.includes(turma)) {
+    if (!etapasDoPeriodo.find((atual) => atual.nome === etapa.nome)?.turmas.includes(turma)) {
       continue;
     }
 
@@ -78,8 +82,13 @@ export async function rasparCaderneta(
     try {
       // Sem disciplina não há avaliação cadastrada, e portanto nada a ler: a
       // etapa fica sem boletim nenhum e a tela pede o cadastro.
-      for (const disciplina of await listDisciplinas(page, { etapa: etapa.nome, turma })) {
+      for (const disciplina of await listDisciplinas(page, {
+        periodoLetivo,
+        etapa: etapa.nome,
+        turma,
+      })) {
         const boletim = await listBoletim(page, {
+          periodoLetivo,
           etapa: etapa.nome,
           turma,
           disciplina,
@@ -99,7 +108,7 @@ export async function rasparCaderneta(
   let estudantes: RaspagemDaTurma['estudantes'] = [];
 
   try {
-    const doPortal = await listEstudantes(page, { turma });
+    const doPortal = await listEstudantes(page, { periodoLetivo, turma });
     // O portal omite a situação e a data; o banco guarda a ausência como null.
     estudantes = doPortal.map((estudante) => ({
       matricula: estudante.matricula,

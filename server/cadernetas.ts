@@ -53,6 +53,7 @@ import { resolverNotasParaPreview, type NotaResolvida } from './notas/plano';
 import type { NotaParaLancar } from './scrape/types';
 import { TurmaNaoEncontradaError } from './cadernetas/raspagem';
 import { turmasDoCatalogo } from './turmas/busca';
+import { periodoLetivoDaTurma } from './turmas/store';
 import { sincronizarEmSegundoPlano } from './cadernetas/sincronizacao';
 import { env } from './env';
 import { createEncryptionPort } from './encryption';
@@ -437,8 +438,11 @@ cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (co
   }
 
   try {
+    const periodoLetivo = periodoLetivoDaTurma(getDb(), professorId, turma);
+
     await naSessaoHeaded(professorId, credenciais, (page) =>
       prepararAulaParaPreenchimento(page, {
+        periodoLetivo,
         etapa,
         mes,
         turma,
@@ -524,8 +528,10 @@ cadernetas.post('/sessoes/:id/envios/boletim/preenchimentos-assistidos', async (
   }
 
   try {
+    const periodoLetivo = periodoLetivoDaTurma(getDb(), professorId, turma);
+
     await naSessaoHeaded(professorId, credenciais, (page) =>
-      prepararNotasParaPreenchimento(page, { etapa, turma, disciplina, notas }),
+      prepararNotasParaPreenchimento(page, { periodoLetivo, etapa, turma, disciplina, notas }),
     );
 
     if (cadernetaId) {
@@ -1097,6 +1103,7 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
 
     await naSessaoHeaded(caderneta.professorId, credenciais, (page) =>
       prepararNotasParaPreenchimento(page, {
+        periodoLetivo: periodoLetivoDaTurma(getDb(), caderneta.professorId, caderneta.turma),
         etapa,
         turma: caderneta.turma,
         disciplina: escolhida,

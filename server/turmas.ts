@@ -6,7 +6,7 @@ import { getDb } from './professores/db';
 import { getProfessorCredenciais } from './professores/store';
 import { closeSession, getCatalogo, openSession, retomarSessao } from './portal-sessions';
 import { LoginError } from './scrape/errors';
-import { buscarEstudantes, turmasDoCatalogo } from './turmas/busca';
+import { buscarEstudantes, turmasComPeriodo } from './turmas/busca';
 import {
   TurmaNotFoundError,
   getTurma,
@@ -111,14 +111,18 @@ turmas.post('/buscas', async (context) => {
       return context.json({ error: 'Sessão não encontrada ou expirada.' }, 404);
     }
 
-    const encontradas = replaceTurmas(getDb(), professorId, turmasDoCatalogo(catalogo));
+    const encontradas = replaceTurmas(getDb(), professorId, turmasComPeriodo(catalogo));
 
     // Os estudantes vêm na mesma sessão: ela já está aberta, e uma turma sem
     // eles não serve para as fichas nem para o boletim. A falha de uma turma
     // não derruba as outras — turma sem estudante ainda é turma conhecida.
     for (const turma of encontradas) {
       try {
-        const estudantes = await buscarEstudantes(session.page, turma.nome);
+        const estudantes = await buscarEstudantes(
+          session.page,
+          turma.nome,
+          turma.periodoLetivo ?? undefined,
+        );
         replaceEstudantes(getDb(), turma.id, estudantes);
       } catch (error) {
         console.error(`Falha ao ler os estudantes de ${turma.nome}:`, error);
@@ -190,7 +194,11 @@ turmas.post('/:id/estudantes/buscas', async (context) => {
 
   try {
     const turma = getTurma(getDb(), id);
-    const encontrados = await buscarEstudantes(session.page, turma.nome);
+    const encontrados = await buscarEstudantes(
+      session.page,
+      turma.nome,
+      turma.periodoLetivo ?? undefined,
+    );
 
     return context.json({ estudantes: replaceEstudantes(getDb(), id, encontrados) });
   } catch (error) {
