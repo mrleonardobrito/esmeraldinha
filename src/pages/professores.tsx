@@ -2,6 +2,8 @@ import * as React from "react";
 import {
   IconAlertTriangle,
   IconChalkboardTeacher,
+  IconLock,
+  IconLockOpen,
   IconDotsVertical,
   IconLoader,
   IconPencil,
@@ -43,6 +45,7 @@ import {
   loadProfessores,
   maskCpf,
   updateProfessor,
+  setProfessorAcesso,
   type Professor,
   type ProfessorInput,
   type ProfessorUpdateInput,
@@ -181,6 +184,26 @@ export function Professores() {
     }
   }
 
+  async function handleAcesso(professor: Professor) {
+    try {
+      const updated = await setProfessorAcesso(professor.id, !professor.acessoLiberado);
+      setProfessores((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      toast.success(
+        updated.acessoLiberado
+          ? "Acesso ao sistema liberado."
+          : "Acesso ao sistema revogado.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível alterar o acesso.",
+      );
+    }
+  }
+
   return (
     <div className="min-w-full flex-1 bg-zinc-50 p-4 font-sans lg:p-6 dark:bg-black">
       <Card>
@@ -291,6 +314,12 @@ export function Professores() {
                           >
                             <IconPencil />
                             Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => void handleAcesso(professor)}>
+                            {professor.acessoLiberado ? <IconLock /> : <IconLockOpen />}
+                            {professor.acessoLiberado
+                              ? "Revogar acesso ao sistema"
+                              : "Criar acesso ao sistema"}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             disabled={relendo === professor.id}

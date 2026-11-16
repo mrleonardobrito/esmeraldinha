@@ -1,4 +1,5 @@
 import * as React from "react";
+import { professorGreeting } from "@shared/pronouns";
 import {
   IconAlertTriangle,
   IconArrowRight,
@@ -33,6 +34,7 @@ import {
 } from "@/lib/painel";
 import { nomeCurtoDaTurma } from "@/lib/turmas";
 import { cn } from "@/lib/utils";
+import { useConta } from "@/components/conta-provider";
 
 type Estado =
   | { status: "carregando" }
@@ -40,13 +42,25 @@ type Estado =
   | { status: "pronto"; dados: DadosDoPainel };
 
 export function Painel() {
+  const { conta } = useConta();
   const [estado, setEstado] = React.useState<Estado>({ status: "carregando" });
   const [tentativa, setTentativa] = React.useState(0);
 
   React.useEffect(() => {
     let cancelado = false;
 
-    carregarPainel()
+    const professorDaSessao = conta?.papel === "professor" && conta.professorId
+      ? {
+          id: conta.professorId,
+          nome: conta.nome,
+          login: conta.login,
+          escola: conta.escola ?? "",
+          imagem: conta.imagem,
+          createdAt: "",
+        }
+      : undefined;
+
+    carregarPainel(professorDaSessao)
       .then((dados) => {
         if (!cancelado) setEstado({ status: "pronto", dados });
       })
@@ -64,7 +78,7 @@ export function Painel() {
     return () => {
       cancelado = true;
     };
-  }, [tentativa]);
+  }, [conta, tentativa]);
 
   function tentarDeNovo() {
     setEstado({ status: "carregando" });
@@ -191,11 +205,14 @@ function Saudacao({
   frase: string;
   temTrabalho?: boolean;
 }) {
+  const { conta } = useConta();
   return (
     <div className="flex animate-rise flex-wrap items-end justify-between gap-3">
       <div className="flex flex-col gap-1">
         <h1 className="font-heading text-2xl font-semibold tracking-tight">
-          Bem-vinda, Esmeraldinha!
+          {conta?.papel === "professor"
+            ? professorGreeting(conta.nome, conta.pronouns)
+            : "Bem-vinda, Esmeraldinha!"}
         </h1>
         <p className="text-sm text-muted-foreground">{frase}</p>
       </div>

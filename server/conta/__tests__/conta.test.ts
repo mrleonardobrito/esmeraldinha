@@ -14,6 +14,7 @@ const originalEnv = {
   dbPath: process.env.ESMERALDINHA_DB_PATH,
   login: process.env.ESMERALDINHA_LOGIN,
   senha: process.env.ESMERALDINHA_SENHA_TEMPORARIA,
+  encryptionKey: process.env.ESMERALDINHA_ENCRYPTION_KEY,
 };
 
 let tempDir: string;
@@ -52,6 +53,7 @@ describe('conta do auxiliar de ensino', () => {
     process.env.ESMERALDINHA_DB_PATH = originalEnv.dbPath;
     process.env.ESMERALDINHA_LOGIN = originalEnv.login;
     process.env.ESMERALDINHA_SENHA_TEMPORARIA = originalEnv.senha;
+    process.env.ESMERALDINHA_ENCRYPTION_KEY = originalEnv.encryptionKey;
 
     const { closeDb } = await import('../../professores/db');
     closeDb();
@@ -92,6 +94,89 @@ describe('conta do auxiliar de ensino', () => {
 
     const loginErrado = await app.fetch(entrar(SENHA_TEMPORARIA, 'outro-login'));
     expect(loginErrado.status).toBe(401);
+  });
+
+  it('abre uma sessão de professor, limitada às próprias cadernetas', async () => {
+    process.env.ESMERALDINHA_ENCRYPTION_KEY = 'chave-de-teste-para-professor';
+    const app = await freshApp();
+    const { createEncryptionPort } = await import('../../encryption');
+    const { createProfessor, setProfessorAcesso } = await import('../../professores/store');
+    const { getDb } = await import('../../professores/db');
+
+    const professor = await createProfessor(getDb(), createEncryptionPort(), {
+      nome: 'Maria Professora',
+      login: '52998224725',
+      senha: 'senha-do-portal',
+      escola: 'Escola Municipal',
+    });
+    const bloqueada = await app.fetch(entrar('senha-do-portal', '529.982.247-25'));
+    expect(bloqueada.status).toBe(403);
+    setProfessorAcesso(getDb(), professor.id, true);
+
+    const entrada = await app.fetch(entrar('senha-do-portal', '529.982.247-25'));
+    expect(entrada.status).toBe(200);
+    const { token, conta } = (await entrada.json()) as {
+      token: string;
+      conta: { papel: string; professorId: string };
+    };
+    expect(conta).toMatchObject({ papel: 'professor', professorId: professor.id });
+
+    const preference = await app.fetch(comToken(new Request('http://localhost/api/conta/pronouns', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pronouns: 'ela/dela', professorId: 'another-professor' }),
+    }), token));
+    expect(preference.status).toBe(200);
+    const reentry = await app.fetch(entrar('senha-do-portal', professor.login));
+    await expect(reentry.json()).resolves.toMatchObject({ conta: { pronouns: 'ela/dela' } });
+    const cleared = await app.fetch(comToken(new Request('http://localhost/api/conta/pronouns', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pronouns: null }),
+    }), token));
+    expect(cleared.status).toBe(200);
+    const current = await app.fetch(comToken(new Request('http://localhost/api/conta'), token));
+    await expect(current.json()).resolves.toMatchObject({ pronouns: null });
+
+    const proprias = await app.fetch(
+      comToken(
+        new Request(`http://localhost/api/cadernetas?professorId=${professor.id}`),
+        token,
+      ),
+    );
+    expect(proprias.status).toBe(200);
+
+    setProfessorAcesso(getDb(), professor.id, false);
+    const revogada = await app.fetch(entrar('senha-do-portal', '529.982.247-25'));
+    expect(revogada.status).toBe(403);
+    setProfessorAcesso(getDb(), professor.id, true);
+
+    const gestao = await app.fetch(
+      comToken(new Request('http://localhost/api/professores'), token),
+    );
+    expect(gestao.status).toBe(403);
+
+    for (const path of [
+      '/api/cadernetas?professorId=another-professor',
+      '/api/cadernetas/turmas?sessionId=unknown-session',
+      '/api/cadernetas/sessoes/unknown-session',
+    ]) {
+      const denied = await app.fetch(comToken(new Request(`http://localhost${path}`), token));
+      expect(denied.status).toBe(403);
+    }
+
+    for (const path of [
+      '/api/cadernetas',
+      '/api/cadernetas/sessoes/unknown-session/envios/aulas/preenchimentos-assistidos',
+      '/api/cadernetas/sessoes/unknown-session/envios/boletim/preenchimentos-assistidos',
+    ]) {
+      const denied = await app.fetch(comToken(new Request(`http://localhost${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ professorId: 'another-professor' }),
+      }), token));
+      expect(denied.status).toBe(403);
+    }
   });
 
   it('depois da troca, só a senha definitiva entra', async () => {

@@ -145,11 +145,11 @@ export function TelaDeEntrada() {
   return (
     <Moldura
       titulo="Entrar na Esmeraldinha"
-      descricao="Use o login e a senha do auxiliar de ensino."
+      descricao="Entre com o login e a senha do auxiliar de ensino ou com seu CPF e senha do portal."
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <div className="flex flex-col gap-2">
-          <Label htmlFor="login">Login</Label>
+          <Label htmlFor="login">Login ou CPF</Label>
           <Input
             id="login"
             value={login}

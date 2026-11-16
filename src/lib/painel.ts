@@ -207,7 +207,15 @@ export interface DadosDoPainel {
  * São poucos professores por instalação — uma escola, um auxiliar de ensino —
  * e por isso as leituras vão juntas, em vez de virarem uma rota nova na API.
  */
-export async function carregarPainel(): Promise<DadosDoPainel> {
+export async function carregarPainel(professorDaSessao?: Professor): Promise<DadosDoPainel> {
+  if (professorDaSessao) {
+    const cadernetas = await loadCadernetas(professorDaSessao.id);
+    return {
+      professores: [professorDaSessao],
+      itens: cadernetas.map((caderneta) => ({ caderneta, professor: professorDaSessao })),
+    };
+  }
+
   const professores = await loadProfessores();
 
   const listas = await Promise.all(

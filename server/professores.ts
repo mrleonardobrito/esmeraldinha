@@ -10,6 +10,7 @@ import {
   deleteProfessor,
   listProfessores,
   updateProfessor,
+  setProfessorAcesso,
 } from './professores/store';
 
 export const professores = new Hono();
@@ -69,6 +70,24 @@ professores.put('/:id', async (context) => {
 
     console.error('Falha ao atualizar professor:', error);
     return context.json({ error: 'Não foi possível atualizar o professor.' }, 500);
+  }
+});
+
+professores.put('/:id/acesso', async (context) => {
+  const body = await context.req.json().catch(() => null) as { liberado?: unknown } | null;
+  if (typeof body?.liberado !== 'boolean') {
+    return context.json({ error: 'Informe se o acesso deve ser liberado.' }, 400);
+  }
+
+  try {
+    return context.json(
+      setProfessorAcesso(getDb(), context.req.param('id'), body.liberado),
+    );
+  } catch (error) {
+    if (error instanceof ProfessorNotFoundError) {
+      return context.json({ error: error.message }, 404);
+    }
+    throw error;
   }
 });
 

@@ -10,13 +10,11 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import {
-  IconCamera,
-  IconFileDescription,
-  IconFileAi,
   IconChalkboardTeacher,
   IconBook2,
   IconLayoutDashboard,
 } from "@tabler/icons-react";
+import { useConta } from "@/components/conta-provider";
 
 const data = {
   navMain: [
@@ -36,57 +34,14 @@ const data = {
       icon: <IconBook2 />,
     },
   ],
-  navClouds: [
-    {
-      title: "Capture",
-      icon: <IconCamera />,
-      isActive: true,
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
-    },
-    {
-      title: "Proposal",
-      icon: <IconFileDescription />,
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
-    },
-    {
-      title: "Prompts",
-      icon: <IconFileAi />,
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
-    },
-  ],
 };
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const { conta } = useConta();
+  const itens = conta?.papel === "professor"
+    ? data.navMain.filter((item) => item.url !== "/professores")
+    : data.navMain;
+
   return (
     <Sidebar collapsible="offcanvas" {...props}>
       <SidebarHeader>
@@ -111,7 +66,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} />
+        <NavMain items={itens} />
       </SidebarContent>
       <SidebarFooter>
         <NavUser />

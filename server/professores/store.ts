@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { EncryptionPort } from '../encryption';
 import type { ProfessorInput, ProfessorUpdateInput } from '../../shared/professor';
 import type { ProfessorCredenciais } from '../scrape/types';
+import { textoConfere } from '../conta/senhas';
 
 /** A professor as returned by the API: never carries the senha. */
 export interface Professor {
@@ -12,6 +13,7 @@ export interface Professor {
   login: string;
   escola: string;
   imagem: string | null;
+  acessoLiberado: boolean;
   createdAt: string;
 }
 
@@ -37,6 +39,7 @@ interface ProfessorRow {
   login: string;
   escola: string;
   imagem: string | null;
+  acesso_liberado: number;
   created_at: string;
 }
 
@@ -47,15 +50,48 @@ function toProfessor(row: ProfessorRow): Professor {
     login: row.login,
     escola: row.escola,
     imagem: row.imagem,
+    acessoLiberado: row.acesso_liberado === 1,
     createdAt: row.created_at,
   };
+}
+
+/** Um professor pelo id, sem expor a senha guardada. */
+export function getProfessor(db: DatabaseSync, id: string): Professor | null {
+  const row = db.prepare(
+    'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at FROM professores WHERE id = ?',
+  ).get(id) as unknown as ProfessorRow | undefined;
+  return row ? toProfessor(row) : null;
+}
+
+/** Finds a professor by portal login without reading their senha. */
+export function getProfessorPorLogin(db: DatabaseSync, login: string): Professor | null {
+  const row = db.prepare(
+    'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at FROM professores WHERE login = ?',
+  ).get(login) as unknown as ProfessorRow | undefined;
+  return row ? toProfessor(row) : null;
+}
+
+/** Localiza o professor pelo CPF e confere sua senha do portal sem expô-la. */
+export async function autenticarProfessor(
+  db: DatabaseSync,
+  encryption: EncryptionPort,
+  login: string,
+  senha: string,
+): Promise<Professor | null> {
+  const row = db.prepare(
+    'SELECT id, nome, login, senha_encrypted, escola, imagem, acesso_liberado, created_at FROM professores WHERE login = ?',
+  ).get(login) as unknown as (ProfessorRow & { senha_encrypted: Uint8Array }) | undefined;
+  if (!row) return null;
+
+  const senhaGuardada = await encryption.decrypt(Buffer.from(row.senha_encrypted));
+  return row.acesso_liberado === 1 && textoConfere(senha, senhaGuardada) ? toProfessor(row) : null;
 }
 
 /** Lists every professor cadastrado. Never includes the senha. */
 export function listProfessores(db: DatabaseSync): Professor[] {
   const rows = db
     .prepare(
-      'SELECT id, nome, login, escola, imagem, created_at FROM professores ORDER BY created_at ASC',
+      'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at FROM professores ORDER BY created_at ASC',
     )
     .all() as unknown as ProfessorRow[];
 
@@ -87,8 +123,8 @@ export async function createProfessor(
   const senhaEncrypted = await encryption.encrypt(input.senha);
 
   db.prepare(
-    `INSERT INTO professores (id, nome, login, senha_encrypted, escola, imagem, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO professores (id, nome, login, senha_encrypted, escola, imagem, acesso_liberado, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
   ).run(
     id,
     input.nome,
@@ -105,6 +141,7 @@ export async function createProfessor(
     login: input.login,
     escola: input.escola,
     imagem: input.imagem ?? null,
+    acessoLiberado: false,
     createdAt,
   };
 }
@@ -152,10 +189,23 @@ export async function updateProfessor(
   }
 
   const row = db
-    .prepare('SELECT id, nome, login, escola, imagem, created_at FROM professores WHERE id = ?')
+    .prepare('SELECT id, nome, login, escola, imagem, acesso_liberado, created_at FROM professores WHERE id = ?')
     .get(id) as unknown as ProfessorRow;
 
   return toProfessor(row);
+}
+
+/** Grants or revokes the professor's permission to enter Esmeraldinha. */
+export function setProfessorAcesso(
+  db: DatabaseSync,
+  id: string,
+  liberado: boolean,
+): Professor {
+  const result = db
+    .prepare('UPDATE professores SET acesso_liberado = ? WHERE id = ?')
+    .run(liberado ? 1 : 0, id);
+  if (result.changes === 0) throw new ProfessorNotFoundError(id);
+  return getProfessor(db, id)!;
 }
 
 /**

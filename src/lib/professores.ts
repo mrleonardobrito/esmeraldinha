@@ -41,6 +41,7 @@ export type Professor = Omit<ProfessorInput, "senha" | "imagem"> & {
   senha?: string;
   /** Nulo quando o professor não tem imagem: é assim que o banco a guarda. */
   imagem: string | null;
+  acessoLiberado?: boolean;
   id: string;
   createdAt: string;
 };
@@ -82,6 +83,18 @@ export async function updateProfessor(
 /** Exclui um professor cadastrado. */
 export async function deleteProfessor(id: string): Promise<void> {
   await requestApi(`/api/professores/${id}`, { method: "DELETE" });
+}
+
+export async function setProfessorAcesso(
+  id: string,
+  liberado: boolean,
+): Promise<Professor> {
+  const response = await requestApi(`/api/professores/${id}/acesso`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ liberado }),
+  });
+  return (await response.json()) as Professor;
 }
 
 export function getInitials(nome: string) {

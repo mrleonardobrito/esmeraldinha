@@ -9,8 +9,12 @@ Domain terms are Portuguese and are never translated — in prose, in code ident
 ### Pessoas
 
 **auxiliar de ensino**:
-The person who fills in cadernetas on behalf of professores. The only user of Esmeraldinha.
-_Avoid_: assistant, operador, usuário
+The person who fills in cadernetas on behalf of professores and manages their access to Esmeraldinha.
+_Avoid_: assistant, operador, usuário, admin
+
+**papel de acesso**:
+The identity that determines what a signed-in person can reach. An **auxiliar de ensino** can manage professores and every caderneta; a **professor** can only view and fill in their own cadernetas. The role is an authorization boundary, not a freemium entitlement.
+_Avoid_: role, permission
 
 **conta do auxiliar de ensino**:
 The single account the auxiliar de ensino signs into Esmeraldinha with. Carries a login, a senha, and the perfil (nome, e-mail, foto). It exists because the app holds the credenciais do professor: only whoever knows the senha gets to them.
@@ -29,7 +33,7 @@ The proof that whoever is at the keyboard has signed into the conta do auxiliar 
 _Avoid_: login, sessão de usuário
 
 **professor**:
-The teacher a caderneta belongs to. Not a user of Esmeraldinha — a portal identity that Esmeraldinha acts on behalf of.
+The teacher a caderneta belongs to. They can enter Esmeraldinha with the same CPF and senha used in the portal, and can only access their own cadernetas.
 _Avoid_: teacher, docente
 
 **credenciais do professor**:
