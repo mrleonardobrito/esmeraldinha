@@ -52,6 +52,6 @@ data/
 /.claude/
 /.scratch/
 /docs/agents/
-
+/docs/superpowers/
 # Credenciais do professor usadas nos dry runs locais. Nunca versionar.
 logins.json
