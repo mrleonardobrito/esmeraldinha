@@ -198,7 +198,7 @@ export async function getCatalogo(id: string): Promise<ConteudoCatalogo | undefi
  * reinicia a cada arquivo salvo) faz `retomarSessao` desistir na hora, mesmo
  * a sessão estando viva na visão de quem a abriu.
  */
-async function donoDaSessao(id: string): Promise<string | undefined> {
+export async function donoDaSessao(id: string): Promise<string | undefined> {
   const emMemoria = donos.get(id);
   if (emMemoria) return emMemoria;
 

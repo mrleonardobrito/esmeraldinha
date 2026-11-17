@@ -123,6 +123,8 @@ export interface Caderneta {
   syncedAt: string | null;
   syncStatus: SyncStatus;
   syncError: string | null;
+  valorRecebido: number | null;
+  valorAReceber: number | null;
 }
 
 /** O que uma raspagem do portal traz para uma etapa da turma. */
@@ -172,6 +174,8 @@ interface CadernetaRow {
   synced_at: string | null;
   sync_status: SyncStatus;
   sync_error: string | null;
+  valor_recebido: number | null;
+  valor_a_receber: number | null;
 }
 
 interface EtapaRow {
@@ -220,7 +224,9 @@ function readEtapas(db: DatabaseSync, cadernetaId: string): EtapaDaCaderneta[] {
 
   const { estudantes } = db
     .prepare(
-      'SELECT COUNT(*) AS estudantes FROM caderneta_estudantes WHERE caderneta_id = ?',
+      `SELECT COUNT(*) AS estudantes FROM caderneta_estudantes
+        WHERE caderneta_id = ?
+          AND UPPER(TRIM(COALESCE(situacao, ''))) NOT IN ('TRANSFERIDO', 'TRANSFERIDA')`,
     )
     .get(cadernetaId) as unknown as { estudantes: number };
 
@@ -239,16 +245,19 @@ function readEtapas(db: DatabaseSync, cadernetaId: string): EtapaDaCaderneta[] {
   const notasPorEtapa = new Map<string, number>();
   for (const row of db
     .prepare(
-      `SELECT etapa, COUNT(*) AS total FROM caderneta_notas
-        WHERE caderneta_id = ? GROUP BY etapa`,
+      `SELECT n.etapa, COUNT(*) AS total FROM caderneta_notas n
+        JOIN caderneta_estudantes e
+          ON e.caderneta_id = n.caderneta_id AND e.matricula = n.matricula
+        WHERE n.caderneta_id = ?
+          AND UPPER(TRIM(COALESCE(e.situacao, ''))) NOT IN ('TRANSFERIDO', 'TRANSFERIDA')
+        GROUP BY n.etapa`,
     )
     .all(cadernetaId) as unknown as { etapa: string; total: number }[]) {
     notasPorEtapa.set(row.etapa, Number(row.total));
   }
 
   return rows.map((row) => {
-    // O boletim está completo quando todo estudante tem nota em toda
-    // avaliação: são as células da grade que o portal mostra.
+    // Transferred estudantes do not contribute to required or completed entries.
     const totalDeNotas = Number(estudantes) * (avaliacoesPorEtapa.get(row.nome) ?? 0);
     const notasLancadas = notasPorEtapa.get(row.nome) ?? 0;
 
@@ -281,6 +290,8 @@ function toCaderneta(db: DatabaseSync, row: CadernetaRow): Caderneta {
     syncedAt: row.synced_at,
     syncStatus: row.sync_status,
     syncError: row.sync_error,
+    valorRecebido: row.valor_recebido,
+    valorAReceber: row.valor_a_receber,
   };
 }
 
@@ -445,7 +456,7 @@ export function createCaderneta(db: DatabaseSync, input: CadernetaInput): Cadern
 export function listCadernetas(db: DatabaseSync, professorId: string): Caderneta[] {
   const rows = db
     .prepare(
-      `SELECT id, professor_id, turma, turno, created_at, synced_at, sync_status, sync_error
+      `SELECT id, professor_id, turma, turno, created_at, synced_at, sync_status, sync_error, valor_recebido, valor_a_receber
          FROM cadernetas WHERE professor_id = ? ORDER BY created_at ASC`,
     )
     .all(professorId) as unknown as CadernetaRow[];
@@ -457,7 +468,7 @@ export function listCadernetas(db: DatabaseSync, professorId: string): Caderneta
 export function getCaderneta(db: DatabaseSync, id: string): Caderneta {
   const row = db
     .prepare(
-      `SELECT id, professor_id, turma, turno, created_at, synced_at, sync_status, sync_error
+      `SELECT id, professor_id, turma, turno, created_at, synced_at, sync_status, sync_error, valor_recebido, valor_a_receber
          FROM cadernetas WHERE id = ?`,
     )
     .get(id) as unknown as CadernetaRow | undefined;
@@ -562,7 +573,7 @@ export function listEstudantes(
 
   return rows.map((row) => ({
     matricula: row.matricula,
-    nome: row.nome,
+    nome: limparNomeDoEstudante(row.nome),
     situacao: row.situacao,
     dataMatricula: row.data_matricula,
   }));
@@ -951,3 +962,4 @@ export function marcarNotasLancadas(
 
   return gravadas;
 }
+import { limparNomeDoEstudante } from '../scrape/nome-do-estudante';

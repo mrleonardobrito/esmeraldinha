@@ -9,19 +9,36 @@ permissions:
   contents: write
 
 jobs:
+  release-draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read release version
+        id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "v${{ steps.version.outputs.value }}" >/dev/null 2>&1 || \
+            gh release create "v${{ steps.version.outputs.value }}" \
+              --draft \
+              --title "v${{ steps.version.outputs.value }}" \
+              --generate-notes
+
   build:
+    needs: release-draft
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: linux
-            artifact_glob: |
-              release/*.AppImage
-              release/*.deb
           - os: windows-latest
             target: win
-            artifact_glob: release/*.exe
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -52,22 +69,16 @@ jobs:
         run: |
           pnpm build
           pnpm build:electron
-          npx electron-builder --${{ matrix.target }} --publish never
+          npx electron-builder --${{ matrix.target }} --publish always
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ESMERALDINHA_LOGIN: ${{ secrets.ESMERALDINHA_LOGIN }}
           ESMERALDINHA_SENHA_TEMPORARIA: ${{ secrets.ESMERALDINHA_SENHA_TEMPORARIA }}
 
-      - name: Upload installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: esmeraldinha-${{ matrix.target }}
-          path: ${{ matrix.artifact_glob }}
-          if-no-files-found: error
-
   release:
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -76,25 +87,14 @@ jobs:
           # Precisa escrever de volta o bump de versão depois da release.
           persist-credentials: true
 
-      - name: Download installers
-        uses: actions/download-artifact@v4
-        with:
-          pattern: esmeraldinha-*
-          path: artifacts
-          merge-multiple: true
-
       - name: Read release version
         id: version
         run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub release
+      - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "v${{ steps.version.outputs.value }}" \
-            artifacts/* \
-            --title "v${{ steps.version.outputs.value }}" \
-            --generate-notes
+        run: gh release edit "v${{ steps.version.outputs.value }}" --draft=false
 
       # Garante que o próximo merge na main não tente recriar a mesma tag.
       - name: Bump patch version for next release

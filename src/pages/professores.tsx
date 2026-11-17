@@ -2,6 +2,8 @@ import * as React from "react";
 import {
   IconAlertTriangle,
   IconChalkboardTeacher,
+  IconLock,
+  IconLockOpen,
   IconDotsVertical,
   IconLoader,
   IconPencil,
@@ -11,6 +13,7 @@ import {
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 
+import { ProfessorDetails } from "@/components/professor-details";
 import { ProfessorForm } from "@/components/professor-form";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -43,6 +46,7 @@ import {
   loadProfessores,
   maskCpf,
   updateProfessor,
+  setProfessorAcesso,
   type Professor,
   type ProfessorInput,
   type ProfessorUpdateInput,
@@ -55,6 +59,7 @@ type ListState =
   | { status: "ready" };
 
 export function Professores() {
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [professores, setProfessores] = React.useState<Professor[]>([]);
   const [listState, setListState] = React.useState<ListState>({
     status: "loading",
@@ -181,6 +186,32 @@ export function Professores() {
     }
   }
 
+  async function handleAcesso(professor: Professor) {
+    try {
+      const updated = await setProfessorAcesso(professor.id, !professor.acessoLiberado);
+      setProfessores((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      toast.success(
+        updated.acessoLiberado
+          ? "Acesso ao sistema liberado."
+          : "Acesso ao sistema revogado.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível alterar o acesso.",
+      );
+    }
+  }
+
+  const selected = professores.find((professor) => professor.id === selectedId);
+  if (selected) return <>
+    <ProfessorDetails professor={selected} onBack={() => setSelectedId(null)} onEdit={() => openEditForm(selected)} onAccess={() => void handleAcesso(selected)} />
+    <ProfessorForm open={isFormOpen} onOpenChange={setIsFormOpen} professor={editedProfessor} onSubmit={handleSubmit} isSubmitting={isSubmitting} />
+  </>;
+
   return (
     <div className="min-w-full flex-1 bg-zinc-50 p-4 font-sans lg:p-6 dark:bg-black">
       <Card>
@@ -262,7 +293,7 @@ export function Professores() {
                             {getInitials(professor.nome)}
                           </AvatarFallback>
                         </Avatar>
-                        <span className="font-medium">{professor.nome}</span>
+                        <button className="font-medium text-left hover:underline" onClick={() => setSelectedId(professor.id)}>{professor.nome}</button>
                       </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground tabular-nums">
@@ -291,6 +322,12 @@ export function Professores() {
                           >
                             <IconPencil />
                             Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => void handleAcesso(professor)}>
+                            {professor.acessoLiberado ? <IconLock /> : <IconLockOpen />}
+                            {professor.acessoLiberado
+                              ? "Revogar acesso ao sistema"
+                              : "Criar acesso ao sistema"}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             disabled={relendo === professor.id}

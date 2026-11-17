@@ -27,6 +27,8 @@ export const SCHEMA = `
     nome TEXT NOT NULL,
     login TEXT NOT NULL UNIQUE,
     senha_encrypted BLOB NOT NULL,
+    acesso_liberado INTEGER NOT NULL DEFAULT 0,
+    pronouns TEXT,
     escola TEXT NOT NULL,
     imagem TEXT,
     created_at TEXT NOT NULL
@@ -78,6 +80,8 @@ export const SCHEMA = `
     -- pendente | sincronizando | sincronizada | falhou
     sync_status TEXT NOT NULL DEFAULT 'pendente',
     sync_error TEXT,
+    valor_recebido REAL,
+    valor_a_receber REAL,
     UNIQUE (professor_id, turma)
   );
 
@@ -179,12 +183,16 @@ export const SCHEMA = `
  * aplicada aqui — nulável, para as linhas antigas continuarem válidas.
  */
 const COLUNAS_NOVAS: readonly { tabela: string; coluna: string; tipo: string }[] = [
+  { tabela: 'professores', coluna: 'acesso_liberado', tipo: 'INTEGER NOT NULL DEFAULT 0' },
+  { tabela: 'professores', coluna: 'pronouns', tipo: 'TEXT' },
   { tabela: 'caderneta_aulas', coluna: 'codigo_cr', tipo: 'TEXT' },
   { tabela: 'caderneta_aulas', coluna: 'desenvolvimento', tipo: 'TEXT' },
   { tabela: 'caderneta_aulas', coluna: 'ferramentas', tipo: 'TEXT' },
   { tabela: 'caderneta_estudantes', coluna: 'data_matricula', tipo: 'TEXT' },
   { tabela: 'turma_estudantes', coluna: 'data_matricula', tipo: 'TEXT' },
   { tabela: 'turmas', coluna: 'periodo_letivo', tipo: 'TEXT' },
+  { tabela: 'cadernetas', coluna: 'valor_recebido', tipo: 'REAL' },
+  { tabela: 'cadernetas', coluna: 'valor_a_receber', tipo: 'REAL' },
 ];
 
 /**

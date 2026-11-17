@@ -9,6 +9,15 @@ import { lerCelulaDoEstudante } from '../portal';
  * `.scratch/estudantes-da-turma/tela-do-portal.md`.
  */
 describe('lerCelulaDoEstudante', () => {
+  it('remove o botão Cadastrar grudado ao nome', () => {
+    expect(lerCelulaDoEstudante(
+      'ADYLLA GABRIELLA SILVA SANTOSCadastrar Nome social: Situação: ATIVO Data da matrícula: 10/12/2025',
+    ).nome).toBe('ADYLLA GABRIELLA SILVA SANTOS');
+  });
+  it('remove qualquer texto após o nome em caixa alta', () => {
+    expect(lerCelulaDoEstudante('MARIA DA SILVAOutra ação Nome social: Situação: ATIVO').nome).toBe('MARIA DA SILVA');
+    expect(lerCelulaDoEstudante('JOÃO DA SILVA Outra ação Nome social: Situação: ATIVO').nome).toBe('JOÃO DA SILVA');
+  });
   it('lê nome, situação e data da matrícula de um estudante ativo', () => {
     const celula =
       'ADYLLA LUIZA FERREIRA Avaliar Nome social: Situação: ATIVO ' +

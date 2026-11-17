@@ -1,4 +1,5 @@
 import { ApiError, requestApi } from "@/lib/api";
+import type { Pronouns } from "@shared/pronouns";
 import { esquecerToken, guardarToken } from "@/lib/sessao-do-auxiliar";
 import {
   contaSchema,
@@ -16,6 +17,7 @@ export type { ContaField, ContaInput, EntrarInput, NovaSenhaInput };
 
 /** A conta do auxiliar de ensino como a API a devolve: nunca com a senha. */
 export interface Conta {
+  pronouns?: Pronouns;
   id: string;
   login: string;
   nome: string;
@@ -24,6 +26,11 @@ export interface Conta {
   imagem: string | null;
   /** Verdadeiro enquanto a senha em uso ainda é a temporária do ambiente. */
   precisaTrocarSenha: boolean;
+  /** Define os limites da sessão atual; prepara o acesso freemium sem o implementar. */
+  papel: "auxiliar de ensino" | "professor";
+  /** Só existe quando quem entrou é o professor dono das cadernetas. */
+  professorId?: string;
+  escola?: string;
 }
 
 const json = { "Content-Type": "application/json" };

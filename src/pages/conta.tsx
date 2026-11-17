@@ -1,4 +1,6 @@
 import * as React from "react";
+import type { Pronouns } from "@shared/pronouns";
+import { requestApi } from "@/lib/api";
 import {
   IconLoader,
   IconLock,
@@ -286,10 +288,58 @@ function Senha() {
 
 /** A conta de quem usa a Esmeraldinha: o perfil e a senha. */
 export function ContaPage() {
+  const { conta } = useConta();
   return (
     <div className="flex min-w-full flex-1 flex-col gap-4 bg-zinc-50 p-4 font-sans lg:p-6 dark:bg-black">
-      <Perfil />
-      <Senha />
+      {conta?.papel === "professor" ? <PronounsPreference /> : <><Perfil /><Senha /></>}
     </div>
   );
+}
+
+function PronounsPreference() {
+  const { conta, guardarConta } = useConta();
+  const [pronouns, setPronouns] = React.useState<Pronouns>(conta?.pronouns ?? null);
+  const [saving, setSaving] = React.useState(false);
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (!conta) return;
+    setSaving(true);
+    try {
+      const response = await requestApi('/api/conta/pronouns', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pronouns }),
+      });
+      const saved = await response.json() as { pronouns: Pronouns };
+      guardarConta({ ...conta, pronouns: saved.pronouns });
+      toast.success('Preferência salva.');
+    } catch (error) {
+      toast.error(mensagem(error, 'Não foi possível salvar.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <Card>
+    <CardHeader>
+      <CardTitle>Como devemos tratar você?</CardTitle>
+      <CardDescription>Escolha seus pronomes para personalizar as mensagens de boas-vindas.</CardDescription>
+    </CardHeader>
+    <CardContent>
+      <form onSubmit={save} className="flex max-w-sm flex-col gap-4">
+        <Label htmlFor="pronouns">Pronomes (opcional)</Label>
+        <select id="pronouns" value={pronouns ?? ''} disabled={saving}
+          onChange={(event) => setPronouns((event.target.value || null) as Pronouns)}
+          aria-describedby="pronouns-help"
+          className="h-10 rounded-md border bg-background px-3 text-foreground">
+          <option value="">Não informar</option>
+          <option value="ele/dele">Ele/dele — bem-vindo</option>
+          <option value="ela/dela">Ela/dela — bem-vinda</option>
+        </select>
+        <p id="pronouns-help" className="text-sm text-muted-foreground">Sem preferência informada, usaremos o masculino.</p>
+        <Button type="submit" disabled={saving}>{saving ? 'Salvando…' : 'Salvar preferência'}</Button>
+      </form>
+    </CardContent>
+  </Card>;
 }

@@ -88,13 +88,17 @@ export function NavUser() {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem onSelect={() => void navigate("/conta")}>
-                <IconUserCircle />
-                Conta
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
+            {(
+              <>
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onSelect={() => void navigate("/conta")}>
+                    <IconUserCircle />
+                    Conta
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuItem onSelect={() => void handleSair()}>
               <IconLogout />
               Sair

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { utils, write } from 'xlsx';
+import { utils, write } from '@e965/xlsx';
 
 import type { createApp as CreateApp } from '../app';
 import { autenticar } from './sessao-de-teste';

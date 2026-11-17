@@ -19,6 +19,7 @@ import { hasSeenWelcome } from "@/lib/welcome";
 
 /** O app depois da entrada: sidebar, cabeçalho e as rotas. */
 function Esmeraldinha() {
+  const { conta } = useConta();
   // Na primeira execução o guia se abre sozinho; depois disso ele só aparece
   // se for pedido no cabeçalho.
   const [guiaAberto, setGuiaAberto] = React.useState(() => !hasSeenWelcome());
@@ -26,21 +27,29 @@ function Esmeraldinha() {
   // A migração dos professores que ficaram no `localStorage` fala com a API,
   // então só tem como acontecer depois da entrada.
   React.useEffect(() => {
-    void migrateProfessoresFromLocalStorage();
-  }, []);
+    if (conta?.papel === "auxiliar de ensino") void migrateProfessoresFromLocalStorage();
+  }, [conta?.papel]);
 
   return (
     <SidebarProvider>
       <AppSidebar />
-      <main className="flex min-h-full flex-1 flex-col">
+      <main className="flex h-svh min-w-0 flex-1 flex-col overflow-hidden">
         <SiteHeader onAbrirGuia={() => setGuiaAberto(true)} />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
         <Routes>
           <Route path="/" element={<Navigate to="/painel" replace />} />
           <Route path="/painel" element={<Painel />} />
-          <Route path="/professores" element={<Professores />} />
+          <Route
+            path="/professores"
+            element={conta?.papel === "auxiliar de ensino" ? <Professores /> : <Navigate to="/cadernetas" replace />}
+          />
           <Route path="/cadernetas" element={<Cadernetas />} />
-          <Route path="/conta" element={<ContaPage />} />
+          <Route
+            path="/conta"
+            element={<ContaPage />}
+          />
         </Routes>
+        </div>
       </main>
       {guiaAberto && <WelcomeTour onClose={() => setGuiaAberto(false)} />}
     </SidebarProvider>

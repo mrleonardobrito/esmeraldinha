@@ -147,3 +147,14 @@ describe('replaceEstudantes', () => {
     expect(() => replaceEstudantes(db, 'turma-fantasma', [])).toThrow(TurmaNotFoundError);
   });
 });
+
+describe('editing records', () => {
+  it('updates a turma and its estudante', async () => {
+    const { updateTurma, updateEstudante } = await import('../store');
+    const [turma] = replaceTurmas(db, professorId, [{ nome: 'Turma A' }]);
+    replaceEstudantes(db, turma.id, [{ matricula: '1', nome: 'Ana', situacao: null, dataMatricula: null }]);
+    expect(updateTurma(db, turma.id, { nome: 'Turma B', turno: 'MATUTINO', periodoLetivo: '2026' }).nome).toBe('Turma B');
+    updateEstudante(db, turma.id, '1', { matricula: '2', nome: 'Bia', situacao: 'Ativa', dataMatricula: '01/02/2026' });
+    expect(listEstudantes(db, turma.id)).toEqual([{ matricula: '2', nome: 'Bia', situacao: 'Ativa', dataMatricula: '01/02/2026' }]);
+  });
+});

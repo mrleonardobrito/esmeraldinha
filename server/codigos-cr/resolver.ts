@@ -32,8 +32,18 @@ function acrescentaAlgo(trecho: string, oficial: string): boolean {
 
   if (palavras.length === 0) return false;
 
-  const novas = palavras.filter((palavra) => !doOficial.has(palavra));
-  return novas.length > palavras.length / 2;
+  const novas = palavras.filter(
+    (palavra) =>
+      ![...doOficial].some(
+        (oficial) =>
+          oficial === palavra ||
+          (Math.min(oficial.length, palavra.length) >= 5 &&
+            (oficial.startsWith(palavra) || palavra.startsWith(oficial))),
+      ),
+  );
+  // A short leftover is usually connective prose, not an addition to the
+  // official skill. Preserve a meaningful phrase with at least two words.
+  return novas.length >= 2 && novas.length > palavras.length / 2;
 }
 
 /**
@@ -73,7 +83,11 @@ export function resolverCodigoCR(
   // O que sobra depois de tirar os códigos é o que o professor escreveu por
   // conta própria: às vezes a unidade temática ("Contextos e práticas."), às
   // vezes só a paráfrase da própria habilidade.
-  const resto = original.replace(CODIGO_BNCC, ' ').replace(/\s+/g, ' ').trim();
+  const resto = original
+    .replace(/\(\s*EF\d{2}[A-Z]{2}\d{2}\s*\)/gi, ' ')
+    .replace(CODIGO_BNCC, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   const juntos = oficiais.map((habilidade) => habilidade.texto).join(' ');
 
   if (resto && acrescentaAlgo(resto, juntos)) linhas.push(resto);

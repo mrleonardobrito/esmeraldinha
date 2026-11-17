@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
+import { restringirValores } from './conta/valores';
 import { z } from 'zod';
 
 import { LoginError, MissingAulaRowsError } from './scrape/errors';
 import {
   closeSession,
+  donoDaSessao,
   getCatalogo,
   openSession,
   retomarSessao,
@@ -59,6 +61,7 @@ import { env } from './env';
 import { createEncryptionPort } from './encryption';
 import { getDb } from './professores/db';
 import { getProfessorCredenciais } from './professores/store';
+import type { ContaEnv } from './conta/autenticacao';
 
 const abrirSessaoSchema = z.object({
   professorId: z.string().trim().min(1),
@@ -121,7 +124,78 @@ const preenchimentoDeNotasSchema = z
     { message: 'Informe ao menos uma nota.' },
   );
 
-export const cadernetas = new Hono();
+export const cadernetas = new Hono<ContaEnv>();
+cadernetas.use('*', restringirValores);
+
+function acessoAoProfessor(context: { get: (key: 'identidade') => ContaEnv['Variables']['identidade'] }, professorId: string) {
+  const identidade = context.get('identidade');
+  return identidade.papel === 'auxiliar de ensino' || identidade.professorId === professorId;
+}
+
+/**
+ * A URL das operações sobre uma caderneta carrega o id dela. Professores só
+ * podem alcançar uma que lhes pertence — inclusive se tentarem trocar o id
+ * manualmente na requisição.
+ */
+cadernetas.use('*', async (context, next) => {
+  const identidade = context.get('identidade');
+  if (identidade.papel === 'auxiliar de ensino') return next();
+
+  // Check every externally supplied reference before opening a portal or
+  // handing the request to a handler, including multipart uploads.
+  let body: Record<string, unknown> = {};
+  if (context.req.method === 'POST') {
+    const contentType = context.req.header('Content-Type') ?? '';
+    const parsed: unknown = contentType.includes('multipart/form-data')
+      ? await context.req.parseBody({ all: true }).catch(() => null)
+      : await context.req.json().catch(() => null);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      body = parsed as Record<string, unknown>;
+    }
+  }
+  for (const value of [body.professorId, context.req.query('professorId')]) {
+    if (value !== undefined && value !== identidade.professorId) {
+      return context.json({ error: 'Access denied.' }, 403);
+    }
+  }
+  if (body.cadernetaId) {
+    const owned = getDb().prepare(
+      'SELECT id FROM cadernetas WHERE id = ? AND professor_id = ?',
+    ).get(String(body.cadernetaId), identidade.professorId);
+    if (!owned) return context.json({ error: 'Access denied.' }, 403);
+  }
+  const pathSession = context.req.path.match(/\/sessoes\/([^/]+)/)?.[1];
+  for (const value of [pathSession, body.sessionId, context.req.query('sessionId')]) {
+    if (value !== undefined) {
+      if (typeof value !== 'string' || await donoDaSessao(value) !== identidade.professorId) {
+        return context.json({ error: 'Access denied.' }, 403);
+      }
+    }
+  }
+
+  const base = '/api/cadernetas/';
+  const restante = context.req.path.startsWith(base)
+    ? context.req.path.slice(base.length)
+    : '';
+  const primeiroSegmento = restante.split('/')[0];
+  if (!primeiroSegmento || primeiroSegmento === 'sessoes' || primeiroSegmento === 'turmas') {
+    return next();
+  }
+
+  try {
+    const caderneta = getCaderneta(getDb(), primeiroSegmento);
+    if (!acessoAoProfessor(context, caderneta.professorId)) {
+      return context.json({ error: 'Você só pode acessar as suas cadernetas.' }, 403);
+    }
+  } catch (error) {
+    if (error instanceof CadernetaNotFoundError) {
+      return context.json({ error: error.message }, 404);
+    }
+    throw error;
+  }
+
+  await next();
+});
 
 cadernetas.post('/sessoes', async (context) => {
   const body = await context.req.json().catch(() => null);
@@ -132,6 +206,10 @@ cadernetas.post('/sessoes', async (context) => {
   }
 
   const { professorId } = parsed.data;
+
+  if (!acessoAoProfessor(context, professorId)) {
+    return context.json({ error: 'Você só pode abrir a sua sessão no portal.' }, 403);
+  }
 
   const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), professorId);
 
@@ -760,6 +838,10 @@ cadernetas.get('/', (context) => {
     return context.json({ error: 'Informe o professor cujas cadernetas listar.' }, 400);
   }
 
+  if (!acessoAoProfessor(context, professorId)) {
+    return context.json({ error: 'Você só pode visualizar as suas cadernetas.' }, 403);
+  }
+
   return context.json(listCadernetas(getDb(), professorId));
 });
 
@@ -1168,4 +1250,14 @@ cadernetas.delete('/:id', (context) => {
     console.error('Falha ao excluir a caderneta:', error);
     return context.json({ error: 'Não foi possível excluir a caderneta.' }, 500);
   }
+});
+
+const cadernetaUpdateSchema = z.object({ valorRecebido: z.number().finite().nonnegative().nullable(), valorAReceber: z.number().finite().nonnegative().nullable() });
+cadernetas.put('/:id', async (context) => {
+  if (context.get('identidade').papel !== 'auxiliar de ensino') return context.json({ error: 'Access denied.' }, 403);
+  const parsed = cadernetaUpdateSchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: 'Valores inválidos.' }, 400);
+  const result = getDb().prepare('UPDATE cadernetas SET valor_recebido = ?, valor_a_receber = ? WHERE id = ?').run(parsed.data.valorRecebido, parsed.data.valorAReceber, context.req.param('id'));
+  if (!result.changes) return context.json({ error: 'Caderneta não encontrada.' }, 404);
+  return context.json(getCaderneta(getDb(), context.req.param('id')));
 });

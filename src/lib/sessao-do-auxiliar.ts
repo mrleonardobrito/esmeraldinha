@@ -9,6 +9,8 @@
  * fechar o app já derruba a sessão do outro lado, e um token órfão só rende
  * um 401 e a tela de entrada.
  */
+import { esquecerSessaoDeTrabalho } from "@/lib/sessao-de-trabalho";
+
 const STORAGE_KEY = "esmeraldinha:sessao-do-auxiliar";
 
 /**
@@ -43,6 +45,7 @@ export function lerToken(): string | null {
 }
 
 export function guardarToken(novo: string): void {
+  if (token !== novo) esquecerSessaoDeTrabalho();
   token = novo;
   try {
     storage()?.setItem(STORAGE_KEY, novo);
@@ -54,6 +57,7 @@ export function guardarToken(novo: string): void {
 
 /** Esquece a sessão: ao sair, e sempre que a API responder 401. */
 export function esquecerToken(): void {
+  esquecerSessaoDeTrabalho();
   if (token === null) return;
 
   token = null;

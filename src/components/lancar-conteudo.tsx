@@ -2,6 +2,7 @@ import * as React from "react";
 import {
   IconAlertTriangle,
   IconArrowLeft,
+  IconChevronDown,
   IconLoader,
   IconSparkles,
   IconUpload,
@@ -264,15 +265,17 @@ function ListaDeAulas({
                 <li
                   key={`${aula.data}-${aula.ordem ?? "s"}`}
                   className={cn(
-                    "flex flex-col gap-2 rounded-xl border px-3 py-2.5",
+                    "rounded-xl border px-3 py-2.5",
                     aula.conteudoPreenchido && "border-primary/30 bg-primary/5",
                   )}
                 >
-                  <div className="flex items-center gap-3">
+                  <details className="group">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium tabular-nums [&::-webkit-details-marker]:hidden">
+                      Aula {aula.data}
+                      <IconChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+                    </summary>
+                  <div className="mt-2 flex items-center gap-3">
                     <div className="flex min-w-0 flex-1 flex-col items-start">
-                      <span className="text-sm font-medium tabular-nums">
-                        Aula {aula.data}
-                      </span>
                       {aula.ordem !== null && (
                         <span className="text-xs text-muted-foreground">
                           ordem {aula.ordem}
@@ -302,7 +305,10 @@ function ListaDeAulas({
                     </div>
                   </div>
 
-                  <ConteudoDaAula aula={aula} />
+                  <div className="mt-2">
+                    <ConteudoDaAula aula={aula} />
+                  </div>
+                  </details>
                 </li>
               ))}
             </ul>

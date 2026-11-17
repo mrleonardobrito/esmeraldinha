@@ -11,12 +11,16 @@ import { env } from '../env';
  * app fecha ao sair, e uma sessão que não sobrevive a isso é exatamente o
  * que se quer de um app que guarda as credenciais dos professores.
  */
-interface SessaoDoAuxiliar {
-  readonly contaId: string;
+export type IdentidadeDaSessao =
+  | { readonly papel: 'auxiliar de ensino'; readonly contaId: string }
+  | { readonly papel: 'professor'; readonly professorId: string };
+
+interface SessaoDaEsmeraldinha {
+  readonly identidade: IdentidadeDaSessao;
   expiraEm: number;
 }
 
-const sessoes = new Map<string, SessaoDoAuxiliar>();
+const sessoes = new Map<string, SessaoDaEsmeraldinha>();
 
 /** Sessões vencidas só ocupam memória: cada consulta aproveita para limpá-las. */
 function descartarVencidas(agora: number): void {
@@ -26,12 +30,12 @@ function descartarVencidas(agora: number): void {
 }
 
 /** Abre uma sessão para a conta e devolve o token que a identifica. */
-export function abrirSessao(contaId: string): string {
+export function abrirSessao(identidade: IdentidadeDaSessao): string {
   const agora = Date.now();
   descartarVencidas(agora);
 
   const token = randomBytes(32).toString('base64url');
-  sessoes.set(token, { contaId, expiraEm: agora + env.conta.sessaoIdleMs });
+  sessoes.set(token, { identidade, expiraEm: agora + env.conta.sessaoIdleMs });
 
   return token;
 }
@@ -40,7 +44,7 @@ export function abrirSessao(contaId: string): string {
  * A conta dona do token, renovando a ociosidade — ou `null` se o token não
  * vale mais.
  */
-export function usarSessao(token: string): string | null {
+export function usarSessao(token: string): IdentidadeDaSessao | null {
   const agora = Date.now();
   const sessao = sessoes.get(token);
 
@@ -52,7 +56,7 @@ export function usarSessao(token: string): string | null {
   }
 
   sessao.expiraEm = agora + env.conta.sessaoIdleMs;
-  return sessao.contaId;
+  return sessao.identidade;
 }
 
 /** Encerra a sessão do token. É o que o botão de sair faz. */
@@ -66,6 +70,10 @@ export function encerrarSessao(token: string): void {
  */
 export function encerrarSessoesDaConta(contaId: string, exceto?: string): void {
   for (const [token, sessao] of sessoes) {
-    if (sessao.contaId === contaId && token !== exceto) sessoes.delete(token);
+    if (
+      sessao.identidade.papel === 'auxiliar de ensino' &&
+      sessao.identidade.contaId === contaId &&
+      token !== exceto
+    ) sessoes.delete(token);
   }
 }

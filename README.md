@@ -90,6 +90,15 @@ pnpm dist
 
 Os instaladores saem em `release/`.
 
+### Automatic updates
+
+After the first installation, distributed builds check GitHub Releases for
+updates when they open. A new version is downloaded in the background and
+installed on the next normal exit from Esmeraldinha.
+
+Windows (NSIS) and Linux AppImage builds are auto-updatable. The `.deb` package
+continues to be updated by the Linux package manager.
+
 ### Os binários não são assinados
 
 Sem certificado de assinatura de código, o Windows mostra a tela azul do

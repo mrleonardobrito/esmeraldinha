@@ -26,6 +26,7 @@ import {
   ProfessorPickerSkeleton,
 } from "@/components/professor-picker";
 import { SinalDeConexao } from "@/components/sinal-de-conexao";
+import { useConta } from "@/components/conta-provider";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -65,6 +66,7 @@ type ProfessoresState =
   | { status: "ready"; professores: Professor[] };
 
 export function Cadernetas() {
+  const { conta } = useConta();
   // Voltar para esta tela deve cair onde se estava, não no começo: o que a
   // visita anterior deixou em aberto é o estado inicial desta.
   const retomada = React.useMemo(() => lerSessaoDeTrabalho(), []);
@@ -105,6 +107,20 @@ export function Cadernetas() {
   React.useEffect(() => {
     let cancelled = false;
 
+    if (conta?.papel === "professor" && conta.professorId) {
+      const professor = {
+        id: conta.professorId,
+        nome: conta.nome,
+        login: conta.login,
+        escola: conta.escola ?? "",
+        imagem: conta.imagem,
+        createdAt: "",
+      };
+      setProfessoresState({ status: "ready", professores: [professor] });
+      setSelected(professor);
+      return () => { cancelled = true; };
+    }
+
     loadProfessores()
       .then((professores) => {
         if (cancelled) return;
@@ -124,7 +140,7 @@ export function Cadernetas() {
     return () => {
       cancelled = true;
     };
-  }, [reloadToken]);
+  }, [conta, reloadToken]);
 
   // O que a próxima visita retoma. Fica fora do React porque precisa
   // sobreviver ao desmonte que a troca de página provoca.
@@ -270,6 +286,7 @@ export function Cadernetas() {
   }
 
   function backToPicker() {
+    setReloadToken((current) => current + 1);
     if (session) void closePortalSession(session.sessionId);
     esquecerSessaoDeTrabalho();
     setSelected(null);
@@ -502,6 +519,7 @@ export function Cadernetas() {
                   </div>
                 ) : (
                   <GradeDeCadernetas
+                    onValoresSalvos={conta?.papel === "auxiliar de ensino" ? (updated) => setCadernetas((current) => current.map((item) => item.id === updated.id ? updated : item)) : undefined}
                     cadernetas={cadernetas}
                     onAbrirConteudo={(caderneta, etapa) =>
                       setLancando({ caderneta, etapa })

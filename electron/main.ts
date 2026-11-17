@@ -2,8 +2,11 @@ import { appendFile, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, net, protocol, shell } from 'electron';
+import electronUpdater from 'electron-updater';
 
 import type { Hono } from 'hono';
+
+import { startUpdates } from './updates';
 
 const SCHEME = 'app';
 const APP_URL = `${SCHEME}://esmeraldinha/`;
@@ -20,6 +23,17 @@ const logPath = join(app.getPath('userData'), 'crash.log');
 function logToFile(linha: string): void {
   const stamp = new Date().toISOString();
   void appendFile(logPath, `[${stamp}] ${linha}\n`, 'utf8').catch(() => {});
+}
+
+function startUpdater(): void {
+  // `electron-updater` is CommonJS; the default form works with the CommonJS
+  // bundle generated for the main process.
+  const { autoUpdater } = electronUpdater;
+  startUpdates({
+    packagedApp: app.isPackaged,
+    updater: autoUpdater,
+    onError: (error) => logToFile(`auto-update: ${error instanceof Error ? error.stack ?? error.message : String(error)}`),
+  });
 }
 
 process.on('uncaughtException', (error) => {
@@ -191,6 +205,7 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     registerProtocol();
     createWindow();
+    startUpdater();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
