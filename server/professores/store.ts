@@ -15,6 +15,8 @@ export interface Professor {
   imagem: string | null;
   acessoLiberado: boolean;
   createdAt: string;
+  valorRecebidoTotal?: number;
+  valorAReceberTotal?: number;
 }
 
 /** Raised when `login` already belongs to a cadastrado professor. */
@@ -41,6 +43,8 @@ interface ProfessorRow {
   imagem: string | null;
   acesso_liberado: number;
   created_at: string;
+  valor_recebido_total?: number;
+  valor_a_receber_total?: number;
 }
 
 function toProfessor(row: ProfessorRow): Professor {
@@ -52,6 +56,7 @@ function toProfessor(row: ProfessorRow): Professor {
     imagem: row.imagem,
     acessoLiberado: row.acesso_liberado === 1,
     createdAt: row.created_at,
+    ...(row.valor_recebido_total !== undefined ? { valorRecebidoTotal: row.valor_recebido_total, valorAReceberTotal: row.valor_a_receber_total } : {}),
   };
 }
 
@@ -91,7 +96,10 @@ export async function autenticarProfessor(
 export function listProfessores(db: DatabaseSync): Professor[] {
   const rows = db
     .prepare(
-      'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at FROM professores ORDER BY created_at ASC',
+      `SELECT p.id, p.nome, p.login, p.escola, p.imagem, p.acesso_liberado, p.created_at,
+        COALESCE((SELECT SUM(c.valor_recebido) FROM cadernetas c WHERE c.professor_id = p.id), 0) AS valor_recebido_total,
+        COALESCE((SELECT SUM(c.valor_a_receber) FROM cadernetas c WHERE c.professor_id = p.id), 0) AS valor_a_receber_total
+       FROM professores p ORDER BY p.created_at ASC`,
     )
     .all() as unknown as ProfessorRow[];
 

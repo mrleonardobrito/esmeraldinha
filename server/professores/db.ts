@@ -80,6 +80,8 @@ export const SCHEMA = `
     -- pendente | sincronizando | sincronizada | falhou
     sync_status TEXT NOT NULL DEFAULT 'pendente',
     sync_error TEXT,
+    valor_recebido REAL,
+    valor_a_receber REAL,
     UNIQUE (professor_id, turma)
   );
 
@@ -189,6 +191,8 @@ const COLUNAS_NOVAS: readonly { tabela: string; coluna: string; tipo: string }[]
   { tabela: 'caderneta_estudantes', coluna: 'data_matricula', tipo: 'TEXT' },
   { tabela: 'turma_estudantes', coluna: 'data_matricula', tipo: 'TEXT' },
   { tabela: 'turmas', coluna: 'periodo_letivo', tipo: 'TEXT' },
+  { tabela: 'cadernetas', coluna: 'valor_recebido', tipo: 'REAL' },
+  { tabela: 'cadernetas', coluna: 'valor_a_receber', tipo: 'REAL' },
 ];
 
 /**

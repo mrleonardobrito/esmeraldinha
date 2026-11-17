@@ -8,6 +8,7 @@ import {
   AJAX_TIMEOUT_MS,
 } from './primefaces';
 import { LoginError, MissingAulaRowsError } from './errors';
+import { limparNomeDoEstudante } from './nome-do-estudante';
 import type {
   AvaliacaoDoPortal,
   BoletimDoPortal,
@@ -388,11 +389,7 @@ export function lerCelulaDoEstudante(celula: string): {
 
   const fim = corte.length > 0 ? Math.min(...corte) : celula.length;
 
-  const nomeDoCadastro = celula
-    .slice(0, fim)
-    // O botão Avaliar fica dentro da célula e entra no texto junto.
-    .replace(/Avaliar/g, '')
-    .trim();
+  const nomeDoCadastro = limparNomeDoEstudante(celula.slice(0, fim));
 
   const nomeSocial = NOME_SOCIAL_PATTERN.exec(celula)?.[1]?.trim();
   const situacao = SITUACAO_DA_MATRICULA_PATTERN.exec(celula)?.[1]?.trim();

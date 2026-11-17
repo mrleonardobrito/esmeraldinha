@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { restringirValores } from './conta/valores';
 import { z } from 'zod';
 
 import { LoginError, MissingAulaRowsError } from './scrape/errors';
@@ -124,6 +125,7 @@ const preenchimentoDeNotasSchema = z
   );
 
 export const cadernetas = new Hono<ContaEnv>();
+cadernetas.use('*', restringirValores);
 
 function acessoAoProfessor(context: { get: (key: 'identidade') => ContaEnv['Variables']['identidade'] }, professorId: string) {
   const identidade = context.get('identidade');
@@ -1248,4 +1250,14 @@ cadernetas.delete('/:id', (context) => {
     console.error('Falha ao excluir a caderneta:', error);
     return context.json({ error: 'Não foi possível excluir a caderneta.' }, 500);
   }
+});
+
+const cadernetaUpdateSchema = z.object({ valorRecebido: z.number().finite().nonnegative().nullable(), valorAReceber: z.number().finite().nonnegative().nullable() });
+cadernetas.put('/:id', async (context) => {
+  if (context.get('identidade').papel !== 'auxiliar de ensino') return context.json({ error: 'Access denied.' }, 403);
+  const parsed = cadernetaUpdateSchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: 'Valores inválidos.' }, 400);
+  const result = getDb().prepare('UPDATE cadernetas SET valor_recebido = ?, valor_a_receber = ? WHERE id = ?').run(parsed.data.valorRecebido, parsed.data.valorAReceber, context.req.param('id'));
+  if (!result.changes) return context.json({ error: 'Caderneta não encontrada.' }, 404);
+  return context.json(getCaderneta(getDb(), context.req.param('id')));
 });

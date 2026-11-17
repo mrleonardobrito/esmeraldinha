@@ -1,5 +1,5 @@
 import WordExtractor from 'word-extractor';
-import { read, utils } from 'xlsx';
+import { read, utils } from '@e965/xlsx';
 
 import { ArquivoIlegivelError } from './errors';
 import type { ArquivoEnviado } from './interpretar-envio';

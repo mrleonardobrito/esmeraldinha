@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { utils, write } from 'xlsx';
+import { utils, write } from '@e965/xlsx';
 
 import { ArquivoIlegivelError } from '../errors';
 import { ehArquivoDePlanilha, ehArquivoWord, extrairTexto } from '../extrair-texto';

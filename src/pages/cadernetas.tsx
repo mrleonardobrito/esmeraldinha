@@ -286,6 +286,7 @@ export function Cadernetas() {
   }
 
   function backToPicker() {
+    setReloadToken((current) => current + 1);
     if (session) void closePortalSession(session.sessionId);
     esquecerSessaoDeTrabalho();
     setSelected(null);
@@ -518,6 +519,7 @@ export function Cadernetas() {
                   </div>
                 ) : (
                   <GradeDeCadernetas
+                    onValoresSalvos={conta?.papel === "auxiliar de ensino" ? (updated) => setCadernetas((current) => current.map((item) => item.id === updated.id ? updated : item)) : undefined}
                     cadernetas={cadernetas}
                     onAbrirConteudo={(caderneta, etapa) =>
                       setLancando({ caderneta, etapa })

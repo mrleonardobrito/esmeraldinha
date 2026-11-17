@@ -44,6 +44,8 @@ export type Professor = Omit<ProfessorInput, "senha" | "imagem"> & {
   acessoLiberado?: boolean;
   id: string;
   createdAt: string;
+  valorRecebidoTotal?: number;
+  valorAReceberTotal?: number;
 };
 
 /** Lista os professores cadastrados. */

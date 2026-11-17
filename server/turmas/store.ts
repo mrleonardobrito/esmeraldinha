@@ -203,7 +203,7 @@ export function listEstudantes(db: DatabaseSync, turmaId: string): EstudanteDaTu
 
   return rows.map((row) => ({
     matricula: row.matricula,
-    nome: row.nome,
+    nome: limparNomeDoEstudante(row.nome),
     situacao: row.situacao,
     dataMatricula: row.data_matricula,
   }));
@@ -249,5 +249,19 @@ export function replaceEstudantes(
     throw error;
   }
 
+  return listEstudantes(db, turmaId);
+}
+import { limparNomeDoEstudante } from '../scrape/nome-do-estudante';
+
+export function updateTurma(db: DatabaseSync, id: string, input: { nome: string; turno: string | null; periodoLetivo: string | null }): Turma {
+  getTurma(db, id);
+  db.prepare('UPDATE turmas SET nome = ?, turno = ?, periodo_letivo = ? WHERE id = ?').run(input.nome, input.turno, input.periodoLetivo, id);
+  return getTurma(db, id);
+}
+
+export function updateEstudante(db: DatabaseSync, turmaId: string, matricula: string, input: EstudanteDaTurma): EstudanteDaTurma[] {
+  getTurma(db, turmaId);
+  const result = db.prepare('UPDATE turma_estudantes SET matricula = ?, nome = ?, situacao = ?, data_matricula = ? WHERE turma_id = ? AND matricula = ?').run(input.matricula, input.nome, input.situacao, input.dataMatricula, turmaId, matricula);
+  if (!result.changes) throw new Error('Estudante não encontrado.');
   return listEstudantes(db, turmaId);
 }

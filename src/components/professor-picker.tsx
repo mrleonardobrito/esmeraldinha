@@ -1,3 +1,4 @@
+import { useConta } from "@/components/conta-provider";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,8 @@ export function ProfessorPicker({
   selectedId?: string;
   onSelect: (professor: Professor) => void;
 }) {
+  const { conta } = useConta();
+  const showValores = conta?.papel === "auxiliar de ensino";
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {professores.map((professor) => {
@@ -38,7 +41,14 @@ export function ProfessorPicker({
               </AvatarFallback>
             </Avatar>
 
-            <span className="text-sm font-medium">{professor.nome}</span>
+            <div className="space-y-1">
+              <span className="text-sm font-medium">{professor.nome}</span>
+              {showValores && <p className="text-xs text-muted-foreground tabular-nums" aria-label="Total recebido / Total a receber">
+                {(professor.valorRecebidoTotal ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                {" / "}
+                {(professor.valorAReceberTotal ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+              </p>}
+            </div>
 
             <div className="flex w-full flex-col gap-0.5 text-xs text-muted-foreground">
               <span className="tabular-nums">

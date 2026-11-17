@@ -33,8 +33,9 @@ function Esmeraldinha() {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <main className="flex min-h-full flex-1 flex-col">
+      <main className="flex h-svh min-w-0 flex-1 flex-col overflow-hidden">
         <SiteHeader onAbrirGuia={() => setGuiaAberto(true)} />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
         <Routes>
           <Route path="/" element={<Navigate to="/painel" replace />} />
           <Route path="/painel" element={<Painel />} />
@@ -48,6 +49,7 @@ function Esmeraldinha() {
             element={<ContaPage />}
           />
         </Routes>
+        </div>
       </main>
       {guiaAberto && <WelcomeTour onClose={() => setGuiaAberto(false)} />}
     </SidebarProvider>

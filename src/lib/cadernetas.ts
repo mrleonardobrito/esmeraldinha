@@ -49,6 +49,8 @@ export interface Caderneta {
   syncedAt: string | null;
   syncStatus: SyncStatus;
   syncError: string | null;
+  valorRecebido?: number | null;
+  valorAReceber?: number | null;
 }
 
 export interface AulaDaCaderneta {
