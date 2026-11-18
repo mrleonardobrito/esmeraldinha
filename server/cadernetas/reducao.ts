@@ -1,4 +1,6 @@
-import type { DatabaseSync } from 'node:sqlite';
+import { callData } from '../database/remote';
+import { transaction, type Database } from '../database/types';
+import { env } from '../env';
 
 import { isReducao } from '../../shared/turma';
 import { listCadernetas, type Caderneta, type SyncStatus } from './store';
@@ -60,14 +62,19 @@ function mergedSync(cadernetas: readonly Caderneta[]): {
  * Existing groups remain intact; their remaining slots are filled before new
  * groups are formed. A running synchronization defers the entire reconciliation.
  */
-export function reconcileCadernetasDeReducao(
-  db: DatabaseSync,
+export async function reconcileCadernetasDeReducao(
+  db: Database,
   professorId: string,
-): Caderneta[] {
-  const current = listCadernetas(db, professorId);
-  const rows = db.prepare(
+): Promise<Caderneta[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof reconcileCadernetasDeReducao>>>(
+      'cadernetas.reconcileCadernetasDeReducao',
+      [professorId],
+    );
+  const current = await listCadernetas(db, professorId);
+  const rows = (await db.prepare(
     'SELECT nome, grupo_diario FROM turmas WHERE professor_id = ?',
-  ).all(professorId) as unknown as { nome: string; grupo_diario: string | null }[];
+  ).all(professorId)) as unknown as { nome: string; grupo_diario: string | null }[];
   const turmasDeReducao = new Set(rows
     .filter((row) => isReducao(row.grupo_diario))
     .map((row) => row.nome));
@@ -96,8 +103,7 @@ export function reconcileCadernetasDeReducao(
   const merges = groups.filter((group) => group.cadernetas.length > 1);
   if (merges.length === 0) return current;
 
-  db.exec('BEGIN');
-  try {
+  await transaction(db, async () => {
     const insertMembership = db.prepare(
       'INSERT INTO caderneta_turmas (caderneta_id, professor_id, turma, posicao) VALUES (?, ?, ?, ?)',
     );
@@ -109,19 +115,19 @@ export function reconcileCadernetasDeReducao(
       const survivor = group.cadernetas[0];
       for (const source of group.cadernetas.slice(1)) {
         for (const table of CACHE_TABLES) {
-          db.prepare(`UPDATE ${table} SET caderneta_id = ? WHERE caderneta_id = ?`)
+          await db.prepare(`UPDATE ${table} SET caderneta_id = ? WHERE caderneta_id = ?`)
             .run(survivor.id, source.id);
         }
-        db.prepare('DELETE FROM caderneta_turmas WHERE caderneta_id = ?').run(source.id);
-        db.prepare('DELETE FROM cadernetas WHERE id = ?').run(source.id);
+        await db.prepare('DELETE FROM caderneta_turmas WHERE caderneta_id = ?').run(source.id);
+        await db.prepare('DELETE FROM cadernetas WHERE id = ?').run(source.id);
       }
       // Rebuild positions only after every source membership has been released.
-      db.prepare('DELETE FROM caderneta_turmas WHERE caderneta_id = ?').run(survivor.id);
-      group.turmas.forEach((turma, position) => {
-        insertMembership.run(survivor.id, professorId, turma, position);
-      });
+      await db.prepare('DELETE FROM caderneta_turmas WHERE caderneta_id = ?').run(survivor.id);
+      for (const [position, turma] of group.turmas.entries()) {
+        await insertMembership.run(survivor.id, professorId, turma, position);
+      }
       const sync = mergedSync(group.cadernetas);
-      updateMetadata.run(
+      await updateMetadata.run(
         group.cadernetas.map((caderneta) => caderneta.createdAt).sort()[0],
         sync.syncedAt,
         sync.status,
@@ -131,11 +137,7 @@ export function reconcileCadernetasDeReducao(
         survivor.id,
       );
     }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
+  });
 
-  return listCadernetas(db, professorId);
+  return await listCadernetas(db, professorId);
 }

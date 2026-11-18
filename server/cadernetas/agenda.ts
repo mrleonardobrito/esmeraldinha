@@ -1,9 +1,10 @@
-import { createEncryptionPort } from '../encryption';
+import { lerCredenciaisDoProfessor } from '../professores/credenciais';
 import { env } from '../env';
 import { getDb } from '../professores/db';
-import { getProfessorCredenciais } from '../professores/store';
 import { closeSession, getCatalogo, openSession } from '../portal-sessions';
 import { sincronizarCaderneta } from './sincronizacao';
+import { listTodas } from './store';
+import { naSessaoAtivaDoAuxiliar, tokenDaSessaoAtual } from '../conta/sessoes';
 
 interface CadernetaAgendada {
   id: string;
@@ -18,7 +19,11 @@ let timer: NodeJS.Timeout | undefined;
 let rodando = false;
 
 /** A próxima madrugada de `env.sync.weekday` às `env.sync.hour`, em local time. */
-export function proximaExecucao(agora: Date, weekday: number, hour: number): Date {
+export function proximaExecucao(
+  agora: Date,
+  weekday: number,
+  hour: number,
+): Date {
   const alvo = new Date(agora);
   alvo.setHours(hour, 0, 0, 0);
 
@@ -41,9 +46,15 @@ export async function sincronizarTodasAsCadernetas(): Promise<{
   sincronizadas: number;
   falhas: number;
 }> {
-  const cadernetas = getDb()
-    .prepare('SELECT id, professor_id, turma FROM cadernetas ORDER BY professor_id, turma')
-    .all() as unknown as CadernetaAgendada[];
+  if (env.dataApiUrl && !tokenDaSessaoAtual()) {
+    return (
+      (await naSessaoAtivaDoAuxiliar(sincronizarTodasAsCadernetas)) ?? {
+        sincronizadas: 0,
+        falhas: 0,
+      }
+    );
+  }
+  const cadernetas = await listTodas(getDb());
 
   const porProfessor = new Map<string, CadernetaAgendada[]>();
   for (const caderneta of cadernetas) {
@@ -59,11 +70,7 @@ export async function sincronizarTodasAsCadernetas(): Promise<{
     let sessionId: string | undefined;
 
     try {
-      const credenciais = await getProfessorCredenciais(
-        getDb(),
-        createEncryptionPort(),
-        professorId,
-      );
+      const credenciais = await lerCredenciaisDoProfessor(professorId);
 
       if (!credenciais) {
         falhas += doProfessor.length;
@@ -74,7 +81,8 @@ export async function sincronizarTodasAsCadernetas(): Promise<{
       sessionId = session.id;
 
       const catalogo = await getCatalogo(session.id);
-      if (!catalogo) throw new Error('A sessão do portal expirou antes da raspagem.');
+      if (!catalogo)
+        throw new Error('A sessão do portal expirou antes da raspagem.');
 
       for (const caderneta of doProfessor) {
         const ok = await sincronizarCaderneta({
@@ -90,7 +98,10 @@ export async function sincronizarTodasAsCadernetas(): Promise<{
     } catch (error) {
       // Um professor cujo login falhou não pode impedir os outros. A causa
       // mais provável aqui é o keychain trancado — ver docs/agents/domain.md.
-      console.error(`Sincronização semanal falhou para o professor ${professorId}:`, error);
+      console.error(
+        `Sincronização semanal falhou para o professor ${professorId}:`,
+        error,
+      );
       falhas += doProfessor.length;
     } finally {
       if (sessionId) await closeSession(sessionId).catch(() => {});
@@ -113,9 +124,11 @@ export function iniciarAgendaSemanal(): void {
   if (timer || !env.sync.enabled) return;
 
   let proxima = proximaExecucao(new Date(), env.sync.weekday, env.sync.hour);
-  console.log(`Sincronização semanal agendada para ${proxima.toLocaleString('pt-BR')}.`);
+  console.log(
+    `Sincronização semanal agendada para ${proxima.toLocaleString('pt-BR')}.`,
+  );
 
-  timer = setInterval(() => {
+  timer = setInterval(async () => {
     if (rodando || new Date() < proxima) return;
 
     rodando = true;
@@ -126,7 +139,9 @@ export function iniciarAgendaSemanal(): void {
       .finally(() => {
         rodando = false;
         proxima = proximaExecucao(new Date(), env.sync.weekday, env.sync.hour);
-        console.log(`Próxima sincronização: ${proxima.toLocaleString('pt-BR')}.`);
+        console.log(
+          `Próxima sincronização: ${proxima.toLocaleString('pt-BR')}.`,
+        );
       });
   }, TICK_MS);
 

@@ -1,5 +1,6 @@
+import { callData } from '../database/remote';
 import { existsSync, readFileSync } from 'node:fs';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/types';
 
 import { parseCodigosCR } from './csv';
 import { listCodigosCR, replaceCodigosCR, type CodigoCR } from './store';
@@ -14,8 +15,15 @@ import { env } from '../env';
  * Um catálogo já importado nunca é reimportado daqui — trocar a planilha é
  * trabalho do script, que substitui tudo de propósito.
  */
-export function garantirCatalogoDeCodigosCR(db: DatabaseSync): CodigoCR[] {
-  const existentes = listCodigosCR(db);
+export async function garantirCatalogoDeCodigosCR(
+  db: Database,
+): Promise<CodigoCR[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof garantirCatalogoDeCodigosCR>>>(
+      'codigos-cr.garantirCatalogoDeCodigosCR',
+      [],
+    );
+  const existentes = await listCodigosCR(db);
   if (existentes.length > 0) return existentes;
 
   if (!existsSync(env.codigosCRCsvPath)) {
@@ -27,6 +35,6 @@ export function garantirCatalogoDeCodigosCR(db: DatabaseSync): CodigoCR[] {
   }
 
   const codigos = parseCodigosCR(readFileSync(env.codigosCRCsvPath, 'utf8'));
-  replaceCodigosCR(db, codigos);
+  await replaceCodigosCR(db, codigos);
   return codigos;
 }

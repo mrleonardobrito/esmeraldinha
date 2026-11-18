@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../app';
-import { authDeTeste, autenticar, type AppAutenticado } from './sessao-de-teste';
+import {
+  authDeTeste,
+  autenticar,
+  type AppAutenticado,
+} from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
@@ -43,18 +47,22 @@ async function freshApp({ comCatalogo = true } = {}): Promise<AppAutenticado> {
 
   const { getDb } = await import('../professores/db');
   const { createEncryptionPort } = await import('../encryption');
-  const { createCaderneta, syncCaderneta } = await import('../cadernetas/store');
+  const { createCaderneta, syncCaderneta } = await import(
+    '../cadernetas/store'
+  );
   const { replaceCodigosCR } = await import('../codigos-cr/store');
 
   const db = getDb();
-  db.prepare(
-    `INSERT INTO professores (id, nome, login, senha_encrypted, escola, created_at)
+  await db
+    .prepare(
+      `INSERT INTO professores (id, nome, login, senha_encrypted, escola, created_at)
      VALUES (?, 'Maria', '111', ?, 'Escola', '2026-01-01T00:00:00.000Z')`,
-  ).run(professorId, await createEncryptionPort().encrypt('segredo'));
+    )
+    .run(professorId, await createEncryptionPort().encrypt('segredo'));
 
-  cadernetaId = createCaderneta(db, { professorId, turma }).id;
+  cadernetaId = (await createCaderneta(db, { professorId, turma })).id;
 
-  syncCaderneta(db, cadernetaId, {
+  await syncCaderneta(db, cadernetaId, {
     estudantes: [],
     etapas: [
       {
@@ -87,13 +95,19 @@ async function freshApp({ comCatalogo = true } = {}): Promise<AppAutenticado> {
   });
 
   if (comCatalogo) {
-    replaceCodigosCR(db, [{ codigo: 'EF03LP18', texto: 'Ler e compreender fábulas.' }]);
+    await replaceCodigosCR(db, [
+      { codigo: 'EF03LP18', texto: 'Ler e compreender fábulas.' },
+    ]);
   }
 
   return autenticar(app);
 }
 
-function pedir(app: AppAutenticado, form: FormData, etapa = 'III ETAPA'): Promise<Response> {
+function pedir(
+  app: AppAutenticado,
+  form: FormData,
+  etapa = 'III ETAPA',
+): Promise<Response> {
   return app.fetch(
     new Request(
       `http://localhost/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/conteudos/rascunhos`,
@@ -102,26 +116,44 @@ function pedir(app: AppAutenticado, form: FormData, etapa = 'III ETAPA'): Promis
   );
 }
 
-function conversa(texto: string, extras: Record<string, string> = {}): FormData {
+function conversa(
+  texto: string,
+  extras: Record<string, string> = {},
+): FormData {
   const form = new FormData();
   form.append('mes', 'Setembro');
   form.append('mensagens', JSON.stringify([{ papel: 'auxiliar', texto }]));
-  for (const [chave, valor] of Object.entries(extras)) form.append(chave, valor);
+  for (const [chave, valor] of Object.entries(extras))
+    form.append(chave, valor);
   return form;
 }
 
 const respostaDoAgente = {
   resposta: 'Escrevi as duas aulas.',
   aulas: [
-    { data: '16/09/2026', ordem: 1, codigoCR: 'EF03LP18', desenvolvimento: 'Retomada.', ferramentas: 'Livro' },
-    { data: '23/09/2026', ordem: 1, codigoCR: '', desenvolvimento: 'Produção.', ferramentas: 'Caderno' },
+    {
+      data: '16/09/2026',
+      ordem: 1,
+      codigoCR: 'EF03LP18',
+      desenvolvimento: 'Retomada.',
+      ferramentas: 'Livro',
+    },
+    {
+      data: '23/09/2026',
+      ordem: 1,
+      codigoCR: '',
+      desenvolvimento: 'Produção.',
+      ferramentas: 'Caderno',
+    },
   ],
 };
 
 beforeEach(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'esmeraldinha-rascunhos-'));
   process.env.ESMERALDINHA_DB_PATH = join(tempDir, 'esmeraldinha.db');
-  process.env.ESMERALDINHA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+  process.env.ESMERALDINHA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString(
+    'base64',
+  );
   process.env.CODIGOS_CR_CSV = join(tempDir, 'habilidades.csv');
   writeFileSync(
     process.env.CODIGOS_CR_CSV,
@@ -163,7 +195,13 @@ describe('POST /api/cadernetas/:id/etapas/:etapa/conteudos/rascunhos', () => {
           desenvolvimento: 'Retomada.',
           ferramentas: 'Livro',
         },
-        { data: '23/09/2026', ordem: 1, codigoCR: '', desenvolvimento: 'Produção.', ferramentas: 'Caderno' },
+        {
+          data: '23/09/2026',
+          ordem: 1,
+          codigoCR: '',
+          desenvolvimento: 'Produção.',
+          ferramentas: 'Caderno',
+        },
       ],
     });
 
@@ -177,7 +215,9 @@ describe('POST /api/cadernetas/:id/etapas/:etapa/conteudos/rascunhos', () => {
     await pedir(
       app,
       conversa('Continue.', {
-        referencias: JSON.stringify([{ etapa: 'III ETAPA', data: '26/08/2026', ordem: 1 }]),
+        referencias: JSON.stringify([
+          { etapa: 'III ETAPA', data: '26/08/2026', ordem: 1 },
+        ]),
       }),
     );
 
@@ -195,12 +235,16 @@ describe('POST /api/cadernetas/:id/etapas/:etapa/conteudos/rascunhos', () => {
     const response = await pedir(app, conversa('Fechamos fábulas.'));
 
     expect(response.status).toBe(200);
-    const { aulas } = (await response.json()) as { aulas: { codigoCR: string }[] };
-    expect(aulas[0].codigoCR).toBe('1. (EF03LP18) Ler e compreender fábulas (da planilha).');
+    const { aulas } = (await response.json()) as {
+      aulas: { codigoCR: string }[];
+    };
+    expect(aulas[0].codigoCR).toBe(
+      '1. (EF03LP18) Ler e compreender fábulas (da planilha).',
+    );
 
     const { getDb } = await import('../professores/db');
     const { listCodigosCR } = await import('../codigos-cr/store');
-    expect(listCodigosCR(getDb())).toHaveLength(1);
+    expect(await listCodigosCR(getDb())).toHaveLength(1);
   });
 
   it('devolve 400 sem a conversa', async () => {
@@ -227,10 +271,13 @@ describe('POST /api/cadernetas/:id/etapas/:etapa/conteudos/rascunhos', () => {
     const app = await freshApp();
 
     const response = await app.fetch(
-      new Request('http://localhost/api/cadernetas/nada/etapas/x/conteudos/rascunhos', {
-        method: 'POST',
-        body: conversa('Oi'),
-      }),
+      new Request(
+        'http://localhost/api/cadernetas/nada/etapas/x/conteudos/rascunhos',
+        {
+          method: 'POST',
+          body: conversa('Oi'),
+        },
+      ),
     );
 
     expect(response.status).toBe(404);
@@ -240,7 +287,9 @@ describe('POST /api/cadernetas/:id/etapas/:etapa/conteudos/rascunhos', () => {
     const app = await freshApp();
     const { chatCompletion } = await import('../ai/openrouter');
     const { OpenRouterNotConfiguredError } = await import('../ai/errors');
-    vi.mocked(chatCompletion).mockRejectedValue(new OpenRouterNotConfiguredError());
+    vi.mocked(chatCompletion).mockRejectedValue(
+      new OpenRouterNotConfiguredError(),
+    );
 
     const response = await pedir(app, conversa('Oi'));
 

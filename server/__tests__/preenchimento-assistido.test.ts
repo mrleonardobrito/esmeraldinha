@@ -38,7 +38,14 @@ const sessionId = 'sessao-1';
 const turma = '9º ANO - 9º ANO B - MATUTINO';
 
 const catalogo = {
-  etapas: [{ nome: '1ª Etapa', periodoLetivo: '2026', turmas: [turma], meses: ['MARÇO'] }],
+  etapas: [
+    {
+      nome: '1ª Etapa',
+      periodoLetivo: '2026',
+      turmas: [turma],
+      meses: ['MARÇO'],
+    },
+  ],
 };
 
 const originalDbPath = process.env.ESMERALDINHA_DB_PATH;
@@ -82,7 +89,10 @@ async function freshApp() {
   return { app: await autenticar(app), professorId: id };
 }
 
-async function cadastrarCaderneta(app: Awaited<ReturnType<typeof freshApp>>['app'], id: string) {
+async function cadastrarCaderneta(
+  app: Awaited<ReturnType<typeof freshApp>>['app'],
+  id: string,
+) {
   const response = await app.fetch(
     request('/', json({ sessionId, professorId: id, turma })),
   );
@@ -94,7 +104,9 @@ describe('preenchimento assistido do boletim', () => {
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), 'esmeraldinha-assistido-'));
     process.env.ESMERALDINHA_DB_PATH = join(tempDir, 'esmeraldinha.db');
-    process.env.ESMERALDINHA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+    process.env.ESMERALDINHA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString(
+      'base64',
+    );
 
     vi.resetModules();
     vi.clearAllMocks();
@@ -113,9 +125,8 @@ describe('preenchimento assistido do boletim', () => {
     vi.mocked(retomarSessao).mockResolvedValue(sessao);
     vi.mocked(getCatalogo).mockResolvedValue(catalogo);
 
-    const { listAulas, listBoletim, listDisciplinas, listEstudantes } = await import(
-      '../scrape/portal'
-    );
+    const { listAulas, listBoletim, listDisciplinas, listEstudantes } =
+      await import('../scrape/portal');
     vi.mocked(listDisciplinas).mockResolvedValue(['MATEMÁTICA']);
     vi.mocked(listAulas).mockResolvedValue([]);
     vi.mocked(listEstudantes).mockResolvedValue([
@@ -136,11 +147,12 @@ describe('preenchimento assistido do boletim', () => {
     resetSincronizacoes();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (originalDbPath === undefined) delete process.env.ESMERALDINHA_DB_PATH;
     else process.env.ESMERALDINHA_DB_PATH = originalDbPath;
 
-    if (originalKey === undefined) delete process.env.ESMERALDINHA_ENCRYPTION_KEY;
+    if (originalKey === undefined)
+      delete process.env.ESMERALDINHA_ENCRYPTION_KEY;
     else process.env.ESMERALDINHA_ENCRYPTION_KEY = originalKey;
 
     rmSync(tempDir, { recursive: true, force: true });
@@ -151,8 +163,8 @@ describe('preenchimento assistido do boletim', () => {
     const { getDb } = await import('../professores/db');
     const { createCaderneta, syncCaderneta, listAulasDaEtapa } = await import('../cadernetas/store');
     const db = getDb();
-    const caderneta = createCaderneta(db, { professorId: id, turma });
-    syncCaderneta(db, caderneta.id, {
+    const caderneta = await createCaderneta(db, { professorId: id, turma });
+    await syncCaderneta(db, caderneta.id, {
       etapas: [{
         nome: '1ª Etapa',
         meses: ['MARÇO'],
@@ -163,7 +175,7 @@ describe('preenchimento assistido do boletim', () => {
       }],
       estudantes: [],
     });
-    const before = listAulasDaEtapa(db, caderneta.id, '1ª Etapa');
+    const before = await listAulasDaEtapa(db, caderneta.id, '1ª Etapa');
 
     const response = await app.fetch(request(
       `/sessoes/${sessionId}/envios/aulas/preenchimentos-assistidos`,
@@ -179,7 +191,7 @@ describe('preenchimento assistido do boletim', () => {
     expect(prepararAulaParaPreenchimento).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       data: '05/03/2026', ordem: 5, conteudo: { desenvolvimento: 'Unsaved conteúdo.' },
     }));
-    expect(listAulasDaEtapa(db, caderneta.id, '1ª Etapa')).toEqual(before);
+    expect(await listAulasDaEtapa(db, caderneta.id, '1ª Etapa')).toEqual(before);
   });
 
   it('leva as notas editadas para o boletim na sessão headed', async () => {
@@ -214,11 +226,11 @@ describe('preenchimento assistido do boletim', () => {
     const { getDb } = await import('../professores/db');
     const { createCaderneta, syncCaderneta } = await import('../cadernetas/store');
     const db = getDb();
-    const caderneta = createCaderneta(db, { professorId: id, turma });
+    const caderneta = await createCaderneta(db, { professorId: id, turma });
     const aulas = ['05/03/2026', '12/03/2026', '19/03/2026'].map((data) => ({
       data, mes: 'MARÇO', ordem: 5, codigoCR: 'CR', desenvolvimento: `Conteúdo ${data}`, ferramentas: 'Livro',
     }));
-    syncCaderneta(db, caderneta.id, {
+    await syncCaderneta(db, caderneta.id, {
       etapas: [{ nome: '1ª Etapa', meses: ['MARÇO'], aulas: [
         ...aulas.map((aula) => ({ mes: aula.mes, data: aula.data, ordem: aula.ordem, preenchida: false })),
         { mes: 'MARÇO', data: '19/03/2026', ordem: 6, preenchida: false },
@@ -237,7 +249,7 @@ describe('preenchimento assistido do boletim', () => {
     expect(vi.mocked(prepararAulasParaPreenchimento).mock.calls[0][1]).toHaveLength(3);
     expect(listAulas).not.toHaveBeenCalled();
     const { listAulasDaEtapa } = await import('../cadernetas/store');
-    expect(listAulasDaEtapa(db, caderneta.id, '1ª Etapa').every((aula) => !aula.conteudoPreenchido)).toBe(true);
+    expect((await listAulasDaEtapa(db, caderneta.id, '1ª Etapa')).every((aula) => !aula.conteudoPreenchido)).toBe(true);
   });
 
   it('verifies saved values in a fresh session and reports unsaved aulas by data and ordem', async () => {
@@ -260,7 +272,7 @@ describe('preenchimento assistido do boletim', () => {
     expect(listAulas).toHaveBeenCalledWith(freshPage, expect.objectContaining({ turma, mes: 'MARÇO' }));
     expect(closeSession).toHaveBeenCalledWith('fresh-verification');
     const { listAulasDaEtapa } = await import('../cadernetas/store');
-    expect(listAulasDaEtapa(db, caderneta.id, '1ª Etapa')[0]).toMatchObject({
+    expect((await listAulasDaEtapa(db, caderneta.id, '1ª Etapa'))[0]).toMatchObject({
       conteudoPreenchido: true, desenvolvimento: 'Manually reviewed and saved.',
     });
 
@@ -273,7 +285,7 @@ describe('preenchimento assistido do boletim', () => {
   it('keeps the last verified status when the portal cannot be read', async () => {
     const { app, db, caderneta, aulas } = await batchFixture();
     const { listAulasDaEtapa } = await import('../cadernetas/store');
-    const before = listAulasDaEtapa(db, caderneta.id, '1ª Etapa');
+    const before = await listAulasDaEtapa(db, caderneta.id, '1ª Etapa');
     const { openSession, closeSession } = await import('../portal-sessions');
     vi.mocked(openSession).mockResolvedValue({ id: 'failed-verification', page: {} } as never);
     const { listAulas } = await import('../scrape/portal');
@@ -283,7 +295,7 @@ describe('preenchimento assistido do boletim', () => {
       const response = await app.fetch(request(`/${caderneta.id}/conteudos/verificacoes`,
         json({ etapa: '1ª Etapa', aulas })));
       expect(response.status).toBe(502);
-      expect(listAulasDaEtapa(db, caderneta.id, '1ª Etapa')).toEqual(before);
+      expect(await listAulasDaEtapa(db, caderneta.id, '1ª Etapa')).toEqual(before);
       expect(closeSession).toHaveBeenCalledWith('failed-verification');
     } finally { log.mockRestore(); }
   });
@@ -304,7 +316,9 @@ describe('preenchimento assistido do boletim', () => {
     // O cadastro do professor guardou a turma como uma turma da EJA.
     const { getDb } = await import('../professores/db');
     const { replaceTurmas } = await import('../turmas/store');
-    replaceTurmas(getDb(), id, [{ nome: turma, periodoLetivo: '2026 EJA' }]);
+    await replaceTurmas(getDb(), id, [
+      { nome: turma, periodoLetivo: '2026 EJA' },
+    ]);
 
     const response = await app.fetch(
       request(

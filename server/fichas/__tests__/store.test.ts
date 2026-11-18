@@ -8,7 +8,7 @@ import { apagarPrevia, getEstruturaDaFicha, getPrevia, salvarEstruturaDaFicha, s
 
 let db: DatabaseSync;
 
-beforeEach(() => {
+beforeEach(async () => {
   db = new DatabaseSync(':memory:');
   db.exec(SCHEMA);
   db.prepare(
@@ -23,23 +23,23 @@ const estrutura = {
   areas: [{ indice: 0, titulo: 'O EU, O OUTRO E NÓS (EO)', habilidades: [{ indice: 0, numero: '1°', texto: 'Demonstra cuidado.' }] }],
 };
 
-it('saves and reads back the structure of a turma', () => {
-  const salva = salvarEstruturaDaFicha(db, 'prof-1', turma, estrutura);
+it('saves and reads back the structure of a turma', async () => {
+  const salva = await salvarEstruturaDaFicha(db, 'prof-1', turma, estrutura);
 
   expect(salva).toMatchObject(estrutura);
   expect(Number.isNaN(Date.parse(salva.lidaEm))).toBe(false);
-  expect(getEstruturaDaFicha(db, 'prof-1', turma)).toEqual(salva);
+  expect(await getEstruturaDaFicha(db, 'prof-1', turma)).toEqual(salva);
 });
 
-it('replaces the structure when read again', () => {
-  salvarEstruturaDaFicha(db, 'prof-1', turma, estrutura);
-  salvarEstruturaDaFicha(db, 'prof-1', turma, { ...estrutura, areas: [] });
+it('replaces the structure when read again', async () => {
+  await salvarEstruturaDaFicha(db, 'prof-1', turma, estrutura);
+  await salvarEstruturaDaFicha(db, 'prof-1', turma, { ...estrutura, areas: [] });
 
-  expect(getEstruturaDaFicha(db, 'prof-1', turma)?.areas).toEqual([]);
+  expect((await getEstruturaDaFicha(db, 'prof-1', turma))?.areas).toEqual([]);
 });
 
-it('returns null for a turma never read', () => {
-  expect(getEstruturaDaFicha(db, 'prof-1', 'OUTRA')).toBeNull();
+it('returns null for a turma never read', async () => {
+  expect(await getEstruturaDaFicha(db, 'prof-1', 'OUTRA')).toBeNull();
 });
 
 describe('prévia', () => {
@@ -60,35 +60,35 @@ describe('prévia', () => {
     resposta: 'ok',
   };
 
-  it('saves and reads back the prévia of a turma', () => {
+  it('saves and reads back the prévia of a turma', async () => {
     const id = caderneta();
-    const salva = salvarPrevia(db, id, turma, previa);
+    const salva = await salvarPrevia(db, id, turma, previa);
 
     expect(salva).toMatchObject(previa);
-    expect(getPrevia(db, id, turma)).toEqual(salva);
+    expect(await getPrevia(db, id, turma)).toEqual(salva);
   });
 
-  it('replaces the prévia when saved again', () => {
+  it('replaces the prévia when saved again', async () => {
     const id = caderneta();
-    salvarPrevia(db, id, turma, previa);
-    salvarPrevia(db, id, turma, { ...previa, resposta: 'nova' });
+    await salvarPrevia(db, id, turma, previa);
+    await salvarPrevia(db, id, turma, { ...previa, resposta: 'nova' });
 
-    expect(getPrevia(db, id, turma)?.resposta).toBe('nova');
+    expect((await getPrevia(db, id, turma))?.resposta).toBe('nova');
   });
 
-  it('deletes the prévia', () => {
+  it('deletes the prévia', async () => {
     const id = caderneta();
-    salvarPrevia(db, id, turma, previa);
-    apagarPrevia(db, id, turma);
+    await salvarPrevia(db, id, turma, previa);
+    await apagarPrevia(db, id, turma);
 
-    expect(getPrevia(db, id, turma)).toBeNull();
+    expect(await getPrevia(db, id, turma)).toBeNull();
   });
 
-  it('goes away with its caderneta', () => {
+  it('goes away with its caderneta', async () => {
     const id = caderneta();
-    salvarPrevia(db, id, turma, previa);
-    deleteCaderneta(db, id);
+    await salvarPrevia(db, id, turma, previa);
+    await deleteCaderneta(db, id);
 
-    expect(getPrevia(db, id, turma)).toBeNull();
+    expect(await getPrevia(db, id, turma)).toBeNull();
   });
 });

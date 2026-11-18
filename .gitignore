@@ -19,6 +19,7 @@
 # vite (processo principal do Electron)
 /dist-electron/
 /dist-auth-admin/
+/dist-data-api/
 
 # release (instaladores do electron-builder)
 /release/

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../app';
-import { autenticar, type AppAutenticado } from './sessao-de-teste';
+import { autenticar, authDeTeste, type AppAutenticado } from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
@@ -34,7 +34,7 @@ let tempDir: string;
 /** A synced caderneta with two estudantes; I ETAPA has four avaliações, II ETAPA none. */
 async function freshApp(): Promise<AppAutenticado> {
   const { createApp } = await import('../app');
-  const app = (createApp as typeof CreateApp)();
+  const app = (createApp as typeof CreateApp)({ auth: authDeTeste() });
 
   const { getDb } = await import('../professores/db');
   const { createEncryptionPort } = await import('../encryption');
@@ -46,9 +46,9 @@ async function freshApp(): Promise<AppAutenticado> {
      VALUES (?, 'Maria', '111', ?, 'Escola', '2026-01-01T00:00:00.000Z')`,
   ).run(professorId, await createEncryptionPort().encrypt('segredo'));
 
-  cadernetaId = createCaderneta(db, { professorId, turma }).id;
+  cadernetaId = (await createCaderneta(db, { professorId, turma })).id;
 
-  syncCaderneta(db, cadernetaId, {
+  await syncCaderneta(db, cadernetaId, {
     estudantes: [
       { matricula: '13946', nome: 'ADYLLA GABRIELLA SILVA SANTOS', situacao: 'ATIVO', dataMatricula: null },
       { matricula: '13949', nome: 'ANA JULIA DA SILVA SOARES', situacao: 'ATIVO', dataMatricula: null },
@@ -111,7 +111,7 @@ beforeEach(async () => {
   );
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (originalDbPath === undefined) delete process.env.ESMERALDINHA_DB_PATH;
   else process.env.ESMERALDINHA_DB_PATH = originalDbPath;
   if (originalKey === undefined) delete process.env.ESMERALDINHA_ENCRYPTION_KEY;
@@ -127,7 +127,7 @@ describe('POST /api/cadernetas/:id/etapas/:etapa/boletim/rascunhos', () => {
     const response = await pedir(app, conversa);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    (await expect(response.json())).resolves.toEqual({
       resposta: 'Dei 5 à Ana Julia.',
       notas: [{ matricula: '13949', notaFinal: 5 }],
       falhas: [],
@@ -157,7 +157,7 @@ describe('POST /api/cadernetas/:id/etapas/:etapa/boletim/rascunhos', () => {
     const response = await pedir(app, { ...conversa, mensagens: [] });
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: 'Informe a conversa com o agente.' });
+    (await expect(response.json())).resolves.toEqual({ error: 'Informe a conversa com o agente.' });
   });
 
   it('refuses an etapa with no avaliação', async () => {
@@ -166,7 +166,7 @@ describe('POST /api/cadernetas/:id/etapas/:etapa/boletim/rascunhos', () => {
     const response = await pedir(app, conversa, 'II ETAPA');
 
     expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toEqual({
+    (await expect(response.json())).resolves.toEqual({
       error: 'Esta etapa não tem avaliação cadastrada nesta disciplina.',
     });
   });

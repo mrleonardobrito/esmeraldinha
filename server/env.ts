@@ -14,6 +14,16 @@ function readIntFromZero(value: string | undefined, fallback: number): number {
 }
 
 export const env = {
+  database: {
+    provider: process.env.ESMERALDINHA_DATABASE?.trim() || 'sqlite',
+    url: process.env.DATABASE_URL?.trim() ?? '',
+    caPath: process.env.DATABASE_CA_PATH?.trim() || undefined,
+  },
+  dataApiUrl: process.env.ESMERALDINHA_DATA_API_URL?.trim() ?? '',
+  portalAutomation:
+    process.env.ESMERALDINHA_PORTAL_AUTOMATION === 'desktop'
+      ? 'desktop'
+      : 'server',
   supabase: {
     url: process.env.SUPABASE_URL?.trim() ?? '',
     publishableKey: process.env.SUPABASE_PUBLISHABLE_KEY?.trim() ?? '',
@@ -46,7 +56,8 @@ export const env = {
    * primeira vez que alguém precisa dele. No Electron aponta para os recursos
    * do app; em desenvolvimento, para o arquivo na raiz do repositório.
    */
-  codigosCRCsvPath: process.env.CODIGOS_CR_CSV?.trim() || './habilidades-ef.csv',
+  codigosCRCsvPath:
+    process.env.CODIGOS_CR_CSV?.trim() || './habilidades-ef.csv',
   /** Tamanho máximo de cada arquivo de um envio. */
   maxUploadBytes: readInt(process.env.MAX_UPLOAD_BYTES, 10 * 1024 * 1024),
   /**
@@ -68,7 +79,10 @@ export const env = {
   conta: {
     login: process.env.ESMERALDINHA_LOGIN?.trim() || 'auxiliar',
     /** Uma sessão do auxiliar ociosa por esse tempo pede login de novo. */
-    sessaoIdleMs: readInt(process.env.ESMERALDINHA_SESSAO_IDLE_MS, 8 * 60 * 60_000),
+    sessaoIdleMs: readInt(
+      process.env.ESMERALDINHA_SESSAO_IDLE_MS,
+      8 * 60 * 60_000,
+    ),
   },
   /**
    * Onde os metadados da sessão do portal (id, professor, login, escola)
@@ -96,10 +110,13 @@ export const env = {
    * ENCRYPTION_ADAPTER, o que os testes usam para nunca tocar o keychain
    * do sistema operacional.
    */
-  encryptionAdapter: (process.env.ENCRYPTION_ADAPTER === 'electron' ||
-  (!process.env.ENCRYPTION_ADAPTER && process.versions.electron)
-    ? 'electron'
-    : 'dev') as 'electron' | 'dev',
+  encryptionAdapter: (process.env.ENCRYPTION_ADAPTER === 'server'
+    ? 'server'
+    : process.env.ENCRYPTION_ADAPTER === 'electron' ||
+        (!process.env.ENCRYPTION_ADAPTER && process.versions.electron)
+      ? 'electron'
+      : 'dev') as 'electron' | 'dev' | 'server',
+  serverEncryptionKey: process.env.SERVER_ENCRYPTION_KEY?.trim() ?? '',
   /** Chave de desenvolvimento usada pelo DevEncryptionAdapter. */
   devEncryptionKey: process.env.ESMERALDINHA_ENCRYPTION_KEY?.trim() ?? '',
   /**

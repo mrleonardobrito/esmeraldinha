@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../app';
-import { autenticar } from './sessao-de-teste';
+import { autenticar, authDeTeste } from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
@@ -50,7 +50,7 @@ function json(body: unknown, method = 'POST'): RequestInit {
 
 async function freshApp() {
   const { createApp } = await import('../app');
-  const app = (createApp as typeof CreateApp)();
+  const app = (createApp as typeof CreateApp)({ auth: authDeTeste() });
   const { createEncryptionPort } = await import('../encryption');
   const { getDb } = await import('../professores/db');
   const { createProfessor } = await import('../professores/store');
@@ -59,8 +59,8 @@ async function freshApp() {
   const { id: professorId } = await createProfessor(getDb(), createEncryptionPort(), {
     nome: 'Maria', login: '111', senha: 'segredo', escola: 'Escola',
   });
-  const caderneta = createCaderneta(getDb(), { professorId, turma });
-  syncCaderneta(getDb(), caderneta.id, {
+  const caderneta = await createCaderneta(getDb(), { professorId, turma });
+  await syncCaderneta(getDb(), caderneta.id, {
     etapas: [{ nome: 'I ETAPA', meses: ['MARÇO'], aulas: [] }],
     estudantes: [
       { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', situacao: 'ATIVO', dataMatricula: null },
@@ -85,7 +85,7 @@ describe('ficha de desempenho routes', () => {
     vi.mocked(lerEstruturaDaFicha).mockResolvedValue(estrutura);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (originalDbPath === undefined) delete process.env.ESMERALDINHA_DB_PATH;
     else process.env.ESMERALDINHA_DB_PATH = originalDbPath;
     if (originalKey === undefined) delete process.env.ESMERALDINHA_ENCRYPTION_KEY;
@@ -307,7 +307,7 @@ describe('ficha de desempenho routes', () => {
     await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
     const { getDb } = await import('../professores/db');
     const { salvarEstruturaDaFicha } = await import('../fichas/store');
-    salvarEstruturaDaFicha(getDb(), professorId, turma, { ...estrutura, areas: [estrutura.areas[1]] });
+    await salvarEstruturaDaFicha(getDb(), professorId, turma, { ...estrutura, areas: [estrutura.areas[1]] });
 
     const response = await preencher(app, cadernetaId);
 
@@ -346,7 +346,7 @@ describe('ficha de desempenho routes', () => {
     await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
     const { getDb } = await import('../professores/db');
     const { syncCaderneta } = await import('../cadernetas/store');
-    syncCaderneta(getDb(), cadernetaId, {
+    await syncCaderneta(getDb(), cadernetaId, {
       etapas: [{ nome: 'I ETAPA', meses: ['MARÇO'], aulas: [] }],
       estudantes: [
         { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', situacao: 'TRANSFERIDO', dataMatricula: null },
@@ -377,7 +377,7 @@ describe('ficha de desempenho routes', () => {
     const { getDb } = await import('../professores/db');
     const { salvarEstruturaDaFicha } = await import('../fichas/store');
     const [primeira, segunda] = estrutura.areas;
-    salvarEstruturaDaFicha(getDb(), professorId, turma, {
+    await salvarEstruturaDaFicha(getDb(), professorId, turma, {
       ...estrutura,
       areas: [{ ...primeira, habilidades: [...primeira.habilidades, { indice: 1, numero: '2°', texto: 'Nova.' }] }, segunda],
     });

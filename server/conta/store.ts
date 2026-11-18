@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/types';
 
 import type { ContaInput } from '../../shared/conta';
 import { hashDeSenha, senhaConfere } from './senhas';
@@ -40,55 +40,74 @@ function toConta(row: ContaRow): Conta {
     nome: row.nome,
     email: row.email,
     imagem: row.imagem,
-    precisaTrocarSenha: row.supabase_auth_id ? row.auth_setup_complete !== 1 : row.senha_hash === null,
+    precisaTrocarSenha: row.supabase_auth_id
+      ? Number(row.auth_setup_complete) !== 1
+      : row.senha_hash === null,
   };
 }
 
-function readRow(db: DatabaseSync): ContaRow | undefined {
-  return db
-    .prepare(
-      'SELECT * FROM conta LIMIT 1',
-    )
-    .get() as unknown as ContaRow | undefined;
+async function readRow(db: Database): Promise<ContaRow | undefined> {
+  return (await db.prepare('SELECT * FROM conta LIMIT 1').get()) as unknown as
+    | ContaRow
+    | undefined;
 }
 
 /** A conta cadastrada, ou `null` enquanto ninguém entrou pela primeira vez. */
-export function lerConta(db: DatabaseSync): Conta | null {
-  const row = readRow(db);
+export async function lerConta(db: Database): Promise<Conta | null> {
+  const row = await readRow(db);
   return row ? toConta(row) : null;
 }
 
-export function lerVinculoDaConta(db: DatabaseSync): { id: string; email: string } | null {
-  const row = readRow(db);
+export async function lerVinculoDaConta(
+  db: Database,
+): Promise<{ id: string; email: string } | null> {
+  const row = await readRow(db);
   return row?.supabase_auth_id && row.supabase_auth_email
     ? { id: row.supabase_auth_id, email: row.supabase_auth_email }
     : null;
 }
 
-export function contaPrecisaVinculo(db: DatabaseSync): boolean {
-  const row = readRow(db);
+export async function contaPrecisaVinculo(db: Database): Promise<boolean> {
+  const row = await readRow(db);
   return Boolean(row?.senha_hash && !row.supabase_auth_id);
 }
 
 /** Called only after both the configured remote identity and local proof are verified. */
-export function vincularConta(db: DatabaseSync, id: string, authId: string, email: string): Conta {
-  db.prepare(`UPDATE conta SET supabase_auth_id = ?, supabase_auth_email = ?, senha_hash = NULL WHERE id = ? AND supabase_auth_id IS NULL`)
+export async function vincularConta(
+  db: Database,
+  id: string,
+  authId: string,
+  email: string,
+): Promise<Conta> {
+  await db
+    .prepare(
+      `UPDATE conta SET supabase_auth_id = ?, supabase_auth_email = ?, senha_hash = NULL WHERE id = ? AND supabase_auth_id IS NULL`,
+    )
     .run(authId, email, id);
-  return lerConta(db)!;
+  return (await lerConta(db))!;
 }
 
-export function concluirPrimeiroAcesso(db: DatabaseSync, id: string): void {
-  db.prepare('UPDATE conta SET auth_setup_complete = 1, senha_hash = NULL WHERE id = ?').run(id);
+export async function concluirPrimeiroAcesso(
+  db: Database,
+  id: string,
+): Promise<void> {
+  await db
+    .prepare(
+      'UPDATE conta SET auth_setup_complete = TRUE, senha_hash = NULL WHERE id = ?',
+    )
+    .run(id);
 }
 
 /** Creates the local conta do auxiliar de ensino without a provider binding. */
-export function criarConta(db: DatabaseSync, login: string): Conta {
+export async function criarConta(db: Database, login: string): Promise<Conta> {
   const id = randomUUID();
 
-  db.prepare(
-    `INSERT INTO conta (id, login, senha_hash, nome, email, imagem, created_at)
+  await db
+    .prepare(
+      `INSERT INTO conta (id, login, senha_hash, nome, email, imagem, created_at)
      VALUES (?, ?, NULL, ?, '', NULL, ?)`,
-  ).run(id, login, NOME_INICIAL, new Date().toISOString());
+    )
+    .run(id, login, NOME_INICIAL, new Date().toISOString());
 
   return {
     id,
@@ -102,41 +121,37 @@ export function criarConta(db: DatabaseSync, login: string): Conta {
 
 /** Legacy-only writer retained for migration fixtures; normal senhas live in Auth. */
 export async function definirSenha(
-  db: DatabaseSync,
+  db: Database,
   id: string,
   senha: string,
 ): Promise<void> {
-  db.prepare('UPDATE conta SET senha_hash = ? WHERE id = ?').run(
-    await hashDeSenha(senha),
-    id,
-  );
+  await db
+    .prepare('UPDATE conta SET senha_hash = ? WHERE id = ?')
+    .run(await hashDeSenha(senha), id);
 }
 
 /** Verifies the legacy local proof needed once when binding an installation. */
 export async function conferirSenhaDefinitiva(
-  db: DatabaseSync,
+  db: Database,
   senha: string,
 ): Promise<boolean> {
-  const row = readRow(db);
+  const row = await readRow(db);
   if (!row?.senha_hash) return false;
 
   return senhaConfere(senha, row.senha_hash);
 }
 
 /** Atualiza o perfil: nome, e-mail e foto. O login não se edita. */
-export function atualizarConta(
-  db: DatabaseSync,
+export async function atualizarConta(
+  db: Database,
   id: string,
   input: ContaInput,
-): Conta {
-  db.prepare('UPDATE conta SET nome = ?, email = ?, imagem = ? WHERE id = ?').run(
-    input.nome,
-    input.email,
-    input.imagem ?? null,
-    id,
-  );
+): Promise<Conta> {
+  await db
+    .prepare('UPDATE conta SET nome = ?, email = ?, imagem = ? WHERE id = ?')
+    .run(input.nome, input.email, input.imagem ?? null, id);
 
-  const row = readRow(db);
+  const row = await readRow(db);
   if (!row) throw new Error('A conta do auxiliar de ensino sumiu do banco.');
 
   return toConta(row);

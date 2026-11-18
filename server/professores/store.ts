@@ -1,8 +1,13 @@
+import { callData } from '../database/remote';
+import { env } from '../env';
 import { randomUUID } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/types';
 
 import type { EncryptionPort } from '../encryption';
-import type { ProfessorInput, ProfessorUpdateInput } from '../../shared/professor';
+import type {
+  ProfessorInput,
+  ProfessorUpdateInput,
+} from '../../shared/professor';
 import type { ProfessorCredenciais } from '../scrape/types';
 import { textoConfere } from '../conta/senhas';
 
@@ -58,56 +63,91 @@ function toProfessor(row: ProfessorRow): Professor {
     login: row.login,
     escola: row.escola,
     imagem: row.imagem,
-    acessoLiberado: row.acesso_liberado === 1,
+    acessoLiberado: Number(row.acesso_liberado) === 1,
     createdAt: row.created_at,
     ...(row.auth_email ? { email: row.auth_email } : {}),
-    ...(row.auth_sync_status && row.auth_sync_status !== 'unlinked' ? { authStatus: row.auth_sync_status } : {}),
-    ...(row.valor_recebido_total !== undefined ? { valorRecebidoTotal: row.valor_recebido_total, valorAReceberTotal: row.valor_a_receber_total } : {}),
+    ...(row.auth_sync_status && row.auth_sync_status !== 'unlinked'
+      ? { authStatus: row.auth_sync_status }
+      : {}),
+    ...(row.valor_recebido_total !== undefined
+      ? {
+          valorRecebidoTotal: row.valor_recebido_total,
+          valorAReceberTotal: row.valor_a_receber_total,
+        }
+      : {}),
   };
 }
 
 /** Um professor pelo id, sem expor a senha guardada. */
-export function getProfessor(db: DatabaseSync, id: string): Professor | null {
-  const row = db.prepare(
-    'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at, auth_email, auth_sync_status FROM professores WHERE id = ?',
-  ).get(id) as unknown as ProfessorRow | undefined;
+export async function getProfessor(
+  db: Database,
+  id: string,
+): Promise<Professor | null> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof getProfessor>>>(
+      'professores.getProfessor',
+      [id],
+    );
+  const row = (await db
+    .prepare(
+      'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at, auth_email, auth_sync_status FROM professores WHERE id = ?',
+    )
+    .get(id)) as unknown as ProfessorRow | undefined;
   return row ? toProfessor(row) : null;
 }
 
 /** Finds a professor by portal login without reading their senha. */
-export function getProfessorPorLogin(db: DatabaseSync, login: string): Professor | null {
-  const row = db.prepare(
-    'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at, auth_email, auth_sync_status FROM professores WHERE login = ?',
-  ).get(login) as unknown as ProfessorRow | undefined;
+export async function getProfessorPorLogin(
+  db: Database,
+  login: string,
+): Promise<Professor | null> {
+  const row = (await db
+    .prepare(
+      'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at, auth_email, auth_sync_status FROM professores WHERE login = ?',
+    )
+    .get(login)) as unknown as ProfessorRow | undefined;
   return row ? toProfessor(row) : null;
 }
 
 /** Localiza o professor pelo CPF e confere sua senha do portal sem expô-la. */
 export async function autenticarProfessor(
-  db: DatabaseSync,
+  db: Database,
   encryption: EncryptionPort,
   login: string,
   senha: string,
 ): Promise<Professor | null> {
-  const row = db.prepare(
-    'SELECT id, nome, login, senha_encrypted, escola, imagem, acesso_liberado, created_at FROM professores WHERE login = ?',
-  ).get(login) as unknown as (ProfessorRow & { senha_encrypted: Uint8Array }) | undefined;
+  const row = (await db
+    .prepare(
+      'SELECT id, nome, login, senha_encrypted, escola, imagem, acesso_liberado, created_at FROM professores WHERE login = ?',
+    )
+    .get(login)) as unknown as
+    | (ProfessorRow & { senha_encrypted: Uint8Array })
+    | undefined;
   if (!row) return null;
 
-  const senhaGuardada = await encryption.decrypt(Buffer.from(row.senha_encrypted));
-  return row.acesso_liberado === 1 && textoConfere(senha, senhaGuardada) ? toProfessor(row) : null;
+  const senhaGuardada = await encryption.decrypt(
+    Buffer.from(row.senha_encrypted),
+  );
+  return Number(row.acesso_liberado) === 1 && textoConfere(senha, senhaGuardada)
+    ? toProfessor(row)
+    : null;
 }
 
 /** Lists every professor cadastrado. Never includes the senha. */
-export function listProfessores(db: DatabaseSync): Professor[] {
-  const rows = db
+export async function listProfessores(db: Database): Promise<Professor[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof listProfessores>>>(
+      'professores.listProfessores',
+      [],
+    );
+  const rows = (await db
     .prepare(
       `SELECT p.id, p.nome, p.login, p.escola, p.imagem, p.acesso_liberado, p.created_at, p.auth_email, p.auth_sync_status,
         COALESCE((SELECT SUM(c.valor_recebido) FROM cadernetas c WHERE c.professor_id = p.id), 0) AS valor_recebido_total,
         COALESCE((SELECT SUM(c.valor_a_receber) FROM cadernetas c WHERE c.professor_id = p.id), 0) AS valor_a_receber_total
        FROM professores p ORDER BY p.created_at ASC`,
     )
-    .all() as unknown as ProfessorRow[];
+    .all()) as unknown as ProfessorRow[];
 
   return rows.map(toProfessor);
 }
@@ -120,11 +160,11 @@ export function listProfessores(db: DatabaseSync): Professor[] {
  * professor.
  */
 export async function createProfessor(
-  db: DatabaseSync,
+  db: Database,
   encryption: EncryptionPort,
   input: ProfessorInput,
 ): Promise<Professor> {
-  const existing = db
+  const existing = await db
     .prepare('SELECT id FROM professores WHERE login = ?')
     .get(input.login);
 
@@ -136,21 +176,23 @@ export async function createProfessor(
   const createdAt = new Date().toISOString();
   const senhaEncrypted = await encryption.encrypt(input.senha);
 
-  db.prepare(
-    `INSERT INTO professores (id, nome, login, senha_encrypted, escola, imagem, acesso_liberado, created_at, auth_email)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-  ).run(
-    id,
-    input.nome,
-    input.login,
-    senhaEncrypted,
-    input.escola,
-    input.imagem ?? null,
-    createdAt,
-    input.email?.toLowerCase() ?? '',
-  );
+  await db
+    .prepare(
+      `INSERT INTO professores (id, nome, login, senha_encrypted, escola, imagem, acesso_liberado, created_at, auth_email)
+     VALUES (?, ?, ?, ?, ?, ?, FALSE, ?, ?)`,
+    )
+    .run(
+      id,
+      input.nome,
+      input.login,
+      senhaEncrypted,
+      input.escola,
+      input.imagem ?? null,
+      createdAt,
+      input.email?.toLowerCase() ?? '',
+    );
 
-  return getProfessor(db, id)!;
+  return (await getProfessor(db, id))!;
 }
 
 /**
@@ -161,20 +203,20 @@ export async function createProfessor(
  * @throws {DuplicateLoginError} when `login` belongs to another professor.
  */
 export async function updateProfessor(
-  db: DatabaseSync,
+  db: Database,
   encryption: EncryptionPort,
   id: string,
   input: ProfessorUpdateInput,
 ): Promise<Professor> {
-  const existing = db.prepare('SELECT id FROM professores WHERE id = ?').get(id) as
-    | { id: string }
-    | undefined;
+  const existing = (await db
+    .prepare('SELECT id FROM professores WHERE id = ?')
+    .get(id)) as { id: string } | undefined;
 
   if (!existing) {
     throw new ProfessorNotFoundError(id);
   }
 
-  const duplicate = db
+  const duplicate = await db
     .prepare('SELECT id FROM professores WHERE login = ? AND id != ?')
     .get(input.login, id);
 
@@ -184,35 +226,56 @@ export async function updateProfessor(
 
   if (input.senha) {
     const senhaEncrypted = await encryption.encrypt(input.senha);
-    db.prepare(
-      `UPDATE professores SET nome = ?, login = ?, senha_encrypted = ?, escola = ?, imagem = ?, auth_email = COALESCE(?, auth_email)
+    await db
+      .prepare(
+        `UPDATE professores SET nome = ?, login = ?, senha_encrypted = ?, escola = ?, imagem = ?, auth_email = COALESCE(?, auth_email)
        WHERE id = ?`,
-    ).run(input.nome, input.login, senhaEncrypted, input.escola, input.imagem ?? null, input.email?.toLowerCase() ?? null, id);
+      )
+      .run(
+        input.nome,
+        input.login,
+        senhaEncrypted,
+        input.escola,
+        input.imagem ?? null,
+        input.email?.toLowerCase() ?? null,
+        id,
+      );
   } else {
-    db.prepare(
-      `UPDATE professores SET nome = ?, login = ?, escola = ?, imagem = ?, auth_email = COALESCE(?, auth_email)
+    await db
+      .prepare(
+        `UPDATE professores SET nome = ?, login = ?, escola = ?, imagem = ?, auth_email = COALESCE(?, auth_email)
        WHERE id = ?`,
-    ).run(input.nome, input.login, input.escola, input.imagem ?? null, input.email?.toLowerCase() ?? null, id);
+      )
+      .run(
+        input.nome,
+        input.login,
+        input.escola,
+        input.imagem ?? null,
+        input.email?.toLowerCase() ?? null,
+        id,
+      );
   }
 
-  const row = db
-    .prepare('SELECT id, nome, login, escola, imagem, acesso_liberado, created_at, auth_email, auth_sync_status FROM professores WHERE id = ?')
-    .get(id) as unknown as ProfessorRow;
+  const row = (await db
+    .prepare(
+      'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at, auth_email, auth_sync_status FROM professores WHERE id = ?',
+    )
+    .get(id)) as unknown as ProfessorRow;
 
   return toProfessor(row);
 }
 
 /** Grants or revokes the professor's permission to enter Esmeraldinha. */
-export function setProfessorAcesso(
-  db: DatabaseSync,
+export async function setProfessorAcesso(
+  db: Database,
   id: string,
   liberado: boolean,
-): Professor {
-  const result = db
+): Promise<Professor> {
+  const result = await db
     .prepare('UPDATE professores SET acesso_liberado = ? WHERE id = ?')
     .run(liberado ? 1 : 0, id);
   if (result.changes === 0) throw new ProfessorNotFoundError(id);
-  return getProfessor(db, id)!;
+  return (await getProfessor(db, id))!;
 }
 
 /**
@@ -220,8 +283,10 @@ export function setProfessorAcesso(
  *
  * @throws {ProfessorNotFoundError} when `id` matches no professor.
  */
-export function deleteProfessor(db: DatabaseSync, id: string): void {
-  const result = db.prepare('DELETE FROM professores WHERE id = ?').run(id);
+export async function deleteProfessor(db: Database, id: string): Promise<void> {
+  const result = await db
+    .prepare('DELETE FROM professores WHERE id = ?')
+    .run(id);
 
   if (result.changes === 0) {
     throw new ProfessorNotFoundError(id);
@@ -241,13 +306,20 @@ interface CredenciaisRow {
  * only happens once credentials actually reach the portal.
  */
 export async function getProfessorCredenciais(
-  db: DatabaseSync,
+  db: Database,
   encryption: EncryptionPort,
   id: string,
 ): Promise<ProfessorCredenciais | undefined> {
-  const row = db
-    .prepare('SELECT login, senha_encrypted, escola FROM professores WHERE id = ?')
-    .get(id) as unknown as CredenciaisRow | undefined;
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof getProfessorCredenciais>>>(
+      'professores.getProfessorCredenciais',
+      [id],
+    );
+  const row = (await db
+    .prepare(
+      'SELECT login, senha_encrypted, escola FROM professores WHERE id = ?',
+    )
+    .get(id)) as unknown as CredenciaisRow | undefined;
 
   if (!row) return undefined;
 

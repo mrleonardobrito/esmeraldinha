@@ -62,7 +62,9 @@ async function enviar(body: FormData, id = sessionId): Promise<Response> {
   const { createApp } = await import('../app');
   // A rota exige uma sessão do auxiliar de ensino: o helper entra uma vez e
   // devolve o mesmo `fetch`, com o token na requisição.
-  const app = await autenticar((createApp as typeof CreateApp)({ auth: authDeTeste() }));
+  const app = await autenticar(
+    (createApp as typeof CreateApp)({ auth: authDeTeste() }),
+  );
   return await app.fetch(
     request(`/sessoes/${id}/envios`, { method: 'POST', body }),
   );
@@ -92,7 +94,14 @@ beforeEach(async () => {
     lastUsedAt: Date.now(),
   });
   const catalogo = {
-    etapas: [{ nome: '1ª Etapa', periodoLetivo: '2026', turmas: [turma], meses: ['MARÇO'] }],
+    etapas: [
+      {
+        nome: '1ª Etapa',
+        periodoLetivo: '2026',
+        turmas: [turma],
+        meses: ['MARÇO'],
+      },
+    ],
   };
   vi.mocked(getCatalogo).mockResolvedValue(catalogo);
 
@@ -100,7 +109,7 @@ beforeEach(async () => {
   vi.mocked(chatCompletion).mockResolvedValue(JSON.stringify(planoDeConteudo));
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (originalDbPath === undefined) delete process.env.ESMERALDINHA_DB_PATH;
   else process.env.ESMERALDINHA_DB_PATH = originalDbPath;
 
@@ -113,24 +122,25 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
 
     expect(response.status).toBe(200);
     // `ordem: null` sai do plano: quem define a ordem da aula é o portal.
-    await expect(response.json()).resolves.toEqual({
+    (await expect(response.json())).resolves.toEqual({
       plano: {
         ...planoDeConteudo,
-        aulas: [{
-          data: planoDeConteudo.aulas[0].data,
-          codigoCR: planoDeConteudo.aulas[0].codigoCR,
-          desenvolvimento: planoDeConteudo.aulas[0].desenvolvimento,
-          ferramentas: planoDeConteudo.aulas[0].ferramentas,
-          isRecuperacao: planoDeConteudo.aulas[0].isRecuperacao,
-          isInteracao: planoDeConteudo.aulas[0].isInteracao,
-        }],
+        aulas: [
+          {
+            data: planoDeConteudo.aulas[0].data,
+            codigoCR: planoDeConteudo.aulas[0].codigoCR,
+            desenvolvimento: planoDeConteudo.aulas[0].desenvolvimento,
+            ferramentas: planoDeConteudo.aulas[0].ferramentas,
+            isRecuperacao: planoDeConteudo.aulas[0].isRecuperacao,
+            isInteracao: planoDeConteudo.aulas[0].isInteracao,
+          },
+        ],
       },
       itens: [{ status: 'pronta', rotulo: '05/03/2026' }],
     });
 
-    const { prepararAulaParaPreenchimento, prepararNotasParaPreenchimento } = await import(
-      '../scrape/portal'
-    );
+    const { prepararAulaParaPreenchimento, prepararNotasParaPreenchimento } =
+      await import('../scrape/portal');
     expect(prepararAulaParaPreenchimento).not.toHaveBeenCalled();
     expect(prepararNotasParaPreenchimento).not.toHaveBeenCalled();
   });
@@ -155,12 +165,14 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
   it('devolve 503 quando a chave do OpenRouter não está configurada', async () => {
     const { chatCompletion } = await import('../ai/openrouter');
     const { OpenRouterNotConfiguredError } = await import('../ai/errors');
-    vi.mocked(chatCompletion).mockRejectedValue(new OpenRouterNotConfiguredError());
+    vi.mocked(chatCompletion).mockRejectedValue(
+      new OpenRouterNotConfiguredError(),
+    );
 
     const response = await enviar(comTexto('Dia 05/03 ensinei adição.'));
 
     expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
+    (await expect(response.json())).resolves.toMatchObject({
       error: expect.stringContaining('OPENROUTER_API_KEY'),
     });
   });
@@ -185,7 +197,7 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
     const response = await enviar(comTexto('Presença da 1ª etapa.'));
 
     expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toMatchObject({
+    (await expect(response.json())).resolves.toMatchObject({
       error: expect.stringContaining('frequência'),
     });
   });
@@ -200,7 +212,10 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
       ]),
       'Notas',
     );
-    const data = write(planilha, { type: 'array', bookType: 'xlsx' }) as Uint8Array;
+    const data = write(planilha, {
+      type: 'array',
+      bookType: 'xlsx',
+    }) as Uint8Array;
 
     const form = new FormData();
     form.append(
@@ -227,9 +242,13 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
     const form = new FormData();
     form.append(
       'arquivos',
-      new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00])], 'plano.docx', {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      }),
+      new File(
+        [new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00])],
+        'plano.docx',
+        {
+          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        },
+      ),
     );
 
     const response = await enviar(form);
@@ -287,22 +306,28 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
       const { createCaderneta } = await import('../cadernetas/store');
       const db = getDb();
 
-      db.prepare(
-        `INSERT INTO professores (id, nome, login, senha_encrypted, escola, created_at)
+      await db
+        .prepare(
+          `INSERT INTO professores (id, nome, login, senha_encrypted, escola, created_at)
          VALUES (?, 'Maria', '111', X'00', 'Escola', '2026-01-01T00:00:00.000Z')`,
-      ).run(professorId);
+        )
+        .run(professorId);
 
-      const caderneta = createCaderneta(db, { professorId, turma });
+      const caderneta = await createCaderneta(db, { professorId, turma });
 
-      db.prepare(
-        `INSERT INTO caderneta_estudantes (caderneta_id, turma, matricula, nome, ordem)
+      await db
+        .prepare(
+          `INSERT INTO caderneta_estudantes (caderneta_id, turma, matricula, nome, ordem)
          VALUES (?, ?, ?, ?, 0)`,
-      ).run(caderneta.id, turma, '2026001', 'Ana Lima');
+        )
+        .run(caderneta.id, turma, '2026001', 'Ana Lima');
 
-      db.prepare(
-        `INSERT INTO caderneta_disciplinas (caderneta_id, turma, nome, posicao)
+      await db
+        .prepare(
+          `INSERT INTO caderneta_disciplinas (caderneta_id, turma, nome, posicao)
          VALUES (?, ?, 'MATEMÁTICA', 0)`,
-      ).run(caderneta.id, turma);
+        )
+        .run(caderneta.id, turma);
 
       // O catálogo que o agente recebe sai daqui: é a sincronização da
       // caderneta que traz as avaliações da turma.
@@ -311,8 +336,14 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
            (caderneta_id, turma, etapa, disciplina, nome, tipo, data, valor, media, posicao)
          VALUES (?, ?, '1ª Etapa', 'MATEMÁTICA', ?, NULL, NULL, NULL, NULL, ?)`,
       );
-      ['PROVA 1', 'TRABALHO INDIVIDUAL', 'TRABALHO EM GRUPO', 'ACOMPANHAMENTO']
-        .forEach((avaliacao, indice) => inserirAvaliacao.run(caderneta.id, turma, avaliacao, indice));
+      for (const [indice, avaliacao] of [
+        'PROVA 1',
+        'TRABALHO INDIVIDUAL',
+        'TRABALHO EM GRUPO',
+        'ACOMPANHAMENTO',
+      ].entries()) {
+        await inserirAvaliacao.run(caderneta.id, turma, avaliacao, indice);
+      }
 
       return caderneta;
     }
@@ -321,7 +352,9 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
       const caderneta = await cadastrarCadernetaComEstudantes();
 
       const { chatCompletion } = await import('../ai/openrouter');
-      vi.mocked(chatCompletion).mockResolvedValue(JSON.stringify(planoDeBoletim));
+      vi.mocked(chatCompletion).mockResolvedValue(
+        JSON.stringify(planoDeBoletim),
+      );
 
       const form = new FormData();
       form.append('texto', 'Notas da prova 1.');
@@ -330,7 +363,7 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
       const response = await enviar(form);
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({
+      (await expect(response.json())).resolves.toMatchObject({
         cadernetaId: caderneta.id,
         itens: [
           { status: 'pronta', rotulo: '2026001' },
@@ -342,7 +375,9 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
         ],
       });
 
-      const { prepararNotasParaPreenchimento } = await import('../scrape/portal');
+      const { prepararNotasParaPreenchimento } = await import(
+        '../scrape/portal'
+      );
       expect(prepararNotasParaPreenchimento).not.toHaveBeenCalled();
     });
 
@@ -350,7 +385,9 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
       const caderneta = await cadastrarCadernetaComEstudantes();
 
       const { chatCompletion } = await import('../ai/openrouter');
-      vi.mocked(chatCompletion).mockResolvedValue(JSON.stringify(planoDeBoletim));
+      vi.mocked(chatCompletion).mockResolvedValue(
+        JSON.stringify(planoDeBoletim),
+      );
 
       const form = new FormData();
       form.append('texto', 'Notas da prova 1.');
@@ -360,12 +397,20 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
 
       // O grupo mantém as quatro colunas da planilha. A linha não resolvida
       // continua no mesmo índice como null para poder ser corrigida na preview.
-      await expect(response.json()).resolves.toMatchObject({
+      (await expect(response.json())).resolves.toMatchObject({
         notasResolvidas: [
           [
             { matricula: '2026001', avaliacao: 'PROVA 1', valor: 8.5 },
-            { matricula: '2026001', avaliacao: 'TRABALHO INDIVIDUAL', valor: 9 },
-            { matricula: '2026001', avaliacao: 'TRABALHO EM GRUPO', valor: 7.5 },
+            {
+              matricula: '2026001',
+              avaliacao: 'TRABALHO INDIVIDUAL',
+              valor: 9,
+            },
+            {
+              matricula: '2026001',
+              avaliacao: 'TRABALHO EM GRUPO',
+              valor: 7.5,
+            },
             { matricula: '2026001', avaliacao: 'ACOMPANHAMENTO', valor: 10 },
           ],
           null,
@@ -375,12 +420,14 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
 
     it('devolve 422 quando a turma do boletim ainda não foi sincronizada', async () => {
       const { chatCompletion } = await import('../ai/openrouter');
-      vi.mocked(chatCompletion).mockResolvedValue(JSON.stringify(planoDeBoletim));
+      vi.mocked(chatCompletion).mockResolvedValue(
+        JSON.stringify(planoDeBoletim),
+      );
 
       const response = await enviar(comTexto('Notas da prova 1.'));
 
       expect(response.status).toBe(422);
-      await expect(response.json()).resolves.toMatchObject({
+      (await expect(response.json())).resolves.toMatchObject({
         error: expect.stringContaining('avaliação cadastrada'),
       });
     });

@@ -1,4 +1,7 @@
-import type { DatabaseSync } from 'node:sqlite';
+import { callData } from '../database/remote';
+import { env } from '../env';
+import { transaction } from '../database/types';
+import type { Database } from '../database/types';
 
 /**
  * One curriculum reference an aula's conteúdo can be recorded against — the
@@ -10,17 +13,30 @@ export interface CodigoCR {
 }
 
 /** Lists the catálogo de códigos CR in código order. */
-export function listCodigosCR(db: DatabaseSync): CodigoCR[] {
-  return db
+export async function listCodigosCR(db: Database): Promise<CodigoCR[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof listCodigosCR>>>(
+      'codigos-cr.listCodigosCR',
+      [],
+    );
+  return (await db
     .prepare('SELECT codigo, texto FROM codigos_cr ORDER BY codigo ASC')
-    .all() as unknown as CodigoCR[];
+    .all()) as unknown as CodigoCR[];
 }
 
 /** Reads one código CR, or `null` when the catálogo does not carry it. */
-export function findCodigoCR(db: DatabaseSync, codigo: string): CodigoCR | null {
-  const row = db
+export async function findCodigoCR(
+  db: Database,
+  codigo: string,
+): Promise<CodigoCR | null> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof findCodigoCR>>>(
+      'codigos-cr.findCodigoCR',
+      [codigo],
+    );
+  const row = (await db
     .prepare('SELECT codigo, texto FROM codigos_cr WHERE codigo = ?')
-    .get(codigo) as unknown as CodigoCR | undefined;
+    .get(codigo)) as unknown as CodigoCR | undefined;
 
   return row ?? null;
 }
@@ -30,20 +46,25 @@ export function findCodigoCR(db: DatabaseSync, codigo: string): CodigoCR | null 
  * source, so importing it again is a full replacement rather than a merge —
  * a código dropped at the source must disappear here too.
  */
-export function replaceCodigosCR(db: DatabaseSync, codigos: CodigoCR[]): number {
-  const insert = db.prepare('INSERT INTO codigos_cr (codigo, texto) VALUES (?, ?)');
+export async function replaceCodigosCR(
+  db: Database,
+  codigos: CodigoCR[],
+): Promise<number> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof replaceCodigosCR>>>(
+      'codigos-cr.replaceCodigosCR',
+      [codigos],
+    );
+  const insert = db.prepare(
+    'INSERT INTO codigos_cr (codigo, texto) VALUES (?, ?)',
+  );
 
-  db.exec('BEGIN');
-  try {
-    db.exec('DELETE FROM codigos_cr');
+  await transaction(db, async () => {
+    await db.exec('DELETE FROM codigos_cr');
     for (const { codigo, texto } of codigos) {
-      insert.run(codigo, texto);
+      await insert.run(codigo, texto);
     }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
+  });
 
   return codigos.length;
 }

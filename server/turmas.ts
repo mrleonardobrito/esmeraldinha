@@ -1,10 +1,14 @@
+import { lerCredenciaisDoProfessor } from './professores/credenciais';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { createEncryptionPort } from './encryption';
 import { getDb } from './professores/db';
-import { getProfessorCredenciais } from './professores/store';
-import { closeSession, getCatalogo, openSession, retomarSessao } from './portal-sessions';
+import {
+  closeSession,
+  getCatalogo,
+  openSession,
+  retomarSessao,
+} from './portal-sessions';
 import { LoginError } from './scrape/errors';
 import { buscarEstudantes, turmasComPeriodo } from './turmas/busca';
 import { reconcileCadernetasDeReducao } from './cadernetas/reducao';
@@ -48,7 +52,10 @@ turmas.post('/validacoes', async (context) => {
   const parsed = credenciaisSchema.safeParse(body);
 
   if (!parsed.success) {
-    return context.json({ error: 'Informe o login, a senha e a escola do professor.' }, 400);
+    return context.json(
+      { error: 'Informe o login, a senha e a escola do professor.' },
+      400,
+    );
   }
 
   try {
@@ -65,7 +72,10 @@ turmas.post('/validacoes', async (context) => {
 
     console.error('Falha ao validar as credenciais no portal:', error);
     return context.json(
-      { error: 'Não foi possível acessar o portal. Tente novamente em instantes.' },
+      {
+        error:
+          'Não foi possível acessar o portal. Tente novamente em instantes.',
+      },
       502,
     );
   }
@@ -88,15 +98,14 @@ turmas.post('/buscas', async (context) => {
   const parsed = buscarTurmasSchema.safeParse(body);
 
   if (!parsed.success) {
-    return context.json({ error: 'Informe o professor cujas turmas buscar.' }, 400);
+    return context.json(
+      { error: 'Informe o professor cujas turmas buscar.' },
+      400,
+    );
   }
 
   const { professorId } = parsed.data;
-  const credenciais = await getProfessorCredenciais(
-    getDb(),
-    createEncryptionPort(),
-    professorId,
-  );
+  const credenciais = await lerCredenciaisDoProfessor(professorId);
 
   if (!credenciais) {
     return context.json({ error: 'Professor não encontrado.' }, 404);
@@ -114,8 +123,12 @@ turmas.post('/buscas', async (context) => {
       return context.json({ error: 'Sessão não encontrada ou expirada.' }, 404);
     }
 
-    const encontradas = replaceTurmas(getDb(), professorId, turmasComPeriodo(catalogo));
-    reconcileCadernetasDeReducao(getDb(), professorId);
+    const encontradas = await replaceTurmas(
+      getDb(),
+      professorId,
+      turmasComPeriodo(catalogo),
+    );
+    await reconcileCadernetasDeReducao(getDb(), professorId);
 
     // Os estudantes vêm na mesma sessão: ela já está aberta, e uma turma sem
     // eles não serve para as fichas nem para o boletim. A falha de uma turma
@@ -127,41 +140,47 @@ turmas.post('/buscas', async (context) => {
           turma.nome,
           turma.periodoLetivo ?? undefined,
         );
-        replaceEstudantes(getDb(), turma.id, estudantes);
+        await replaceEstudantes(getDb(), turma.id, estudantes);
       } catch (error) {
         console.error(`Falha ao ler os estudantes de ${turma.nome}:`, error);
       }
     }
 
-    return context.json({ turmas: listTurmas(getDb(), professorId) });
+    return context.json({ turmas: await listTurmas(getDb(), professorId) });
   } catch (error) {
     if (error instanceof LoginError) {
       return context.json({ error: error.message }, 422);
     }
 
     console.error('Falha ao buscar as turmas do professor:', error);
-    return context.json({ error: 'Não foi possível ler as turmas no portal.' }, 502);
+    return context.json(
+      { error: 'Não foi possível ler as turmas no portal.' },
+      502,
+    );
   } finally {
     if (sessionId) await closeSession(sessionId);
   }
 });
 
 /** As turmas já conhecidas de um professor, sem ir ao portal. */
-turmas.get('/', (context) => {
+turmas.get('/', async (context) => {
   const professorId = context.req.query('professorId')?.trim();
 
   if (!professorId) {
-    return context.json({ error: 'Informe o professor cujas turmas listar.' }, 400);
+    return context.json(
+      { error: 'Informe o professor cujas turmas listar.' },
+      400,
+    );
   }
 
-  return context.json({ turmas: listTurmas(getDb(), professorId) });
+  return context.json({ turmas: await listTurmas(getDb(), professorId) });
 });
 
-turmas.get('/:id/estudantes', (context) => {
+turmas.get('/:id/estudantes', async (context) => {
   const id = context.req.param('id');
 
   try {
-    getTurma(getDb(), id);
+    await getTurma(getDb(), id);
   } catch (error) {
     if (error instanceof TurmaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -169,7 +188,7 @@ turmas.get('/:id/estudantes', (context) => {
     throw error;
   }
 
-  return context.json({ estudantes: listEstudantes(getDb(), id) });
+  return context.json({ estudantes: await listEstudantes(getDb(), id) });
 });
 
 /** Passo 3 do cadastro: os estudantes de uma turma, lidos do portal. */
@@ -197,37 +216,88 @@ turmas.post('/:id/estudantes/buscas', async (context) => {
   }
 
   try {
-    const turma = getTurma(getDb(), id);
+    const turma = await getTurma(getDb(), id);
     const encontrados = await buscarEstudantes(
       session.page,
       turma.nome,
       turma.periodoLetivo ?? undefined,
     );
 
-    return context.json({ estudantes: replaceEstudantes(getDb(), id, encontrados) });
+    return context.json({
+      estudantes: await replaceEstudantes(getDb(), id, encontrados),
+    });
   } catch (error) {
     if (error instanceof TurmaNotFoundError) {
       return context.json({ error: error.message }, 404);
     }
 
     console.error('Falha ao buscar os estudantes da turma:', error);
-    return context.json({ error: 'Não foi possível ler os estudantes no portal.' }, 502);
+    return context.json(
+      { error: 'Não foi possível ler os estudantes no portal.' },
+      502,
+    );
   }
 });
 
-const turmaUpdateSchema = z.object({ nome: z.string().trim().min(1), turno: z.string().nullable(), periodoLetivo: z.string().nullable() });
-const estudanteUpdateSchema = z.object({ matricula: z.string().trim().min(1), nome: z.string().trim().min(1), situacao: z.string().nullable(), dataMatricula: z.string().nullable() });
+const turmaUpdateSchema = z.object({
+  nome: z.string().trim().min(1),
+  turno: z.string().nullable(),
+  periodoLetivo: z.string().nullable(),
+});
+const estudanteUpdateSchema = z.object({
+  matricula: z.string().trim().min(1),
+  nome: z.string().trim().min(1),
+  situacao: z.string().nullable(),
+  dataMatricula: z.string().nullable(),
+});
 
 turmas.put('/:id', async (context) => {
-  const parsed = turmaUpdateSchema.safeParse(await context.req.json().catch(() => null));
-  if (!parsed.success) return context.json({ error: 'Dados da turma inválidos.' }, 400);
-  try { return context.json(updateTurma(getDb(), context.req.param('id'), parsed.data)); }
-  catch (error) { return context.json({ error: error instanceof Error ? error.message : 'Não foi possível atualizar a turma.' }, 400); }
+  const parsed = turmaUpdateSchema.safeParse(
+    await context.req.json().catch(() => null),
+  );
+  if (!parsed.success)
+    return context.json({ error: 'Dados da turma inválidos.' }, 400);
+  try {
+    return context.json(
+      await updateTurma(getDb(), context.req.param('id'), parsed.data),
+    );
+  } catch (error) {
+    return context.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Não foi possível atualizar a turma.',
+      },
+      400,
+    );
+  }
 });
 
 turmas.put('/:id/estudantes/:matricula', async (context) => {
-  const parsed = estudanteUpdateSchema.safeParse(await context.req.json().catch(() => null));
-  if (!parsed.success) return context.json({ error: 'Dados do estudante inválidos.' }, 400);
-  try { return context.json({ estudantes: updateEstudante(getDb(), context.req.param('id'), context.req.param('matricula'), parsed.data) }); }
-  catch (error) { return context.json({ error: error instanceof Error ? error.message : 'Não foi possível atualizar o estudante.' }, 400); }
+  const parsed = estudanteUpdateSchema.safeParse(
+    await context.req.json().catch(() => null),
+  );
+  if (!parsed.success)
+    return context.json({ error: 'Dados do estudante inválidos.' }, 400);
+  try {
+    return context.json({
+      estudantes: await updateEstudante(
+        getDb(),
+        context.req.param('id'),
+        context.req.param('matricula'),
+        parsed.data,
+      ),
+    });
+  } catch (error) {
+    return context.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Não foi possível atualizar o estudante.',
+      },
+      400,
+    );
+  }
 });

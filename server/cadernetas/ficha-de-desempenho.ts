@@ -17,7 +17,6 @@ import { ArquivoIlegivelError, EnvioInvalidoError, OpenRouterError, OpenRouterNo
 import type { ArquivoEnviado } from '../ai/interpretar-envio';
 import { interpretarObservacoes } from '../ai/interpretar-observacoes';
 import type { ContaEnv } from '../conta/autenticacao';
-import { createEncryptionPort } from '../encryption';
 import { env } from '../env';
 import {
   acompanharPreenchimento,
@@ -29,7 +28,7 @@ import { apagarPrevia, getEstruturaDaFicha, getPrevia, salvarEstruturaDaFicha, s
 import { naSessaoHeaded } from '../sessoes-headed';
 import { closeSession, openSession } from '../portal-sessions';
 import { getDb } from '../professores/db';
-import { getProfessorCredenciais } from '../professores/store';
+import { lerCredenciaisDoProfessor } from '../professores/credenciais';
 import { FichaNaoSuportadaError, LoginError } from '../scrape/errors';
 import { lerEstruturaDaFicha } from '../scrape/ficha-de-desempenho';
 import { periodoLetivoDaTurma } from '../turmas/store';
@@ -38,19 +37,19 @@ import { CadernetaNotFoundError, getCaderneta, listEstudantes, type Caderneta } 
 /** Routes of the ficha de desempenho of one caderneta's turma. */
 export const fichaDeDesempenho = new Hono<ContaEnv>();
 
-function cadernetaDaRota(id: string, turma: string | undefined): Caderneta | null {
+async function cadernetaDaRota(id: string, turma: string | undefined): Promise<Caderneta | null> {
   try {
-    return getCaderneta(getDb(), id, turma);
+    return await getCaderneta(getDb(), id, turma);
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) return null;
     throw error;
   }
 }
 
-fichaDeDesempenho.get('/:id/ficha-de-desempenho/estrutura', (context) => {
-  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+fichaDeDesempenho.get('/:id/ficha-de-desempenho/estrutura', async (context) => {
+  const caderneta = await cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
   if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
-  return context.json({ estrutura: getEstruturaDaFicha(getDb(), caderneta.professorId, caderneta.turma) });
+  return context.json({ estrutura: await getEstruturaDaFicha(getDb(), caderneta.professorId, caderneta.turma) });
 });
 
 /**
@@ -58,10 +57,10 @@ fichaDeDesempenho.get('/:id/ficha-de-desempenho/estrutura', (context) => {
  * portal: opens the first estudante's ficha and closes it without saving.
  */
 fichaDeDesempenho.post('/:id/ficha-de-desempenho/estrutura/leituras', async (context) => {
-  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+  const caderneta = await cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
   if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
 
-  const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), caderneta.professorId);
+  const credenciais = await lerCredenciaisDoProfessor(caderneta.professorId);
   if (!credenciais) return context.json({ error: 'Professor não encontrado.' }, 404);
 
   let sessionId: string | undefined;
@@ -69,10 +68,10 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/estrutura/leituras', async (con
     const session = await openSession(credenciais, { professorId: caderneta.professorId });
     sessionId = session.id;
     const lida = await lerEstruturaDaFicha(session.page, {
-      periodoLetivo: periodoLetivoDaTurma(getDb(), caderneta.professorId, caderneta.turma),
+      periodoLetivo: await periodoLetivoDaTurma(getDb(), caderneta.professorId, caderneta.turma),
       turma: caderneta.turma,
     });
-    return context.json({ estrutura: salvarEstruturaDaFicha(getDb(), caderneta.professorId, caderneta.turma, lida) });
+    return context.json({ estrutura: await salvarEstruturaDaFicha(getDb(), caderneta.professorId, caderneta.turma, lida) });
   } catch (error) {
     if (error instanceof FichaNaoSuportadaError || error instanceof LoginError) {
       return context.json({ error: error.message }, 422);
@@ -113,10 +112,10 @@ function rotuloDasEtapas(etapas: readonly IndiceDaEtapa[]): string {
  * can review it over time; it replaces any earlier prévia.
  */
 fichaDeDesempenho.post('/:id/ficha-de-desempenho/previas', async (context) => {
-  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+  const caderneta = await cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
   if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
 
-  const estrutura = getEstruturaDaFicha(getDb(), caderneta.professorId, caderneta.turma);
+  const estrutura = await getEstruturaDaFicha(getDb(), caderneta.professorId, caderneta.turma);
   if (!estrutura) {
     return context.json({ error: 'Leia a ficha de desempenho no portal antes de enviar as observações.' }, 422);
   }
@@ -150,7 +149,7 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/previas', async (context) => {
     data: new Uint8Array(await file.arrayBuffer()),
   })));
 
-  const turma = listEstudantes(getDb(), caderneta.id, caderneta.turma);
+  const turma = await listEstudantes(getDb(), caderneta.id, caderneta.turma);
   if (turma.length === 0) {
     return context.json({ error: 'A caderneta ainda não tem os estudantes lidos do portal. Sincronize e tente de novo.' }, 422);
   }
@@ -164,7 +163,7 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/previas', async (context) => {
       texto: typeof body.texto === 'string' ? body.texto : '',
       arquivos,
     });
-    const previa = salvarPrevia(getDb(), caderneta.id, caderneta.turma, {
+    const previa = await salvarPrevia(getDb(), caderneta.id, caderneta.turma, {
       areas: escolhidas.map((area) => area.indice),
       etapas: etapasDaPrevia,
       // Observações about the turma (or "a maioria") apply to everyone; one
@@ -199,16 +198,16 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/previas', async (context) => {
   }
 });
 
-fichaDeDesempenho.get('/:id/ficha-de-desempenho/previas/atual', (context) => {
-  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+fichaDeDesempenho.get('/:id/ficha-de-desempenho/previas/atual', async (context) => {
+  const caderneta = await cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
   if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
-  return context.json({ previa: getPrevia(getDb(), caderneta.id, caderneta.turma) });
+  return context.json({ previa: await getPrevia(getDb(), caderneta.id, caderneta.turma) });
 });
 
-fichaDeDesempenho.delete('/:id/ficha-de-desempenho/previas/atual', (context) => {
-  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+fichaDeDesempenho.delete('/:id/ficha-de-desempenho/previas/atual', async (context) => {
+  const caderneta = await cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
   if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
-  apagarPrevia(getDb(), caderneta.id, caderneta.turma);
+  await apagarPrevia(getDb(), caderneta.id, caderneta.turma);
   return context.body(null, 204);
 });
 
@@ -235,11 +234,11 @@ const chaveDaExecucao = (caderneta: Caderneta) => `${caderneta.id}|${caderneta.t
  * its progress is read from the status route.
  */
 fichaDeDesempenho.post('/:id/ficha-de-desempenho/preenchimentos-assistidos', async (context) => {
-  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+  const caderneta = await cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
   if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
 
   const db = getDb();
-  const previa = getPrevia(db, caderneta.id, caderneta.turma);
+  const previa = await getPrevia(db, caderneta.id, caderneta.turma);
   if (!previa) return context.json({ error: 'Gere a prévia da ficha antes de preencher o portal.' }, 422);
 
   // The screen's edits are not saved: they come with the request, on top of
@@ -255,12 +254,12 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/preenchimentos-assistidos', asy
   if (tela.data.naoResolvidos.some((item) => item.excecoes.length > 0)) {
     return context.json({ error: 'Há nomes nas observações que ainda não foram ligados a um estudante. Resolva ou ignore antes de preencher.' }, 422);
   }
-  const estrutura = getEstruturaDaFicha(db, caderneta.professorId, caderneta.turma);
+  const estrutura = await getEstruturaDaFicha(db, caderneta.professorId, caderneta.turma);
   if (!estrutura || !mesmasHabilidades(tela.data.estudantes[0]?.conceitos, tela.data.areas, estrutura.areas)) {
     return context.json({ error: 'A ficha mudou desde a prévia. Releia a ficha no portal e gere a prévia de novo.' }, 422);
   }
 
-  const credenciais = await getProfessorCredenciais(db, createEncryptionPort(), caderneta.professorId);
+  const credenciais = await lerCredenciaisDoProfessor(caderneta.professorId);
   if (!credenciais) return context.json({ error: 'Professor não encontrado.' }, 404);
 
   // What gets filled is the prévia as the screen shows it: its áreas, its
@@ -273,14 +272,14 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/preenchimentos-assistidos', asy
   );
   const rotulo = rotuloDasEtapas(daTela.etapas);
   const plano = {
-    periodoLetivo: periodoLetivoDaTurma(db, caderneta.professorId, caderneta.turma),
+    periodoLetivo: await periodoLetivoDaTurma(db, caderneta.professorId, caderneta.turma),
     turma: caderneta.turma,
     etapas: daTela.etapas,
     rotuloDasEtapas: rotulo,
     areas: daTela.areas,
     // The situação is read now, not when the prévia was made: an estudante
     // transferred since then must not be filled.
-    estudantes: listEstudantes(db, caderneta.id, caderneta.turma)
+    estudantes: (await listEstudantes(db, caderneta.id, caderneta.turma))
       .map(({ matricula, nome, situacao }) => ({ matricula, nome, situacao })),
     fichas: new Map(daTela.estudantes.map((e) => [
       e.matricula,
@@ -303,8 +302,8 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/preenchimentos-assistidos', asy
   }
 });
 
-fichaDeDesempenho.get('/:id/ficha-de-desempenho/preenchimentos-assistidos/atual', (context) => {
-  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+fichaDeDesempenho.get('/:id/ficha-de-desempenho/preenchimentos-assistidos/atual', async (context) => {
+  const caderneta = await cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
   if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
   return context.json({ estado: estadoDoPreenchimento(chaveDaExecucao(caderneta)) });
 });

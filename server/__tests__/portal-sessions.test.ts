@@ -81,7 +81,9 @@ async function comProfessor() {
     escola: 'Escola',
   });
 
-  getDb().prepare('UPDATE professores SET id = ? WHERE id = ?').run(professorId, professor.id);
+  await getDb()
+    .prepare('UPDATE professores SET id = ? WHERE id = ?')
+    .run(professorId, professor.id);
 }
 
 beforeEach(() => {
@@ -97,7 +99,7 @@ beforeEach(() => {
 afterEach(async () => {
   await (await import('../conta/sessoes')).encerrarTodasAsSessoes();
   const { closeDb } = await import('../professores/db');
-  closeDb();
+  await closeDb();
   rmSync(tempDir, { recursive: true, force: true });
   process.env.ESMERALDINHA_DB_PATH = originalDbPath;
   process.env.ENCRYPTION_ADAPTER = originalAdapter;
@@ -159,8 +161,8 @@ describe('retomarSessao', () => {
     await expirar(aberta.id);
 
     const [uma, outra] = await Promise.all([
-      retomarSessao(aberta.id),
-      retomarSessao(aberta.id),
+      await retomarSessao(aberta.id),
+      await retomarSessao(aberta.id),
     ]);
 
     expect(uma?.page).toBe(outra?.page);
@@ -169,7 +171,9 @@ describe('retomarSessao', () => {
 
   it('não retoma uma sessão encerrada de propósito', async () => {
     await comProfessor();
-    const { openSession, closeSession, retomarSessao } = await import('../portal-sessions');
+    const { openSession, closeSession, retomarSessao } = await import(
+      '../portal-sessions'
+    );
 
     const aberta = await openSession(
       { login: '11111111111', senha: 'segredo', escola: 'Escola' },
@@ -192,7 +196,9 @@ describe('retomarSessao', () => {
     );
     await expirar(aberta.id);
 
-    getDb().prepare('DELETE FROM professores WHERE id = ?').run(professorId);
+    await getDb()
+      .prepare('DELETE FROM professores WHERE id = ?')
+      .run(professorId);
 
     expect(await retomarSessao(aberta.id)).toBeUndefined();
   });
@@ -208,7 +214,9 @@ describe('retomarSessao', () => {
     );
     await expirar(aberta.id);
 
-    vi.mocked(login).mockRejectedValueOnce(new LoginError('Login ou senha inválidos.'));
+    vi.mocked(login).mockRejectedValueOnce(
+      new LoginError('Login ou senha inválidos.'),
+    );
 
     await expect(retomarSessao(aberta.id)).rejects.toBeInstanceOf(LoginError);
   });
@@ -280,14 +288,25 @@ describe('app-session ownership of portal contexts', () => {
     const { authDeTeste } = await import('./auth-de-teste');
     const sessions = await import('../conta/sessoes');
     const auth = authDeTeste();
-    const first = sessions.abrirSessao({ papel: 'auxiliar de ensino', contaId: 'local-conta' }, auth.session(auth.auxiliarEmail));
-    const second = sessions.abrirSessao({ papel: 'auxiliar de ensino', contaId: 'local-conta' }, auth.session(auth.auxiliarEmail));
+    const first = sessions.abrirSessao(
+      { papel: 'auxiliar de ensino', contaId: 'local-conta' },
+      auth.session(auth.auxiliarEmail),
+    );
+    const second = sessions.abrirSessao(
+      { papel: 'auxiliar de ensino', contaId: 'local-conta' },
+      auth.session(auth.auxiliarEmail),
+    );
     return { sessions, first, second };
   }
   it('closes a headless context only after its final app owner leaves', async () => {
     const { sessions, first, second } = await owners();
     const portal = await import('../portal-sessions');
-    const opened = await sessions.naSessaoDoAuxiliar(first, () => portal.openSession({ login: '111', senha: 'portal-senha', escola: 'Escola' }, { professorId }));
+    const opened = await sessions.naSessaoDoAuxiliar(first, () =>
+      portal.openSession(
+        { login: '111', senha: 'portal-senha', escola: 'Escola' },
+        { professorId },
+      ),
+    );
     sessions.naSessaoDoAuxiliar(second, () => portal.touchSession(opened.id));
     await sessions.encerrarSessao(first);
     expect(paginas[0].fechada).toBe(false);
@@ -297,9 +316,17 @@ describe('app-session ownership of portal contexts', () => {
   it('closes a visible context only after its final app owner leaves', async () => {
     const { sessions, first, second } = await owners();
     const { naSessaoHeaded } = await import('../sessoes-headed');
-    const credenciais = { login: '111', senha: 'portal-senha', escola: 'Escola' };
-    await sessions.naSessaoDoAuxiliar(first, () => naSessaoHeaded(professorId, credenciais, async () => {}));
-    await sessions.naSessaoDoAuxiliar(second, () => naSessaoHeaded(professorId, credenciais, async () => {}));
+    const credenciais = {
+      login: '111',
+      senha: 'portal-senha',
+      escola: 'Escola',
+    };
+    await sessions.naSessaoDoAuxiliar(first, () =>
+      naSessaoHeaded(professorId, credenciais, async () => {}),
+    );
+    await sessions.naSessaoDoAuxiliar(second, () =>
+      naSessaoHeaded(professorId, credenciais, async () => {}),
+    );
     await sessions.encerrarSessao(first);
     expect(paginas[0].fechada).toBe(false);
     await sessions.encerrarSessao(second);
@@ -309,9 +336,19 @@ describe('app-session ownership of portal contexts', () => {
     const { sessions, first } = await owners();
     const { login } = await import('../scrape/portal');
     let complete!: () => void;
-    vi.mocked(login).mockImplementationOnce(() => new Promise<void>((resolve) => { complete = resolve; }));
+    vi.mocked(login).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          complete = resolve;
+        }),
+    );
     const portal = await import('../portal-sessions');
-    const pending = sessions.naSessaoDoAuxiliar(first, () => portal.openSession({ login: '111', senha: 'portal-senha', escola: 'Escola' }, { professorId }));
+    const pending = sessions.naSessaoDoAuxiliar(first, () =>
+      portal.openSession(
+        { login: '111', senha: 'portal-senha', escola: 'Escola' },
+        { professorId },
+      ),
+    );
     const rejected = expect(pending).rejects.toMatchObject({ status: 401 });
     await vi.waitFor(() => expect(complete).toBeDefined());
     await sessions.encerrarSessao(first);

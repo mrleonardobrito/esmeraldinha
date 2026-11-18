@@ -34,58 +34,63 @@ describe('parseCodigosCR', () => {
   });
 
   it('refuses a planilha missing a column the catálogo needs', () => {
-    expect(() => parseCodigosCR('codigo,componente\nEF01LP01,ef-comp-lp\n')).toThrow(
-      MissingColumnError,
-    );
+    expect(() =>
+      parseCodigosCR('codigo,componente\nEF01LP01,ef-comp-lp\n'),
+    ).toThrow(MissingColumnError);
   });
 });
 
 describe('catálogo de códigos CR', () => {
   let db: DatabaseSync;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     db = new DatabaseSync(':memory:');
-    db.exec(
+    await db.exec(
       'CREATE TABLE codigos_cr (codigo TEXT PRIMARY KEY, texto TEXT NOT NULL);',
     );
   });
 
-  it('lists what was imported, in codigo order', () => {
-    replaceCodigosCR(db, [
+  it('lists what was imported, in codigo order', async () => {
+    await replaceCodigosCR(db, [
       { codigo: 'EF02MA01', texto: 'Segundo.' },
       { codigo: 'EF01LP01', texto: 'Primeiro.' },
     ]);
 
-    expect(listCodigosCR(db).map((c) => c.codigo)).toEqual([
+    expect((await listCodigosCR(db)).map((c) => c.codigo)).toEqual([
       'EF01LP01',
       'EF02MA01',
     ]);
   });
 
-  it('replaces the catálogo instead of merging into it', () => {
-    replaceCodigosCR(db, [{ codigo: 'EF01LP01', texto: 'Antigo.' }]);
-    replaceCodigosCR(db, [{ codigo: 'EF02MA01', texto: 'Novo.' }]);
+  it('replaces the catálogo instead of merging into it', async () => {
+    await replaceCodigosCR(db, [{ codigo: 'EF01LP01', texto: 'Antigo.' }]);
+    await replaceCodigosCR(db, [{ codigo: 'EF02MA01', texto: 'Novo.' }]);
 
-    expect(listCodigosCR(db)).toEqual([{ codigo: 'EF02MA01', texto: 'Novo.' }]);
+    expect(await listCodigosCR(db)).toEqual([
+      { codigo: 'EF02MA01', texto: 'Novo.' },
+    ]);
   });
 
-  it('finds one código CR, and nothing for one it does not carry', () => {
-    replaceCodigosCR(db, [{ codigo: 'EF01LP01', texto: 'Reconhecer.' }]);
+  it('finds one código CR, and nothing for one it does not carry', async () => {
+    await replaceCodigosCR(db, [{ codigo: 'EF01LP01', texto: 'Reconhecer.' }]);
 
-    expect(findCodigoCR(db, 'EF01LP01')?.texto).toBe('Reconhecer.');
-    expect(findCodigoCR(db, 'EF09MA99')).toBeNull();
+    expect((await findCodigoCR(db, 'EF01LP01'))?.texto).toBe('Reconhecer.');
+    expect(await findCodigoCR(db, 'EF09MA99')).toBeNull();
   });
 
-  it('leaves the catálogo untouched when an import fails halfway', () => {
-    replaceCodigosCR(db, [{ codigo: 'EF01LP01', texto: 'Antigo.' }]);
+  it('leaves the catálogo untouched when an import fails halfway', async () => {
+    await replaceCodigosCR(db, [{ codigo: 'EF01LP01', texto: 'Antigo.' }]);
 
-    expect(() =>
-      replaceCodigosCR(db, [
-        { codigo: 'EF02MA01', texto: 'Novo.' },
-        { codigo: 'EF02MA01', texto: 'Repetido.' },
-      ]),
-    ).toThrow();
+    await expect(
+      async () =>
+        await replaceCodigosCR(db, [
+          { codigo: 'EF02MA01', texto: 'Novo.' },
+          { codigo: 'EF02MA01', texto: 'Repetido.' },
+        ]),
+    ).rejects.toThrow();
 
-    expect(listCodigosCR(db)).toEqual([{ codigo: 'EF01LP01', texto: 'Antigo.' }]);
+    expect(await listCodigosCR(db)).toEqual([
+      { codigo: 'EF01LP01', texto: 'Antigo.' },
+    ]);
   });
 });

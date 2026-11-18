@@ -17,36 +17,40 @@ const SCHEMA_ANTIGO = `
   );
 `;
 
-function colunas(db: DatabaseSync): string[] {
-  const rows = db
+async function colunas(db: DatabaseSync): Promise<string[]> {
+  const rows = (await db
     .prepare('PRAGMA table_info(caderneta_aulas)')
-    .all() as unknown as { name: string }[];
+    .all()) as unknown as { name: string }[];
 
   return rows.map((row) => row.name);
 }
 
 describe('migrate', () => {
-  it('acrescenta as colunas de conteúdo a um banco antigo, preservando as aulas', () => {
+  it('acrescenta as colunas de conteúdo a um banco antigo, preservando as aulas', async () => {
     const db = new DatabaseSync(':memory:');
-    db.exec(SCHEMA_ANTIGO);
-    db.prepare(
-      `INSERT INTO caderneta_aulas (caderneta_id, etapa, mes, data, ordem, conteudo_preenchido)
+    await db.exec(SCHEMA_ANTIGO);
+    await db
+      .prepare(
+        `INSERT INTO caderneta_aulas (caderneta_id, etapa, mes, data, ordem, conteudo_preenchido)
        VALUES ('c1', '1ª Etapa', 'MARÇO', '05/03/2026', 1, 1)`,
-    ).run();
+      )
+      .run();
 
     migrate(db);
 
-    expect(colunas(db)).toEqual(
+    expect(await colunas(db)).toEqual(
       expect.arrayContaining(['codigo_cr', 'desenvolvimento', 'ferramentas']),
     );
     expect(
-      db.prepare('SELECT data, desenvolvimento FROM caderneta_aulas').all(),
+      await db
+        .prepare('SELECT data, desenvolvimento FROM caderneta_aulas')
+        .all(),
     ).toEqual([{ data: '05/03/2026', desenvolvimento: null }]);
   });
 
-  it('acrescenta a data da matrícula aos estudantes de um banco antigo', () => {
+  it('acrescenta a data da matrícula aos estudantes de um banco antigo', async () => {
     const db = new DatabaseSync(':memory:');
-    db.exec(`
+    await db.exec(`
       CREATE TABLE caderneta_estudantes (
         caderneta_id TEXT NOT NULL,
         matricula TEXT NOT NULL,
@@ -56,21 +60,25 @@ describe('migrate', () => {
         PRIMARY KEY (caderneta_id, matricula)
       );
     `);
-    db.prepare(
-      `INSERT INTO caderneta_estudantes (caderneta_id, matricula, nome, situacao, ordem)
+    await db
+      .prepare(
+        `INSERT INTO caderneta_estudantes (caderneta_id, matricula, nome, situacao, ordem)
        VALUES ('c1', '12658', 'Benjamin', 'ATIVO', 0)`,
-    ).run();
+      )
+      .run();
 
     migrate(db);
 
     expect(
-      db.prepare('SELECT nome, data_matricula FROM caderneta_estudantes').all(),
+      await db
+        .prepare('SELECT nome, data_matricula FROM caderneta_estudantes')
+        .all(),
     ).toEqual([{ nome: 'Benjamin', data_matricula: null }]);
   });
 
-  it('ignora as tabelas que o banco antigo ainda não tem', () => {
+  it('ignora as tabelas que o banco antigo ainda não tem', async () => {
     const db = new DatabaseSync(':memory:');
-    db.exec(SCHEMA_ANTIGO);
+    await db.exec(SCHEMA_ANTIGO);
 
     // `turma_estudantes` não existe aqui: um ALTER TABLE nela estouraria.
     expect(() => {
@@ -78,14 +86,14 @@ describe('migrate', () => {
     }).not.toThrow();
   });
 
-  it('não faz nada quando as colunas já existem', () => {
+  it('não faz nada quando as colunas já existem', async () => {
     const db = new DatabaseSync(':memory:');
-    db.exec(SCHEMA_ANTIGO);
+    await db.exec(SCHEMA_ANTIGO);
 
     migrate(db);
-    const depoisDaPrimeira = colunas(db);
+    const depoisDaPrimeira = await colunas(db);
     migrate(db);
 
-    expect(colunas(db)).toEqual(depoisDaPrimeira);
+    expect(await colunas(db)).toEqual(depoisDaPrimeira);
   });
 });

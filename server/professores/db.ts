@@ -3,8 +3,11 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import { env } from '../env';
+import { PostgresDatabase } from '../database/postgres';
+import { SqliteDatabase } from '../database/sqlite';
+import type { Database } from '../database/types';
 
-let db: DatabaseSync | undefined;
+let db: Database | undefined;
 
 /** O schema inteiro do app, exportado para os testes montarem um banco em memória. */
 export const SCHEMA = `
@@ -248,15 +251,39 @@ export const SCHEMA = `
  * NOT EXISTS` não as acrescenta a um banco que já existe, então cada uma é
  * aplicada aqui — nulável, para as linhas antigas continuarem válidas.
  */
-const COLUNAS_NOVAS: readonly { tabela: string; coluna: string; tipo: string }[] = [
+const COLUNAS_NOVAS: readonly {
+  tabela: string;
+  coluna: string;
+  tipo: string;
+}[] = [
   { tabela: 'conta', coluna: 'supabase_auth_id', tipo: 'TEXT' },
   { tabela: 'conta', coluna: 'supabase_auth_email', tipo: 'TEXT' },
-  { tabela: 'conta', coluna: 'auth_setup_complete', tipo: 'INTEGER NOT NULL DEFAULT 0' },
+  {
+    tabela: 'conta',
+    coluna: 'auth_setup_complete',
+    tipo: 'INTEGER NOT NULL DEFAULT 0',
+  },
   { tabela: 'professores', coluna: 'supabase_auth_id', tipo: 'TEXT' },
-  { tabela: 'professores', coluna: 'auth_email', tipo: "TEXT NOT NULL DEFAULT ''" },
-  { tabela: 'professores', coluna: 'auth_sync_status', tipo: "TEXT NOT NULL DEFAULT 'unlinked'" },
-  { tabela: 'professores', coluna: 'auth_revision', tipo: 'INTEGER NOT NULL DEFAULT 0' },
-  { tabela: 'professores', coluna: 'acesso_liberado', tipo: 'INTEGER NOT NULL DEFAULT 0' },
+  {
+    tabela: 'professores',
+    coluna: 'auth_email',
+    tipo: "TEXT NOT NULL DEFAULT ''",
+  },
+  {
+    tabela: 'professores',
+    coluna: 'auth_sync_status',
+    tipo: "TEXT NOT NULL DEFAULT 'unlinked'",
+  },
+  {
+    tabela: 'professores',
+    coluna: 'auth_revision',
+    tipo: 'INTEGER NOT NULL DEFAULT 0',
+  },
+  {
+    tabela: 'professores',
+    coluna: 'acesso_liberado',
+    tipo: 'INTEGER NOT NULL DEFAULT 0',
+  },
   { tabela: 'professores', coluna: 'pronouns', tipo: 'TEXT' },
   { tabela: 'caderneta_aulas', coluna: 'codigo_cr', tipo: 'TEXT' },
   { tabela: 'caderneta_aulas', coluna: 'desenvolvimento', tipo: 'TEXT' },
@@ -278,14 +305,34 @@ const COLUNAS_NOVAS: readonly { tabela: string; coluna: string; tipo: string }[]
  *
  * A recriação só acontece quando faltam colunas: um banco em dia não é tocado.
  */
-const TABELAS_DO_BOLETIM: readonly { nome: string; colunas: readonly string[] }[] = [
+const TABELAS_DO_BOLETIM: readonly {
+  nome: string;
+  colunas: readonly string[];
+}[] = [
   {
     nome: 'caderneta_avaliacoes',
-    colunas: ['caderneta_id', 'etapa', 'disciplina', 'nome', 'tipo', 'data', 'valor', 'media', 'posicao'],
+    colunas: [
+      'caderneta_id',
+      'etapa',
+      'disciplina',
+      'nome',
+      'tipo',
+      'data',
+      'valor',
+      'media',
+      'posicao',
+    ],
   },
   {
     nome: 'caderneta_notas',
-    colunas: ['caderneta_id', 'etapa', 'disciplina', 'matricula', 'avaliacao', 'valor'],
+    colunas: [
+      'caderneta_id',
+      'etapa',
+      'disciplina',
+      'matricula',
+      'avaliacao',
+      'valor',
+    ],
   },
   {
     nome: 'caderneta_notas_do_estudante',
@@ -300,7 +347,10 @@ const TABELAS_DO_BOLETIM: readonly { nome: string; colunas: readonly string[] }[
       'personalizada',
     ],
   },
-  { nome: 'caderneta_disciplinas', colunas: ['caderneta_id', 'nome', 'posicao'] },
+  {
+    nome: 'caderneta_disciplinas',
+    colunas: ['caderneta_id', 'nome', 'posicao'],
+  },
 ];
 
 /**
@@ -311,7 +361,9 @@ const TABELAS_DO_BOLETIM: readonly { nome: string; colunas: readonly string[] }[
 function migrarTabelasDoBoletim(database: DatabaseSync): void {
   const desatualizadas = TABELAS_DO_BOLETIM.filter(({ nome, colunas }) => {
     const existentes = (
-      database.prepare(`PRAGMA table_info(${nome})`).all() as unknown as { name: string }[]
+      database.prepare(`PRAGMA table_info(${nome})`).all() as unknown as {
+        name: string;
+      }[]
     ).map((coluna) => coluna.name);
 
     // Tabela que ainda não existe será criada pelo SCHEMA, não aqui.
@@ -404,22 +456,50 @@ export function migrate(database: DatabaseSync): void {
  * no migration step; `migrate` cobre os bancos que já existiam antes de uma
  * coluna nova.
  */
-export function getDb(): DatabaseSync {
+export function getDb(): Database {
   if (db) return db;
+
+  if (env.dataApiUrl)
+    return {
+      prepare() {
+        throw new Error('Use a registered data operation with the hosted API.');
+      },
+      exec() {
+        throw new Error(
+          'The desktop cannot execute SQL on the hosted database.',
+        );
+      },
+      close() {},
+    };
+  if (env.database.provider === 'postgres') {
+    if (process.versions.electron)
+      throw new Error(
+        'Postgres credentials belong only on the controlled backend.',
+      );
+    if (!env.database.url)
+      throw new Error('Configure DATABASE_URL on the controlled backend.');
+    db = new PostgresDatabase({
+      url: env.database.url,
+      caPath: env.database.caPath,
+    });
+    return db;
+  }
+  if (env.database.provider !== 'sqlite')
+    throw new Error('Unsupported database provider.');
 
   if (env.dbPath !== ':memory:') {
     mkdirSync(dirname(env.dbPath), { recursive: true });
   }
 
-  db = new DatabaseSync(env.dbPath);
-  db.exec(SCHEMA);
-  migrate(db);
+  const sqlite = new DatabaseSync(env.dbPath);
+  sqlite.exec(SCHEMA);
+  migrate(sqlite);
   // Browser jobs do not survive a process restart; their cached data does.
-  db.prepare(`UPDATE cadernetas SET sync_status = 'falhou',
+  sqlite.prepare(`UPDATE cadernetas SET sync_status = 'falhou',
     sync_error = 'Synchronization was interrupted. Synchronize the caderneta again.'
     WHERE sync_status = 'sincronizando'`).run();
 
-  db.exec(`
+  sqlite.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS conta_auth_id ON conta(supabase_auth_id);
     CREATE UNIQUE INDEX IF NOT EXISTS professores_auth_id ON professores(supabase_auth_id);
     CREATE TABLE IF NOT EXISTS professor_auth_operations (
@@ -429,11 +509,13 @@ export function getDb(): DatabaseSync {
     );
   `);
 
+  db = new SqliteDatabase(sqlite);
   return db;
 }
 
 /** Closes the current connection so a later `getDb()` call reopens fresh. */
-export function closeDb(): void {
-  db?.close();
+export async function closeDb(): Promise<void> {
+  const current = db;
   db = undefined;
+  await current?.close();
 }

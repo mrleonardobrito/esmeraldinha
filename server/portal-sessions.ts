@@ -1,16 +1,23 @@
+import { lerCredenciaisDoProfessor } from './professores/credenciais';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
-import { registrarLimpezaDeSessao, sessaoAindaAtiva, tokenDaSessaoAtual } from './conta/sessoes';
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from 'playwright';
+import {
+  registrarLimpezaDeSessao,
+  sessaoAindaAtiva,
+  tokenDaSessaoAtual,
+} from './conta/sessoes';
 import { AuthFailure } from './conta/supabase';
 
 import { listConteudoOptions, login } from './scrape/portal';
 import type { ConteudoCatalogo, ProfessorCredenciais } from './scrape/types';
 import { env } from './env';
-import { createEncryptionPort } from './encryption';
-import { getDb } from './professores/db';
-import { getProfessorCredenciais } from './professores/store';
 import {
   fecharConexaoRedis,
   invalidarSessao,
@@ -44,10 +51,11 @@ function trackOwner(id: string): void {
   appOwners.set(id, owners);
 }
 registrarLimpezaDeSessao(async (token) => {
-  for (const [id, owners] of appOwners) if (owners.delete(token) && owners.size === 0) {
-    appOwners.delete(id);
-    await closeSession(id);
-  }
+  for (const [id, owners] of appOwners)
+    if (owners.delete(token) && owners.size === 0) {
+      appOwners.delete(id);
+      await closeSession(id);
+    }
 });
 /** De quem era cada sessão, para saber com qual login refazê-la ao expirar. */
 const donos = new Map<string, string>();
@@ -59,10 +67,12 @@ let browserPromise: Promise<Browser> | null = null;
 /** O navegador é único e compartilhado; cada sessão ganha um contexto isolado. */
 async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
-    browserPromise = chromium.launch({ headless: env.headless.login }).catch((error: unknown) => {
-      browserPromise = null;
-      throw error;
-    });
+    browserPromise = chromium
+      .launch({ headless: env.headless.login })
+      .catch((error: unknown) => {
+        browserPromise = null;
+        throw error;
+      });
   }
   return browserPromise;
 }
@@ -193,7 +203,9 @@ export function touchSession(id: string): PortalSession | undefined {
  * expirada é retomada antes: o catálogo mora na página, e a página nova não
  * herda o que a antiga tinha raspado.
  */
-export async function getCatalogo(id: string): Promise<ConteudoCatalogo | undefined> {
+export async function getCatalogo(
+  id: string,
+): Promise<ConteudoCatalogo | undefined> {
   if (!(await retomarSessao(id))) return undefined;
 
   const session = sessions.get(id);
@@ -202,11 +214,13 @@ export async function getCatalogo(id: string): Promise<ConteudoCatalogo | undefi
   session.lastUsedAt = Date.now();
   scheduleExpiration(session);
 
-  session.catalogo ??= listConteudoOptions(session.page).catch((error: unknown) => {
-    // Uma falha não pode virar cache: a próxima tentativa precisa tentar de novo.
-    session.catalogo = undefined;
-    throw error;
-  });
+  session.catalogo ??= listConteudoOptions(session.page).catch(
+    (error: unknown) => {
+      // Uma falha não pode virar cache: a próxima tentativa precisa tentar de novo.
+      session.catalogo = undefined;
+      throw error;
+    },
+  );
 
   return session.catalogo;
 }
@@ -240,7 +254,9 @@ export async function donoDaSessao(id: string): Promise<string | undefined> {
  * O login que o portal recusa vira `LoginError`, para quem chamou avisar que
  * a senha guardada não serve mais.
  */
-export async function retomarSessao(id: string): Promise<PortalSession | undefined> {
+export async function retomarSessao(
+  id: string,
+): Promise<PortalSession | undefined> {
   const viva = touchSession(id);
   if (viva) return viva;
 
@@ -248,14 +264,14 @@ export async function retomarSessao(id: string): Promise<PortalSession | undefin
   if (!professorId) return undefined;
 
   const emVoo = retomando.get(id);
-  if (emVoo) { const resumed = await emVoo; if (resumed) trackOwner(resumed.id); return resumed; }
+  if (emVoo) {
+    const resumed = await emVoo;
+    if (resumed) trackOwner(resumed.id);
+    return resumed;
+  }
 
   const promessa = (async () => {
-    const credenciais = await getProfessorCredenciais(
-      getDb(),
-      createEncryptionPort(),
-      professorId,
-    );
+    const credenciais = await lerCredenciaisDoProfessor(professorId);
 
     if (!credenciais) {
       // Sem professor não há como refazer o login: a sessão morreu de vez.

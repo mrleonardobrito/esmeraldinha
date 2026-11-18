@@ -39,8 +39,7 @@ quando a mudança tocar o processo principal ou o roteamento `app://`.
 
 Esmeraldinha authenticates the auxiliar de ensino and professores through
 Supabase Auth. Professores continue entering with CPF and senha do portal.
-The local API keeps provider tokens in memory and enforces app idleness;
-application data and encrypted credenciais do professor remain in SQLite.
+The APIs keep provider tokens in memory and enforce app idleness.
 
 Configure the project, SMTP, the intended auxiliar identity, and the separate
 administration service before using the migrated app. Follow
@@ -52,11 +51,24 @@ Desktop builds embed only public project configuration. The shared
 key belongs in the installed application. Missing configuration shows a setup
 error and cannot enable local-password fallback.
 
+## Persistence
+
+Set `ESMERALDINHA_DATA_API_URL` to use Supabase Postgres through the controlled
+data API. Portal automation stays on the desktop. Professores, turmas,
+cadernetas, boletim, profile data, and the administrative journal use private
+Postgres schemas; database passwords and encryption keys stay on the servers.
+
+Follow [Postgres setup and rollout](docs/supabase-postgres.md) for the migration
+plan, runtime roles, deployment, and the **Conta → Dados anteriores** import.
+The import preserves IDs, re-encrypts portal senhas, checks counts, and rolls
+back failed writes. An explicit SQLite mode remains available for local
+development and transition; cloud errors never reactivate it automatically.
+
 ## Distribuição
 
-Esmeraldinha é um app Electron desktop: a API roda dentro do processo
-principal, o SQLite fica em `userData` e as senhas dos professores são cifradas
-pelo chaveiro do sistema operacional. Não há versão hospedada.
+Esmeraldinha remains an Electron desktop app. Local Hono runs in the main
+process and controls Playwright. Hosted persistence uses a separate data API;
+the earlier SQLite database in `userData` is available as the migration source.
 
 O Node precisa ser o 24 (veja `.nvmrc`) — é o que o Electron 44 embute.
 

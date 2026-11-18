@@ -33,7 +33,8 @@ async function paginaDoJob(input: SincronizarInput): Promise<Page> {
   const { retomarSessao } = await import('../portal-sessions');
   const sessao = await retomarSessao(input.sessionId);
 
-  if (!sessao) throw new Error('A sessão do portal expirou e não pôde ser retomada.');
+  if (!sessao)
+    throw new Error('A sessão do portal expirou e não pôde ser retomada.');
 
   return sessao.page;
 }
@@ -45,7 +46,9 @@ async function paginaDoJob(input: SincronizarInput): Promise<Page> {
  *
  * Devolve `false` quando a caderneta já está sendo sincronizada.
  */
-export async function sincronizarCaderneta(input: SincronizarInput): Promise<boolean> {
+export async function sincronizarCaderneta(
+  input: SincronizarInput,
+): Promise<boolean> {
   const { cadernetaId, catalogo } = input;
 
   if (emAndamento.has(cadernetaId)) return false;
@@ -53,8 +56,8 @@ export async function sincronizarCaderneta(input: SincronizarInput): Promise<boo
   emAndamento.add(cadernetaId);
 
   try {
-    const caderneta = getCaderneta(getDb(), cadernetaId);
-    marcarSincronizando(getDb(), cadernetaId);
+    const caderneta = await getCaderneta(getDb(), cadernetaId);
+    await marcarSincronizando(getDb(), cadernetaId);
 
     const page = await paginaDoJob(input);
     const raspagens: { turma: string; raspagem: RaspagemDaTurma }[] = [];
@@ -62,7 +65,7 @@ export async function sincronizarCaderneta(input: SincronizarInput): Promise<boo
     for (const turma of caderneta.turmas) {
       raspagens.push({ turma, raspagem: await rasparCaderneta(page, catalogo, turma) });
     }
-    syncCadernetaTurmas(getDb(), cadernetaId, raspagens);
+    await syncCadernetaTurmas(getDb(), cadernetaId, raspagens);
 
     return true;
   } catch (error) {
@@ -70,7 +73,7 @@ export async function sincronizarCaderneta(input: SincronizarInput): Promise<boo
     console.error(`Falha ao sincronizar a caderneta ${cadernetaId}:`, error);
 
     try {
-      marcarFalhaNaSincronizacao(getDb(), cadernetaId, motivo);
+      await marcarFalhaNaSincronizacao(getDb(), cadernetaId, motivo);
     } catch {
       // A caderneta pode ter sido excluída no meio da raspagem.
     }
@@ -97,14 +100,14 @@ const queued = new Set<string>();
 export function sincronizarEmSegundoPlano(input: SincronizarInput): void {
   if (queued.has(input.cadernetaId) || emAndamento.has(input.cadernetaId)) return;
   // Queued jobs retain their caderneta id too, so reconciliation must wait for them.
-  marcarSincronizando(getDb(), input.cadernetaId);
+  void marcarSincronizando(getDb(), input.cadernetaId).catch(() => {});
   queued.add(input.cadernetaId);
   const anterior = filas.get(input.sessionId) ?? Promise.resolve();
   // `sincronizarCaderneta` já trata os próprios erros; o `catch` aqui é só
   // para uma falha inesperada não interromper a fila de quem vem depois.
   const atual = anterior.then(
-    () => sincronizarCaderneta(input),
-    () => sincronizarCaderneta(input),
+    async () => await sincronizarCaderneta(input),
+    async () => await sincronizarCaderneta(input),
   );
 
   filas.set(input.sessionId, atual);

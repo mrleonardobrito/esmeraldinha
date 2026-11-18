@@ -70,8 +70,10 @@ describe('professores router', () => {
     );
 
     const db = new DatabaseSync(dbPath);
-    const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'professores'")
+    const tables = await db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'professores'",
+      )
       .all();
     db.close();
 
@@ -91,10 +93,15 @@ describe('professores router', () => {
 
     expect(createResponse.status).toBe(201);
     const created = await createResponse.json();
-    expect(created).toMatchObject({ nome: 'Maria da Silva', escola: 'Escola Municipal' });
+    expect(created).toMatchObject({
+      nome: 'Maria da Silva',
+      escola: 'Escola Municipal',
+    });
     expect(created).not.toHaveProperty('senha');
 
-    const listResponse = await app.fetch(new Request('http://localhost/api/professores'));
+    const listResponse = await app.fetch(
+      new Request('http://localhost/api/professores'),
+    );
     expect(listResponse.status).toBe(200);
     const list = await listResponse.json();
 
@@ -115,7 +122,9 @@ describe('professores router', () => {
     );
 
     const db = new DatabaseSync(dbPath);
-    const row = db.prepare('SELECT senha_encrypted FROM professores').get() as {
+    const row = (await db
+      .prepare('SELECT senha_encrypted FROM professores')
+      .get()) as {
       senha_encrypted: Uint8Array;
     };
     db.close();
@@ -180,13 +189,19 @@ describe('professores router', () => {
       new Request(`http://localhost/api/professores/${created.id}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(novoProfessor({ nome: 'Maria Souza', escola: 'Escola Estadual' })),
+        body: JSON.stringify(
+          novoProfessor({ nome: 'Maria Souza', escola: 'Escola Estadual' }),
+        ),
       }),
     );
 
     expect(updateResponse.status).toBe(200);
     const updated = await updateResponse.json();
-    expect(updated).toMatchObject({ id: created.id, nome: 'Maria Souza', escola: 'Escola Estadual' });
+    expect(updated).toMatchObject({
+      id: created.id,
+      nome: 'Maria Souza',
+      escola: 'Escola Estadual',
+    });
     expect(updated).not.toHaveProperty('senha');
   });
 
@@ -209,13 +224,20 @@ describe('professores router', () => {
       new Request(`http://localhost/api/professores/${created.id}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...novoProfessor({ nome: 'Maria Souza' }), imagem: null }),
+        body: JSON.stringify({
+          ...novoProfessor({ nome: 'Maria Souza' }),
+          imagem: null,
+        }),
       }),
     );
 
     expect(updateResponse.status).toBe(200);
     const updated = await updateResponse.json();
-    expect(updated).toMatchObject({ id: created.id, nome: 'Maria Souza', imagem: null });
+    expect(updated).toMatchObject({
+      id: created.id,
+      nome: 'Maria Souza',
+      imagem: null,
+    });
   });
 
   it('leaves the stored senha unchanged when editing without one', async () => {
@@ -231,7 +253,9 @@ describe('professores router', () => {
     const created = await createResponse.json();
 
     const dbBefore = new DatabaseSync(dbPath);
-    const before = dbBefore.prepare('SELECT senha_encrypted FROM professores WHERE id = ?').get(created.id) as {
+    const before = (await dbBefore
+      .prepare('SELECT senha_encrypted FROM professores WHERE id = ?')
+      .get(created.id)) as {
       senha_encrypted: Uint8Array;
     };
     dbBefore.close();
@@ -250,14 +274,18 @@ describe('professores router', () => {
     expect(updateResponse.status).toBe(200);
 
     const dbAfter = new DatabaseSync(dbPath);
-    const after = dbAfter.prepare('SELECT senha_encrypted FROM professores WHERE id = ?').get(created.id) as {
+    const after = (await dbAfter
+      .prepare('SELECT senha_encrypted FROM professores WHERE id = ?')
+      .get(created.id)) as {
       senha_encrypted: Uint8Array;
     };
     dbAfter.close();
 
-    expect(Buffer.from(after.senha_encrypted).equals(Buffer.from(before.senha_encrypted))).toBe(
-      true,
-    );
+    expect(
+      Buffer.from(after.senha_encrypted).equals(
+        Buffer.from(before.senha_encrypted),
+      ),
+    ).toBe(true);
   });
 
   it('replaces the senha, still encrypted, when a new one is supplied', async () => {
@@ -283,7 +311,9 @@ describe('professores router', () => {
     expect(updateResponse.status).toBe(200);
 
     const db = new DatabaseSync(dbPath);
-    const row = db.prepare('SELECT senha_encrypted FROM professores WHERE id = ?').get(created.id) as {
+    const row = (await db
+      .prepare('SELECT senha_encrypted FROM professores WHERE id = ?')
+      .get(created.id)) as {
       senha_encrypted: Uint8Array;
     };
     db.close();
@@ -308,7 +338,9 @@ describe('professores router', () => {
       new Request('http://localhost/api/professores', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(novoProfessor({ nome: 'Outro Nome', login: '529.982.247-25' })),
+        body: JSON.stringify(
+          novoProfessor({ nome: 'Outro Nome', login: '529.982.247-25' }),
+        ),
       }),
     );
     const second = await secondResponse.json();
@@ -364,18 +396,24 @@ describe('professores router', () => {
     const created = await createResponse.json();
 
     const deleteResponse = await app.fetch(
-      new Request(`http://localhost/api/professores/${created.id}`, { method: 'DELETE' }),
+      new Request(`http://localhost/api/professores/${created.id}`, {
+        method: 'DELETE',
+      }),
     );
 
     expect(deleteResponse.status).toBe(204);
 
     const db = new DatabaseSync(dbPath);
-    const row = db.prepare('SELECT id FROM professores WHERE id = ?').get(created.id);
+    const row = await db
+      .prepare('SELECT id FROM professores WHERE id = ?')
+      .get(created.id);
     db.close();
 
     expect(row).toBeUndefined();
 
-    const listResponse = await app.fetch(new Request('http://localhost/api/professores'));
+    const listResponse = await app.fetch(
+      new Request('http://localhost/api/professores'),
+    );
     const list = await listResponse.json();
     expect(list).toHaveLength(0);
   });
@@ -398,7 +436,9 @@ describe('professores router', () => {
     const app = await freshApp();
 
     const response = await app.fetch(
-      new Request('http://localhost/api/professores/id-inexistente', { method: 'DELETE' }),
+      new Request('http://localhost/api/professores/id-inexistente', {
+        method: 'DELETE',
+      }),
     );
 
     expect(response.status).toBe(404);

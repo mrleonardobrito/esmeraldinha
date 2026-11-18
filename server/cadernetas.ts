@@ -42,6 +42,7 @@ import {
   TurmaJaCadastradaError,
   createCaderneta,
   deleteCaderneta,
+  findCadernetaDaTurma,
   getBoletimDaEtapa,
   getCaderneta,
   listAvaliacoesDoProfessor,
@@ -49,6 +50,7 @@ import {
   listAulasDaEtapa,
   listEstudantes,
   marcarNotasLancadas,
+  updateValores,
   type Caderneta,
 } from './cadernetas/store';
 import { resolverNotasParaPreview, type NotaResolvida } from './notas/plano';
@@ -68,9 +70,9 @@ import { sincronizarEmSegundoPlano } from './cadernetas/sincronizacao';
 import { preenchimentosDeConteudo } from './cadernetas/preenchimento-de-conteudos';
 import { fichaDeDesempenho } from './cadernetas/ficha-de-desempenho';
 import { env } from './env';
-import { createEncryptionPort } from './encryption';
 import { getDb } from './professores/db';
-import { getProfessorCredenciais } from './professores/store';
+import { lerCredenciaisDoProfessor } from './professores/credenciais';
+import { getProfessor } from './professores/store';
 import type { ContaEnv } from './conta/autenticacao';
 
 const abrirSessaoSchema = z.object({
@@ -188,10 +190,15 @@ cadernetas.use('*', async (context, next) => {
     }
   }
   if (body.cadernetaId) {
-    const owned = getDb().prepare(
-      'SELECT id FROM cadernetas WHERE id = ? AND professor_id = ?',
-    ).get(String(body.cadernetaId), identidade.professorId);
-    if (!owned) return context.json({ error: 'Access denied.' }, 403);
+    try {
+      const owned = await getCaderneta(getDb(), String(body.cadernetaId));
+      if (owned.professorId !== identidade.professorId)
+        return context.json({ error: 'Access denied.' }, 403);
+    } catch (error) {
+      if (error instanceof CadernetaNotFoundError)
+        return context.json({ error: 'Access denied.' }, 403);
+      throw error;
+    }
   }
   const pathSession = context.req.path.match(/\/sessoes\/([^/]+)/)?.[1];
   for (const value of [pathSession, body.sessionId, context.req.query('sessionId')]) {
@@ -212,7 +219,7 @@ cadernetas.use('*', async (context, next) => {
   }
 
   try {
-    const caderneta = getCaderneta(getDb(), primeiroSegmento);
+    const caderneta = await getCaderneta(getDb(), primeiroSegmento);
     if (!acessoAoProfessor(context, caderneta.professorId)) {
       return context.json({ error: 'Você só pode acessar as suas cadernetas.' }, 403);
     }
@@ -233,7 +240,7 @@ cadernetas.use('*', async (context, next) => {
   const turma = context.req.query('turma');
   const scoped = /^\/(etapas|estudantes|conteudos|boletim|ficha-de-desempenho)(\/|$)/.test(match[2] ?? '');
   if (turma !== undefined || scoped) {
-    const caderneta = getCaderneta(getDb(), decodeURIComponent(match[1]));
+    const caderneta = await getCaderneta(getDb(), decodeURIComponent(match[1]));
     if (turma !== undefined && !caderneta.turmas.includes(turma)) {
       return context.json({ error: 'Esta turma não faz parte desta caderneta. Feche e abra a ficha de novo.' }, 422);
     }
@@ -261,7 +268,7 @@ cadernetas.post('/sessoes', async (context) => {
     return context.json({ error: 'Você só pode abrir a sua sessão no portal.' }, 403);
   }
 
-  const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), professorId);
+  const credenciais = await lerCredenciaisDoProfessor(professorId);
 
   if (!credenciais) {
     return context.json({ error: 'Professor não encontrado.' }, 404);
@@ -431,7 +438,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
     }
 
     if (turmaDoEnvio) {
-      if (cadernetaId) cadernetaDoPlano(cadernetaId, session.professorId, turmaDoEnvio);
+      if (cadernetaId) await cadernetaDoPlano(cadernetaId, session.professorId, turmaDoEnvio);
       if (!turmasDoCatalogo(catalogo).includes(turmaDoEnvio)) {
         return context.json({ error: 'A turma não pertence a este professor.' }, 422);
       }
@@ -444,7 +451,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
     // sincronização da caderneta já as deixou turma por turma.
     const comAvaliacoes = comAvaliacoesDoBanco(
       catalogo,
-      listAvaliacoesDoProfessor(getDb(), session.professorId),
+      await listAvaliacoesDoProfessor(getDb(), session.professorId),
     );
 
     const scopedCatalogo = turmaDoEnvio ? {
@@ -456,10 +463,10 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
         })),
     } : comAvaliacoes;
     const plano = await interpretarEnvio({ texto, arquivos, catalogo: scopedCatalogo });
-    if (cadernetaId) cadernetaDoPlano(cadernetaId, session.professorId, plano.turma);
+    if (cadernetaId) await cadernetaDoPlano(cadernetaId, session.professorId, plano.turma);
 
     if (plano.parte === 'boletim') {
-      const caderneta = cadernetaDoPlano(cadernetaId, session.professorId, plano.turma);
+      const caderneta = await cadernetaDoPlano(cadernetaId, session.professorId, plano.turma);
 
       if (!caderneta) {
         throw new BoletimIndisponivelError(
@@ -468,7 +475,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
         );
       }
 
-      const estudantes = listEstudantes(getDb(), caderneta.id, caderneta.turma);
+      const estudantes = await listEstudantes(getDb(), caderneta.id, caderneta.turma);
 
       if (estudantes.length === 0) {
         throw new BoletimIndisponivelError(
@@ -477,7 +484,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
         );
       }
 
-      const disciplinas = listDisciplinasDaCaderneta(getDb(), caderneta.id, caderneta.turma);
+      const disciplinas = await listDisciplinasDaCaderneta(getDb(), caderneta.id, caderneta.turma);
       const disciplina = plano.disciplina || disciplinas[0];
 
       if (!disciplina) {
@@ -577,17 +584,17 @@ cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (co
   }
 
   const { professorId, cadernetaId, etapa, mes, turma, aula } = parsed.data;
-  if (cadernetaId) cadernetaDoPlano(cadernetaId, professorId, turma);
+  if (cadernetaId) await cadernetaDoPlano(cadernetaId, professorId, turma);
   const { data, ordem, ...conteudo } = aula;
 
-  const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), professorId);
+  const credenciais = await lerCredenciaisDoProfessor(professorId);
 
   if (!credenciais) {
     return context.json({ error: 'Professor não encontrado.' }, 404);
   }
 
   try {
-    const periodoLetivo = periodoLetivoDaTurma(getDb(), professorId, turma);
+    const periodoLetivo = await periodoLetivoDaTurma(getDb(), professorId, turma);
 
     await naSessaoHeaded(professorId, credenciais, (page) =>
       prepararAulaParaPreenchimento(page, {
@@ -659,16 +666,16 @@ cadernetas.post('/sessoes/:id/envios/boletim/preenchimentos-assistidos', async (
   }
 
   const { professorId, cadernetaId, etapa, turma, disciplina, notas } = parsed.data;
-  if (cadernetaId) cadernetaDoPlano(cadernetaId, professorId, turma);
+  if (cadernetaId) await cadernetaDoPlano(cadernetaId, professorId, turma);
 
-  const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), professorId);
+  const credenciais = await lerCredenciaisDoProfessor(professorId);
 
   if (!credenciais) {
     return context.json({ error: 'Professor não encontrado.' }, 404);
   }
 
   try {
-    const periodoLetivo = periodoLetivoDaTurma(getDb(), professorId, turma);
+    const periodoLetivo = await periodoLetivoDaTurma(getDb(), professorId, turma);
 
     await naSessaoHeaded(professorId, credenciais, (page) =>
       prepararNotasParaPreenchimento(page, { periodoLetivo, etapa, turma, disciplina, notas }),
@@ -676,7 +683,7 @@ cadernetas.post('/sessoes/:id/envios/boletim/preenchimentos-assistidos', async (
 
     if (cadernetaId) {
       try {
-        marcarNotasLancadas(
+        await marcarNotasLancadas(
           getDb(),
           cadernetaId,
           notas.map((nota) => ({ etapa, disciplina, ...nota })),
@@ -715,24 +722,22 @@ cadernetas.post('/sessoes/:id/envios/boletim/preenchimentos-assistidos', async (
 
 
 /** Resolve the plano's turma within its caderneta and professor. */
-function cadernetaDoPlano(
+async function cadernetaDoPlano(
   cadernetaId: string,
   professorId: string,
   turma: string,
-): Caderneta | undefined {
+): Promise<Caderneta | undefined> {
   if (cadernetaId) {
-    const caderneta = getCaderneta(getDb(), cadernetaId, turma);
+    const caderneta = await getCaderneta(getDb(), cadernetaId, turma);
     if (caderneta.professorId !== professorId) {
       throw new CadernetaInvalidaError('The caderneta belongs to another professor.');
     }
     return caderneta;
   }
 
-  const row = getDb()
-    .prepare('SELECT caderneta_id AS id FROM caderneta_turmas WHERE professor_id = ? AND turma = ?')
-    .get(professorId, turma) as unknown as { id: string } | undefined;
+  const id = await findCadernetaDaTurma(getDb(), professorId, turma);
 
-  return row ? getCaderneta(getDb(), row.id, turma) : undefined;
+  return id ? await getCaderneta(getDb(), id, turma) : undefined;
 }
 
 /** O envio de notas não pôde ser gravado, e o porquê. */
@@ -777,9 +782,7 @@ cadernetas.post('/', async (context) => {
     return context.json({ error: 'The sessão do portal belongs to another professor.' }, 422);
   }
 
-  const professor = getDb()
-    .prepare('SELECT id FROM professores WHERE id = ?')
-    .get(professorId);
+  const professor = await getProfessor(getDb(), professorId);
 
   if (!professor) {
     return context.json({ error: 'Professor não encontrado.' }, 404);
@@ -805,7 +808,7 @@ cadernetas.post('/', async (context) => {
   const disponiveis = turmasDoCatalogo(catalogo);
 
   // Persist the relationship before deciding which turmas share a caderneta.
-  replaceTurmas(getDb(), professorId, turmasComPeriodo(catalogo));
+  await replaceTurmas(getDb(), professorId, turmasComPeriodo(catalogo));
 
   const cadastradas: Caderneta[] = [];
   const recusadas: { turma: string; motivo: string }[] = [];
@@ -824,7 +827,7 @@ cadernetas.post('/', async (context) => {
     }
 
     try {
-      const caderneta = createCaderneta(getDb(), { professorId, turma });
+      const caderneta = await createCaderneta(getDb(), { professorId, turma });
 
       cadastradas.push(caderneta);
     } catch (error) {
@@ -843,7 +846,7 @@ cadernetas.post('/', async (context) => {
   }
 
   const accepted = new Set(cadastradas.flatMap((caderneta) => caderneta.turmas));
-  const reconciled = reconcileCadernetasDeReducao(getDb(), professorId);
+  const reconciled = await reconcileCadernetasDeReducao(getDb(), professorId);
   const resulting = reconciled.filter((caderneta) => caderneta.turmas.some((nome) => accepted.has(nome)));
   // Consolidate first: no queued job should retain a caderneta id removed by grouping.
   for (const caderneta of resulting) {
@@ -893,8 +896,8 @@ cadernetas.get('/turmas', async (context) => {
       return context.json({ error: 'Sessão não encontrada ou expirada.' }, 404);
     }
 
-    replaceTurmas(getDb(), session.professorId, turmasComPeriodo(catalogo));
-    reconcileCadernetasDeReducao(getDb(), session.professorId);
+    await replaceTurmas(getDb(), session.professorId, turmasComPeriodo(catalogo));
+    await reconcileCadernetasDeReducao(getDb(), session.professorId);
 
     return context.json({
       turmas: turmasDoCatalogo(catalogo),
@@ -909,7 +912,7 @@ cadernetas.get('/turmas', async (context) => {
 });
 
 /** A grade: as cadernetas do professor, com o progresso de cada etapa. */
-cadernetas.get('/', (context) => {
+cadernetas.get('/', async (context) => {
   const professorId = context.req.query('professorId')?.trim();
 
   if (!professorId) {
@@ -920,12 +923,12 @@ cadernetas.get('/', (context) => {
     return context.json({ error: 'Você só pode visualizar as suas cadernetas.' }, 403);
   }
 
-  return context.json(reconcileCadernetasDeReducao(getDb(), professorId));
+  return context.json(await reconcileCadernetasDeReducao(getDb(), professorId));
 });
 
-cadernetas.get('/:id', (context) => {
+cadernetas.get('/:id', async (context) => {
   try {
-    return context.json(getCaderneta(getDb(), context.req.param('id'), context.req.query('turma')));
+    return context.json(await getCaderneta(getDb(), context.req.param('id'), context.req.query('turma')));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -935,12 +938,12 @@ cadernetas.get('/:id', (context) => {
 });
 
 /** As aulas datadas de uma etapa, que é o que a tela de lançar conteúdo lista. */
-cadernetas.get('/:id/etapas/:etapa/aulas', (context) => {
+cadernetas.get('/:id/etapas/:etapa/aulas', async (context) => {
   const id = context.req.param('id');
   const etapa = decodeURIComponent(context.req.param('etapa'));
 
   try {
-    getCaderneta(getDb(), id, context.req.query('turma'));
+    await getCaderneta(getDb(), id, context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -948,7 +951,7 @@ cadernetas.get('/:id/etapas/:etapa/aulas', (context) => {
     throw error;
   }
 
-  return context.json({ etapa, aulas: listAulasDaEtapa(getDb(), id, etapa, context.req.query('turma')) });
+  return context.json({ etapa, aulas: await listAulasDaEtapa(getDb(), id, etapa, context.req.query('turma')) });
 });
 
 const rascunhosDeConteudoSchema = z.object({
@@ -1008,7 +1011,7 @@ cadernetas.post('/:id/etapas/:etapa/conteudos/rascunhos', async (context) => {
 
   let caderneta: Caderneta;
   try {
-    caderneta = getCaderneta(getDb(), id, context.req.query('turma'));
+    caderneta = await getCaderneta(getDb(), id, context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -1048,7 +1051,7 @@ cadernetas.post('/:id/etapas/:etapa/conteudos/rascunhos', async (context) => {
   }
 
   const { mes, mensagens, rascunhos, referencias } = parsed.data;
-  const aulasDaEtapa = listAulasDaEtapa(getDb(), id, etapa, context.req.query('turma'));
+  const aulasDaEtapa = await listAulasDaEtapa(getDb(), id, etapa, context.req.query('turma'));
   const noEscopo = aulasDaEtapa.filter((aula) => mes === null || aula.mes === mes);
 
   if (noEscopo.length === 0) {
@@ -1060,13 +1063,13 @@ cadernetas.post('/:id/etapas/:etapa/conteudos/rascunhos', async (context) => {
 
   // As referências vêm como endereço (etapa, data, ordem) e são lidas do banco
   // aqui: o cliente não carrega o texto de uma aula só para mandá-lo de volta.
-  const porEtapa = new Map<string, ReturnType<typeof listAulasDaEtapa>>();
+  const porEtapa = new Map<string, Awaited<ReturnType<typeof listAulasDaEtapa>>>();
   const aulasDeReferencia: AulaDeReferencia[] = [];
   for (const referencia of referencias) {
     let aulas = porEtapa.get(referencia.etapa);
     if (!aulas) {
       aulas =
-        referencia.etapa === etapa ? aulasDaEtapa : listAulasDaEtapa(getDb(), id, referencia.etapa, context.req.query('turma'));
+        referencia.etapa === etapa ? aulasDaEtapa : await listAulasDaEtapa(getDb(), id, referencia.etapa, context.req.query('turma'));
       porEtapa.set(referencia.etapa, aulas);
     }
     const aula = aulas.find(
@@ -1096,7 +1099,7 @@ cadernetas.post('/:id/etapas/:etapa/conteudos/rascunhos', async (context) => {
       rascunhos: rascunhos as RascunhoDeConteudo[],
       mensagens: mensagens as MensagemDaConversa[],
       arquivos,
-      codigosCR: garantirCatalogoDeCodigosCR(getDb()),
+      codigosCR: await garantirCatalogoDeCodigosCR(getDb()),
     });
 
     return context.json(gerados);
@@ -1122,13 +1125,13 @@ cadernetas.post('/:id/etapas/:etapa/conteudos/rascunhos', async (context) => {
 });
 
 /** O boletim de uma etapa: os estudantes, as avaliações e as notas. */
-cadernetas.get('/:id/etapas/:etapa/boletim', (context) => {
+cadernetas.get('/:id/etapas/:etapa/boletim', async (context) => {
   const id = context.req.param('id');
   const etapa = decodeURIComponent(context.req.param('etapa'));
 
   let caderneta: Caderneta;
   try {
-    caderneta = getCaderneta(getDb(), id, context.req.query('turma'));
+    caderneta = await getCaderneta(getDb(), id, context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -1139,9 +1142,9 @@ cadernetas.get('/:id/etapas/:etapa/boletim', (context) => {
   const disciplina = context.req.query('disciplina')?.trim() || undefined;
 
   return context.json({
-    ...getBoletimDaEtapa(getDb(), id, etapa, disciplina, caderneta.turma),
-    classificacaoPadrao: getClassificacaoPadrao(getDb(), caderneta.professorId, caderneta.turma),
-    classificacoes: listClassificacoes(getDb(), caderneta.professorId, caderneta.turma),
+    ...(await getBoletimDaEtapa(getDb(), id, etapa, disciplina, caderneta.turma)),
+    classificacaoPadrao: await getClassificacaoPadrao(getDb(), caderneta.professorId, caderneta.turma),
+    classificacoes: await listClassificacoes(getDb(), caderneta.professorId, caderneta.turma),
   });
 });
 
@@ -1155,8 +1158,8 @@ cadernetas.put('/:id/boletim/classificacao-padrao', async (context) => {
     return context.json({ error: 'Informe uma classificação válida.' }, 400);
   }
 
-  const caderneta = getCaderneta(getDb(), context.req.param('id'), context.req.query('turma'));
-  setClassificacaoPadrao(getDb(), caderneta.professorId, caderneta.turma, parsed.data.classificacao);
+  const caderneta = await getCaderneta(getDb(), context.req.param('id'), context.req.query('turma'));
+  await setClassificacaoPadrao(getDb(), caderneta.professorId, caderneta.turma, parsed.data.classificacao);
 
   return context.json({ classificacao: parsed.data.classificacao });
 });
@@ -1196,8 +1199,8 @@ cadernetas.post('/:id/etapas/:etapa/boletim/rascunhos', async (context) => {
     return context.json({ error: 'Informe a conversa com o agente.' }, 400);
   }
 
-  const caderneta = getCaderneta(getDb(), context.req.param('id'), context.req.query('turma'));
-  const boletim = getBoletimDaEtapa(
+  const caderneta = await getCaderneta(getDb(), context.req.param('id'), context.req.query('turma'));
+  const boletim = await getBoletimDaEtapa(
     getDb(),
     caderneta.id,
     etapa,
@@ -1253,11 +1256,11 @@ cadernetas.post('/:id/etapas/:etapa/boletim/rascunhos', async (context) => {
 });
 
 /** Os estudantes da turma, que é o que a aba de turmas mostra. */
-cadernetas.get('/:id/estudantes', (context) => {
+cadernetas.get('/:id/estudantes', async (context) => {
   const id = context.req.param('id');
 
   try {
-    getCaderneta(getDb(), id, context.req.query('turma'));
+    await getCaderneta(getDb(), id, context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -1265,7 +1268,7 @@ cadernetas.get('/:id/estudantes', (context) => {
     throw error;
   }
 
-  return context.json({ estudantes: listEstudantes(getDb(), id, context.req.query('turma')) });
+  return context.json({ estudantes: await listEstudantes(getDb(), id, context.req.query('turma')) });
 });
 
 /** Relê a turma no portal: a válvula para quando alguém preenche por fora. */
@@ -1293,7 +1296,7 @@ cadernetas.post('/:id/sincronizacoes', async (context) => {
   }
 
   try {
-    const caderneta = getCaderneta(getDb(), id, context.req.query('turma'));
+    const caderneta = await getCaderneta(getDb(), id, context.req.query('turma'));
     if (session.professorId !== caderneta.professorId) {
       return context.json({ error: 'The sessão do portal belongs to another professor.' }, 422);
     }
@@ -1304,9 +1307,9 @@ cadernetas.post('/:id/sincronizacoes', async (context) => {
     }
 
     // The original id may have been consolidated while the portal was loading.
-    const currentId = cadernetaDoPlano('', caderneta.professorId, caderneta.turma)?.id;
+    const currentId = (await cadernetaDoPlano('', caderneta.professorId, caderneta.turma))?.id;
     if (!currentId) throw new CadernetaNotFoundError(id);
-    const current = getCaderneta(getDb(), currentId, context.req.query('turma'));
+    const current = await getCaderneta(getDb(), currentId, context.req.query('turma'));
     sincronizarEmSegundoPlano({
       cadernetaId: current.id,
       sessionId: parsed.data.sessionId,
@@ -1346,7 +1349,7 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
 
   let caderneta: Caderneta;
   try {
-    caderneta = getCaderneta(getDb(), context.req.param('id'), context.req.query('turma'));
+    caderneta = await getCaderneta(getDb(), context.req.param('id'), context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -1354,11 +1357,7 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
     throw error;
   }
 
-  const credenciais = await getProfessorCredenciais(
-    getDb(),
-    createEncryptionPort(),
-    caderneta.professorId,
-  );
+  const credenciais = await lerCredenciaisDoProfessor(caderneta.professorId);
 
   if (!credenciais) {
     return context.json({ error: 'Professor não encontrado.' }, 404);
@@ -1367,7 +1366,7 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
   try {
     // Sem disciplina informada vale a primeira da caderneta: é o caso de quem
     // tem uma só e não escolheu nada na tela.
-    const escolhida = disciplina ?? listDisciplinasDaCaderneta(getDb(), caderneta.id, caderneta.turma)[0];
+    const escolhida = disciplina ?? (await listDisciplinasDaCaderneta(getDb(), caderneta.id, caderneta.turma))[0];
 
     if (!escolhida) {
       return context.json(
@@ -1380,9 +1379,10 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
       );
     }
 
+    const periodoLetivo = await periodoLetivoDaTurma(getDb(), caderneta.professorId, caderneta.turma);
     await naSessaoHeaded(caderneta.professorId, credenciais, (page) =>
       prepararNotasParaPreenchimento(page, {
-        periodoLetivo: periodoLetivoDaTurma(getDb(), caderneta.professorId, caderneta.turma),
+        periodoLetivo,
         etapa,
         turma: caderneta.turma,
         disciplina: escolhida,
@@ -1400,7 +1400,7 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
     );
 
     try {
-      marcarNotasLancadas(
+      await marcarNotasLancadas(
         getDb(),
         caderneta.id,
         notas.map((nota) => ({ etapa, disciplina: escolhida, ...nota })),
@@ -1412,7 +1412,7 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
     }
 
     try {
-      salvarClassificacoes(getDb(), caderneta.professorId, caderneta.turma, classificacoes);
+      await salvarClassificacoes(getDb(), caderneta.professorId, caderneta.turma, classificacoes);
     } catch (error) {
       console.error('Failed to save the classificações:', error);
     }
@@ -1442,9 +1442,9 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
   }
 });
 
-cadernetas.delete('/:id', (context) => {
+cadernetas.delete('/:id', async (context) => {
   try {
-    deleteCaderneta(getDb(), context.req.param('id'));
+    await deleteCaderneta(getDb(), context.req.param('id'));
     return context.body(null, 204);
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
@@ -1461,7 +1461,11 @@ cadernetas.put('/:id', async (context) => {
   if (context.get('identidade').papel !== 'auxiliar de ensino') return context.json({ error: 'Access denied.' }, 403);
   const parsed = cadernetaUpdateSchema.safeParse(await context.req.json().catch(() => null));
   if (!parsed.success) return context.json({ error: 'Valores inválidos.' }, 400);
-  const result = getDb().prepare('UPDATE cadernetas SET valor_recebido = ?, valor_a_receber = ? WHERE id = ?').run(parsed.data.valorRecebido, parsed.data.valorAReceber, context.req.param('id'));
-  if (!result.changes) return context.json({ error: 'Caderneta não encontrada.' }, 404);
-  return context.json(getCaderneta(getDb(), context.req.param('id'), context.req.query('turma')));
+  try {
+    await updateValores(getDb(), context.req.param('id'), parsed.data);
+  } catch (error) {
+    if (error instanceof CadernetaNotFoundError) return context.json({ error: 'Caderneta não encontrada.' }, 404);
+    throw error;
+  }
+  return context.json(await getCaderneta(getDb(), context.req.param('id'), context.req.query('turma')));
 });

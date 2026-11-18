@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
+import { callData } from '../database/remote';
+import { transaction, type Database } from '../database/types';
+import { env } from '../env';
 import type { AulaDoPortal, AvaliacaoDoPortal, NotaDoEstudante, NotaDoPortal } from '../scrape/types';
 import { turnoDaTurma } from '../turmas/turno';
 import { isReducao } from '../../shared/turma';
@@ -174,38 +176,26 @@ interface CadernetaRow {
   valor_a_receber: number | null;
 }
 
-function transaction<T>(db: DatabaseSync, operation: () => T): T {
-  db.exec('BEGIN');
-  try {
-    const result = operation();
-    db.exec('COMMIT');
-    return result;
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
-
-function turmasDaCaderneta(db: DatabaseSync, id: string): string[] {
-  const rows = db.prepare(
+async function turmasDaCaderneta(db: Database, id: string): Promise<string[]> {
+  const rows = (await db.prepare(
     'SELECT turma FROM caderneta_turmas WHERE caderneta_id = ? ORDER BY posicao',
   )
-    .all(id) as unknown as {
+    .all(id)) as unknown as {
       turma: string;
     }[];
   if (rows.length) return rows.map(row => row.turma);
-  const row = db.prepare('SELECT turma FROM cadernetas WHERE id = ?').get(id) as unknown as {
+  const row = (await db.prepare('SELECT turma FROM cadernetas WHERE id = ?').get(id)) as unknown as {
     turma: string;
   } | undefined;
   return row ? [row.turma] : [];
 }
 
-function selectedTurma(
-  db: DatabaseSync,
+async function selectedTurma(
+  db: Database,
   id: string,
   turma?: string,
-): string {
-  const turmas = turmasDaCaderneta(db, id);
+): Promise<string> {
+  const turmas = await turmasDaCaderneta(db, id);
   if (turma !== undefined && !turmas.includes(turma)) {
     throw new CadernetaInvalidaError('The turma does not belong to this caderneta.');
   }
@@ -218,50 +208,50 @@ function statusDoConteudo(total: number, preenchidas: number): StatusDaParte {
 }
 
 /** Compute each turma separately so estudantes and avaliações never cross-multiply. */
-function readEtapas(
-  db: DatabaseSync,
+async function readEtapas(
+  db: Database,
   id: string,
   turmas: readonly string[],
-): EtapaDaCaderneta[] {
+): Promise<EtapaDaCaderneta[]> {
   const etapas = new Map<string, EtapaDaCaderneta>();
   const statuses = new Map<string, { conteudo: StatusDaParte[]; boletim: StatusDaParte[]; }>();
   for (const turma of turmas) {
-    const rows = db.prepare(
+    const rows = (await db.prepare(
       `SELECT e.nome, e.meses, COUNT(a.data) AS total,
-       COALESCE(SUM(a.conteudo_preenchido), 0) AS preenchidas
+       COALESCE(SUM(CAST(a.conteudo_preenchido AS INTEGER)), 0) AS preenchidas
        FROM caderneta_etapas e LEFT JOIN caderneta_aulas a
        ON a.caderneta_id = e.caderneta_id AND a.turma = e.turma AND a.etapa = e.nome
        WHERE e.caderneta_id = ? AND e.turma = ? GROUP BY e.nome, e.meses, e.posicao ORDER BY e.posicao`,
     )
-      .all(id, turma) as unknown as {
+      .all(id, turma)) as unknown as {
         nome: string;
         meses: string;
         total: number;
         preenchidas: number;
       }[];
-    const estudantes = db.prepare(
+    const estudantes = (await db.prepare(
       `SELECT COUNT(*) AS total FROM caderneta_estudantes
        WHERE caderneta_id = ? AND turma = ?
        AND UPPER(TRIM(COALESCE(situacao, ''))) NOT IN ('TRANSFERIDO', 'TRANSFERIDA')`,
     )
-      .get(id, turma) as unknown as {
+      .get(id, turma)) as unknown as {
         total: number;
       };
-    const avaliacoes = new Map((db.prepare(
+    const avaliacoes = new Map(((await db.prepare(
       `SELECT etapa, COUNT(*) AS total FROM caderneta_avaliacoes
        WHERE caderneta_id = ? AND turma = ? GROUP BY etapa`,
     )
-      .all(id, turma) as unknown as {
+      .all(id, turma)) as unknown as {
         etapa: string;
         total: number;
       }[]).map(row => [row.etapa, Number(row.total)]));
-    const notas = new Map((db.prepare(
+    const notas = new Map(((await db.prepare(
       `SELECT n.etapa, COUNT(*) AS total FROM caderneta_notas n
        JOIN caderneta_estudantes e ON e.caderneta_id = n.caderneta_id AND e.turma = n.turma AND e.matricula = n.matricula
        WHERE n.caderneta_id = ? AND n.turma = ?
        AND UPPER(TRIM(COALESCE(e.situacao, ''))) NOT IN ('TRANSFERIDO', 'TRANSFERIDA') GROUP BY n.etapa`,
     )
-      .all(id, turma) as unknown as {
+      .all(id, turma)) as unknown as {
         etapa: string;
         total: number;
       }[]).map(row => [row.etapa, Number(row.total)]));
@@ -304,34 +294,38 @@ function readEtapas(
   return [...etapas.values()];
 }
 
-function toCaderneta(
-  db: DatabaseSync,
+async function toCaderneta(
+  db: Database,
   row: CadernetaRow,
   turma?: string,
-): Caderneta {
-  const turmas = turmasDaCaderneta(db, row.id);
-  const selected = selectedTurma(db, row.id, turma);
+): Promise<Caderneta> {
+  const turmas = await turmasDaCaderneta(db, row.id);
+  const selected = await selectedTurma(db, row.id, turma);
   const scope = turma === undefined ? turmas : [selected];
   const count = db.prepare(
     'SELECT COUNT(*) AS total FROM caderneta_estudantes WHERE caderneta_id = ? AND turma = ?',
   );
   const turnos = new Set(scope.map(turnoDaTurma));
+  let totalDeEstudantes = 0;
+  for (const nome of scope) {
+    totalDeEstudantes += Number(((await count.get(row.id, nome)) as unknown as {
+      total: number;
+    }).total);
+  }
   return {
     id: row.id,
     professorId: row.professor_id,
     turma: selected,
     turmas,
     turno: turnos.size === 1 ? turnoDaTurma(scope[0] ?? row.turma) : null,
-    etapas: readEtapas(db, row.id, scope),
-    totalDeEstudantes: scope.reduce((sum, nome) => sum + Number((count.get(row.id, nome) as unknown as {
-      total: number;
-    }).total), 0),
+    etapas: await readEtapas(db, row.id, scope),
+    totalDeEstudantes,
     createdAt: row.created_at,
     syncedAt: row.synced_at,
     syncStatus: row.sync_status,
     syncError: row.sync_error,
-    valorRecebido: row.valor_recebido,
-    valorAReceber: row.valor_a_receber
+    valorRecebido: row.valor_recebido === null ? null : Number(row.valor_recebido),
+    valorAReceber: row.valor_a_receber === null ? null : Number(row.valor_a_receber)
   };
 }
 
@@ -342,7 +336,9 @@ export interface CadernetaInput {
 }
 
 /** Create one caderneta, grouping turmas only when explicitly requested. */
-export function createCaderneta(db: DatabaseSync, input: CadernetaInput): Caderneta {
+export async function createCaderneta(db: Database, input: CadernetaInput): Promise<Caderneta> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof createCaderneta>>>('cadernetas.createCaderneta', [input]);
   const turmas = input.turmas ? [...input.turmas] : input.turma ? [input.turma] : [];
   if (!turmas.length || turmas.length > 4 || new Set(turmas).size !== turmas.length || turmas.some(turma => !turma.trim())) {
     throw new CadernetaInvalidaError('A caderneta must contain one to four distinct turmas.');
@@ -350,7 +346,7 @@ export function createCaderneta(db: DatabaseSync, input: CadernetaInput): Cadern
   if (turmas.length > 1) {
     const lookup = db.prepare('SELECT grupo_diario FROM turmas WHERE professor_id = ? AND nome = ?');
     for (const turma of turmas) {
-      const row = lookup.get(input.professorId, turma) as unknown as {
+      const row = (await lookup.get(input.professorId, turma)) as unknown as {
         grupo_diario: string | null;
       } | undefined;
       if (!row || !isReducao(row.grupo_diario)) {
@@ -359,9 +355,9 @@ export function createCaderneta(db: DatabaseSync, input: CadernetaInput): Cadern
     }
   }
   const id = randomUUID();
-  transaction(db, () => {
+  await transaction(db, async () => {
     for (const turma of turmas) {
-      if (db.prepare(
+      if (await db.prepare(
         `SELECT 1 FROM caderneta_turmas WHERE professor_id = ? AND turma = ?
          UNION ALL SELECT 1 FROM cadernetas WHERE professor_id = ? AND turma = ?`,
       )
@@ -369,7 +365,7 @@ export function createCaderneta(db: DatabaseSync, input: CadernetaInput): Cadern
         throw new TurmaJaCadastradaError(turma);
       }
     }
-    db.prepare(
+    await db.prepare(
       `INSERT INTO cadernetas (id, professor_id, turma, turno, created_at, sync_status)
        VALUES (?, ?, ?, ?, ?, 'pendente')`,
     )
@@ -377,42 +373,65 @@ export function createCaderneta(db: DatabaseSync, input: CadernetaInput): Cadern
     const insert = db.prepare(
       'INSERT INTO caderneta_turmas (caderneta_id, professor_id, turma, posicao) VALUES (?, ?, ?, ?)',
     );
-    turmas.forEach((turma, posicao) => insert.run(id, input.professorId, turma, posicao));
+    for (const [posicao, turma] of turmas.entries()) await insert.run(id, input.professorId, turma, posicao);
   });
-  return getCaderneta(db, id);
+  return await getCaderneta(db, id);
 }
 
-export function listCadernetas(db: DatabaseSync, professorId: string): Caderneta[] {
-  return (db.prepare('SELECT * FROM cadernetas WHERE professor_id = ? ORDER BY created_at').all(professorId) as unknown as CadernetaRow[]).map(row => toCaderneta(db, row));
+export async function listCadernetas(db: Database, professorId: string): Promise<Caderneta[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof listCadernetas>>>('cadernetas.listCadernetas', [professorId]);
+  const rows = (await db.prepare('SELECT * FROM cadernetas WHERE professor_id = ? ORDER BY created_at').all(professorId)) as unknown as CadernetaRow[];
+  const cadernetas: Caderneta[] = [];
+  for (const row of rows) cadernetas.push(await toCaderneta(db, row));
+  return cadernetas;
 }
 
-export function getCaderneta(
-  db: DatabaseSync,
+/** The caderneta holding the professor's turma, if one has been registered. */
+export async function findCadernetaDaTurma(
+  db: Database,
+  professorId: string,
+  turma: string,
+): Promise<string | undefined> {
+  if (env.dataApiUrl)
+    return (await callData<string | null>('cadernetas.findCadernetaDaTurma', [professorId, turma])) ?? undefined;
+  const row = (await db
+    .prepare('SELECT caderneta_id AS id FROM caderneta_turmas WHERE professor_id = ? AND turma = ?')
+    .get(professorId, turma)) as unknown as { id: string } | undefined;
+  return row?.id;
+}
+
+export async function getCaderneta(
+  db: Database,
   id: string,
   turma?: string,
-): Caderneta {
-  const row = db.prepare('SELECT * FROM cadernetas WHERE id = ?').get(id) as unknown as CadernetaRow | undefined;
+): Promise<Caderneta> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof getCaderneta>>>('cadernetas.getCaderneta', [id, turma]);
+  const row = (await db.prepare('SELECT * FROM cadernetas WHERE id = ?').get(id)) as unknown as CadernetaRow | undefined;
   if (!row) throw new CadernetaNotFoundError(id);
-  return toCaderneta(db, row, turma);
+  return await toCaderneta(db, row, turma);
 }
 
-export function listAulasDaEtapa(
-  db: DatabaseSync,
+export async function listAulasDaEtapa(
+  db: Database,
   id: string,
   etapa: string,
   turma?: string,
-): AulaDaCaderneta[] {
-  const rows = db.prepare(
+): Promise<AulaDaCaderneta[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof listAulasDaEtapa>>>('cadernetas.listAulasDaEtapa', [id, etapa, turma]);
+  const rows = (await db.prepare(
     `SELECT etapa, mes, data, ordem, conteudo_preenchido, codigo_cr, desenvolvimento, ferramentas
      FROM caderneta_aulas WHERE caderneta_id = ? AND turma = ? AND etapa = ?
      ORDER BY substr(data, 7, 4), substr(data, 4, 2), substr(data, 1, 2), ordem`,
   )
-    .all(id, selectedTurma(db, id, turma), etapa) as unknown as {
+    .all(id, await selectedTurma(db, id, turma), etapa)) as unknown as {
       etapa: string;
       mes: string;
       data: string;
       ordem: number;
-      conteudo_preenchido: number;
+      conteudo_preenchido: number | boolean;
       codigo_cr: string | null;
       desenvolvimento: string | null;
       ferramentas: string | null;
@@ -421,8 +440,8 @@ export function listAulasDaEtapa(
     etapa: row.etapa,
     mes: row.mes,
     data: row.data,
-    ordem: row.ordem === SEM_ORDEM ? null : row.ordem,
-    conteudoPreenchido: row.conteudo_preenchido === 1,
+    ordem: Number(row.ordem) === SEM_ORDEM ? null : Number(row.ordem),
+    conteudoPreenchido: Number(row.conteudo_preenchido) === 1,
     codigoCR: row.codigo_cr,
     desenvolvimento: row.desenvolvimento,
     ferramentas: row.ferramentas
@@ -434,13 +453,13 @@ export interface RaspagemDaTurma {
   estudantes: readonly EstudanteDaCaderneta[];
 }
 
-function replaceRaspagem(
-  db: DatabaseSync,
+async function replaceRaspagem(
+  db: Database,
   id: string,
   turma: string,
   raspagem: RaspagemDaTurma,
-): void {
-  for (const table of TABLES) db.prepare(`DELETE FROM ${table} WHERE caderneta_id = ? AND turma = ?`).run(id, turma);
+): Promise<void> {
+  for (const table of TABLES) await db.prepare(`DELETE FROM ${table} WHERE caderneta_id = ? AND turma = ?`).run(id, turma);
   const insertEtapa = db.prepare(
     'INSERT INTO caderneta_etapas (caderneta_id, turma, nome, posicao, meses) VALUES (?, ?, ?, ?, ?)',
   );
@@ -450,7 +469,7 @@ function replaceRaspagem(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertDisciplina = db.prepare(
-    'INSERT OR IGNORE INTO caderneta_disciplinas (caderneta_id, turma, nome, posicao) VALUES (?, ?, ?, ?)',
+    'INSERT INTO caderneta_disciplinas (caderneta_id, turma, nome, posicao) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING',
   );
   const insertAvaliacao = db.prepare(
     `INSERT INTO caderneta_avaliacoes
@@ -465,9 +484,9 @@ function replaceRaspagem(
      (caderneta_id, turma, etapa, disciplina, matricula, origem, calculada, parcial, personalizada) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const disciplinas: string[] = [];
-  raspagem.etapas.forEach((etapa, posicao) => {
-    insertEtapa.run(id, turma, etapa.nome, posicao, JSON.stringify(etapa.meses));
-    for (const aula of etapa.aulas) insertAula.run(
+  for (const [posicao, etapa] of raspagem.etapas.entries()) {
+    await insertEtapa.run(id, turma, etapa.nome, posicao, JSON.stringify(etapa.meses));
+    for (const aula of etapa.aulas) await insertAula.run(
       id,
       turma,
       etapa.nome,
@@ -481,10 +500,10 @@ function replaceRaspagem(
     );
     for (const boletim of etapa.boletins ?? []) {
       if (!disciplinas.includes(boletim.disciplina)) {
-        insertDisciplina.run(id, turma, boletim.disciplina, disciplinas.length);
+        await insertDisciplina.run(id, turma, boletim.disciplina, disciplinas.length);
         disciplinas.push(boletim.disciplina);
       }
-      boletim.avaliacoes.forEach((avaliacao, posicao) => insertAvaliacao.run(
+      for (const [ordem, avaliacao] of boletim.avaliacoes.entries()) await insertAvaliacao.run(
         id,
         turma,
         etapa.nome,
@@ -494,9 +513,9 @@ function replaceRaspagem(
         avaliacao.data ?? null,
         avaliacao.valor ?? null,
         avaliacao.media ?? null,
-        posicao,
-      ));
-      for (const nota of boletim.notas) insertNota.run(
+        ordem,
+      );
+      for (const nota of boletim.notas) await insertNota.run(
         id,
         turma,
         etapa.nome,
@@ -505,7 +524,7 @@ function replaceRaspagem(
         nota.avaliacao,
         nota.valor,
       );
-      for (const nota of boletim.notasDoEstudante) insertNotaDoEstudante.run(
+      for (const nota of boletim.notasDoEstudante) await insertNotaDoEstudante.run(
         id,
         turma,
         etapa.nome,
@@ -517,12 +536,12 @@ function replaceRaspagem(
         nota.personalizada ?? null,
       );
     }
-  });
+  }
   const insertEstudante = db.prepare(
     `INSERT INTO caderneta_estudantes
      (caderneta_id, turma, matricula, nome, situacao, data_matricula, ordem) VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
-  raspagem.estudantes.forEach((estudante, ordem) => insertEstudante.run(
+  for (const [ordem, estudante] of raspagem.estudantes.entries()) await insertEstudante.run(
     id,
     turma,
     estudante.matricula,
@@ -530,74 +549,80 @@ function replaceRaspagem(
     estudante.situacao ?? null,
     estudante.dataMatricula ?? null,
     ordem,
-  ));
+  );
 }
 
 /** Commit all turmas together after every portal read succeeds. */
-export function syncCadernetaTurmas(
-  db: DatabaseSync,
+export async function syncCadernetaTurmas(
+  db: Database,
   id: string,
   raspagens: readonly {
     turma: string;
     raspagem: RaspagemDaTurma;
   }[],
-): Caderneta {
-  const caderneta = getCaderneta(db, id);
+): Promise<Caderneta> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof syncCadernetaTurmas>>>('cadernetas.syncCadernetaTurmas', [id, raspagens]);
+  const caderneta = await getCaderneta(db, id);
   if (raspagens.length !== caderneta.turmas.length || new Set(raspagens.map(entry => entry.turma)).size !== raspagens.length || raspagens.some(entry => !caderneta.turmas.includes(entry.turma))) {
     throw new CadernetaInvalidaError('Synchronization must include every turma of the caderneta.');
   }
-  transaction(db, () => {
+  await transaction(db, async () => {
     for (const {
       turma,
       raspagem
-    } of raspagens) replaceRaspagem(db, id, turma, raspagem);
-    db.prepare(
+    } of raspagens) await replaceRaspagem(db, id, turma, raspagem);
+    await db.prepare(
       "UPDATE cadernetas SET synced_at = ?, sync_status = 'sincronizada', sync_error = NULL WHERE id = ?",
     )
       .run(new Date().toISOString(), id);
   });
-  return getCaderneta(db, id);
+  return await getCaderneta(db, id);
 }
 
-export function syncCaderneta(
-  db: DatabaseSync,
+export async function syncCaderneta(
+  db: Database,
   id: string,
   raspagem: RaspagemDaTurma,
   turma?: string,
-): Caderneta {
-  const caderneta = getCaderneta(db, id);
-  const selected = selectedTurma(db, id, turma);
-  transaction(db, () => {
-    replaceRaspagem(db, id, selected, raspagem);
+): Promise<Caderneta> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof syncCaderneta>>>('cadernetas.syncCaderneta', [id, raspagem, turma]);
+  const caderneta = await getCaderneta(db, id);
+  const selected = await selectedTurma(db, id, turma);
+  await transaction(db, async () => {
+    await replaceRaspagem(db, id, selected, raspagem);
     // A single-turma refresh cannot establish success for the entire group.
     if (caderneta.turmas.length === 1) {
-      db.prepare(
+      await db.prepare(
         "UPDATE cadernetas SET synced_at = ?, sync_status = 'sincronizada', sync_error = NULL WHERE id = ?",
       )
         .run(new Date().toISOString(), id);
     }
   });
-  return getCaderneta(db, id);
+  return await getCaderneta(db, id);
 }
 
-export function atualizarConteudosDoMes(
-  db: DatabaseSync,
+export async function atualizarConteudosDoMes(
+  db: Database,
   id: string,
   etapa: string,
   mes: string,
   aulas: readonly AulaDoPortal[],
   turma?: string,
-): void {
-  const selected = selectedTurma(db, id, turma);
-  const existentes = listAulasDaEtapa(db, id, etapa, selected).filter(aula => aula.mes === mes);
+): Promise<void> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof atualizarConteudosDoMes>>>('cadernetas.atualizarConteudosDoMes', [id, etapa, mes, aulas, turma]);
+  const selected = await selectedTurma(db, id, turma);
+  const existentes = (await listAulasDaEtapa(db, id, etapa, selected)).filter(aula => aula.mes === mes);
   const update = db.prepare(
     `UPDATE caderneta_aulas SET conteudo_preenchido = ?, codigo_cr = ?, desenvolvimento = ?, ferramentas = ?
      WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND mes = ? AND data = ? AND ordem = ?`,
   );
-  transaction(db, () => {
+  await transaction(db, async () => {
     for (const existente of existentes) {
       const aula = aulas.find(candidate => candidate.data === existente.data && (candidate.ordem ?? null) === existente.ordem);
-      update.run(
+      await update.run(
         aula?.preenchida ? 1 : 0,
         aula?.codigoCR ?? null,
         aula?.desenvolvimento ?? null,
@@ -613,34 +638,40 @@ export function atualizarConteudosDoMes(
   });
 }
 
-export function marcarSincronizando(db: DatabaseSync, id: string): void {
-  db.prepare(
+export async function marcarSincronizando(db: Database, id: string): Promise<void> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof marcarSincronizando>>>('cadernetas.marcarSincronizando', [id]);
+  await db.prepare(
     "UPDATE cadernetas SET sync_status = 'sincronizando', sync_error = NULL WHERE id = ?",
   )
     .run(id);
 }
 
-export function marcarFalhaNaSincronizacao(
-  db: DatabaseSync,
+export async function marcarFalhaNaSincronizacao(
+  db: Database,
   id: string,
   motivo: string,
-): void {
-  db.prepare(
+): Promise<void> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof marcarFalhaNaSincronizacao>>>('cadernetas.marcarFalhaNaSincronizacao', [id, motivo]);
+  await db.prepare(
     "UPDATE cadernetas SET sync_status = 'falhou', sync_error = ? WHERE id = ?",
   )
     .run(motivo, id);
 }
 
-export function listEstudantes(
-  db: DatabaseSync,
+export async function listEstudantes(
+  db: Database,
   id: string,
   turma?: string,
-): EstudanteDaCaderneta[] {
-  const rows = db.prepare(
+): Promise<EstudanteDaCaderneta[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof listEstudantes>>>('cadernetas.listEstudantes', [id, turma]);
+  const rows = (await db.prepare(
     `SELECT matricula, nome, situacao, data_matricula FROM caderneta_estudantes
      WHERE caderneta_id = ? AND turma = ? ORDER BY ordem`,
   )
-    .all(id, selectedTurma(db, id, turma)) as unknown as {
+    .all(id, await selectedTurma(db, id, turma))) as unknown as {
       matricula: string;
       nome: string;
       situacao: string | null;
@@ -660,40 +691,79 @@ export interface AulaGravada {
   ordem?: number | null;
 }
 
-export function marcarConteudoPreenchido(
-  db: DatabaseSync,
+export async function marcarConteudoPreenchido(
+  db: Database,
   id: string,
   aulas: readonly AulaGravada[],
   turma?: string,
-): number {
-  const selected = selectedTurma(db, id, turma);
+): Promise<number> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof marcarConteudoPreenchido>>>('cadernetas.marcarConteudoPreenchido', [id, aulas, turma]);
+  const selected = await selectedTurma(db, id, turma);
   const comOrdem = db.prepare(
-    'UPDATE caderneta_aulas SET conteudo_preenchido = 1 WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND data = ? AND ordem = ?',
+    'UPDATE caderneta_aulas SET conteudo_preenchido = TRUE WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND data = ? AND ordem = ?',
   );
   const semOrdem = db.prepare(
-    'UPDATE caderneta_aulas SET conteudo_preenchido = 1 WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND data = ?',
+    'UPDATE caderneta_aulas SET conteudo_preenchido = TRUE WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND data = ?',
   );
-  return transaction(db, () => aulas.reduce((total, aula) => total + Number((aula.ordem === undefined || aula.ordem === null ? semOrdem.run(id, selected, aula.etapa, aula.data) : comOrdem.run(id, selected, aula.etapa, aula.data, aula.ordem)).changes), 0));
-}
-
-export function deleteCaderneta(db: DatabaseSync, id: string): void {
-  getCaderneta(db, id);
-  transaction(db, () => {
-    for (const table of TABLES) db.prepare(`DELETE FROM ${table} WHERE caderneta_id = ?`).run(id);
-    db.prepare('DELETE FROM caderneta_turmas WHERE caderneta_id = ?').run(id);
-    db.prepare('DELETE FROM cadernetas WHERE id = ?').run(id);
+  return await transaction(db, async () => {
+    let total = 0;
+    for (const aula of aulas) {
+      const result = aula.ordem === undefined || aula.ordem === null
+        ? await semOrdem.run(id, selected, aula.etapa, aula.data)
+        : await comOrdem.run(id, selected, aula.etapa, aula.data, aula.ordem);
+      total += Number(result.changes);
+    }
+    return total;
   });
 }
 
-export function listDisciplinasDaCaderneta(
-  db: DatabaseSync,
+export async function deleteCaderneta(db: Database, id: string): Promise<void> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof deleteCaderneta>>>('cadernetas.deleteCaderneta', [id]);
+  await getCaderneta(db, id);
+  await transaction(db, async () => {
+    for (const table of TABLES) await db.prepare(`DELETE FROM ${table} WHERE caderneta_id = ?`).run(id);
+    await db.prepare('DELETE FROM caderneta_turmas WHERE caderneta_id = ?').run(id);
+    await db.prepare('DELETE FROM cadernetas WHERE id = ?').run(id);
+  });
+}
+
+export async function updateValores(
+  db: Database,
+  id: string,
+  values: { valorRecebido: number | null; valorAReceber: number | null },
+): Promise<Caderneta> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof updateValores>>>('cadernetas.updateValores', [id, values]);
+  const result = await db
+    .prepare('UPDATE cadernetas SET valor_recebido = ?, valor_a_receber = ? WHERE id = ?')
+    .run(values.valorRecebido, values.valorAReceber, id);
+  if (!Number(result.changes)) throw new CadernetaNotFoundError(id);
+  return await getCaderneta(db, id);
+}
+
+export async function listTodas(
+  db: Database,
+): Promise<{ id: string; professor_id: string; turma: string }[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof listTodas>>>('cadernetas.listTodas', []);
+  return (await db
+    .prepare('SELECT id, professor_id, turma FROM cadernetas ORDER BY professor_id, turma')
+    .all()) as { id: string; professor_id: string; turma: string }[];
+}
+
+export async function listDisciplinasDaCaderneta(
+  db: Database,
   id: string,
   turma?: string,
-): string[] {
-  return (db.prepare(
+): Promise<string[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof listDisciplinasDaCaderneta>>>('cadernetas.listDisciplinasDaCaderneta', [id, turma]);
+  return ((await db.prepare(
     'SELECT nome FROM caderneta_disciplinas WHERE caderneta_id = ? AND turma = ? ORDER BY posicao',
   )
-    .all(id, selectedTurma(db, id, turma)) as unknown as {
+    .all(id, await selectedTurma(db, id, turma))) as unknown as {
       nome: string;
     }[]).map(row => row.nome);
 }
@@ -708,14 +778,16 @@ export interface AvaliacaoDaTurma {
   readonly media?: number;
 }
 
-export function listAvaliacoesDoProfessor(db: DatabaseSync, professorId: string): AvaliacaoDaTurma[] {
-  const rows = db.prepare(
+export async function listAvaliacoesDoProfessor(db: Database, professorId: string): Promise<AvaliacaoDaTurma[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof listAvaliacoesDoProfessor>>>('cadernetas.listAvaliacoesDoProfessor', [professorId]);
+  const rows = (await db.prepare(
     `SELECT a.turma, a.etapa, a.disciplina, a.nome, a.tipo, a.valor, a.media
      FROM caderneta_avaliacoes a JOIN cadernetas c ON c.id = a.caderneta_id
      LEFT JOIN caderneta_disciplinas d ON d.caderneta_id = a.caderneta_id AND d.turma = a.turma AND d.nome = a.disciplina
      WHERE c.professor_id = ? ORDER BY a.turma, a.etapa, d.posicao, a.posicao`,
   )
-    .all(professorId) as unknown as {
+    .all(professorId)) as unknown as {
       turma: string;
       etapa: string;
       disciplina: string;
@@ -741,23 +813,27 @@ export function listAvaliacoesDoProfessor(db: DatabaseSync, professorId: string)
   }));
 }
 
-export function getBoletimDaEtapa(
-  db: DatabaseSync,
+const numero = (valor: number | null) => (valor === null ? null : Number(valor));
+
+export async function getBoletimDaEtapa(
+  db: Database,
   id: string,
   etapa: string,
   disciplina?: string,
   turma?: string,
-): BoletimDaEtapa {
-  const selected = selectedTurma(db, id, turma);
-  const disciplinas = listDisciplinasDaCaderneta(db, id, selected);
+): Promise<BoletimDaEtapa> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof getBoletimDaEtapa>>>('cadernetas.getBoletimDaEtapa', [id, etapa, disciplina, turma]);
+  const selected = await selectedTurma(db, id, turma);
+  const disciplinas = await listDisciplinasDaCaderneta(db, id, selected);
   const escolhida = disciplina ?? disciplinas[0];
-  const disciplinasLancadas = (db.prepare(
+  const disciplinasLancadas = ((await db.prepare(
     `SELECT DISTINCT disciplina FROM (
      SELECT disciplina FROM caderneta_notas WHERE caderneta_id = ? AND turma = ? AND etapa = ?
      UNION SELECT disciplina FROM caderneta_notas_do_estudante WHERE caderneta_id = ? AND turma = ? AND etapa = ?
-     AND (parcial IS NOT NULL OR personalizada IS NOT NULL))`,
+     AND (parcial IS NOT NULL OR personalizada IS NOT NULL)) AS lancadas`,
   )
-    .all(id, selected, etapa, id, selected, etapa) as unknown as {
+    .all(id, selected, etapa, id, selected, etapa)) as unknown as {
       disciplina: string;
     }[]).map(row => row.disciplina);
   const base = {
@@ -765,7 +841,7 @@ export function getBoletimDaEtapa(
     disciplina: escolhida ?? null,
     disciplinas,
     disciplinasLancadas,
-    estudantes: listEstudantes(db, id, selected)
+    estudantes: await listEstudantes(db, id, selected)
   };
   if (escolhida === undefined) {
     return {
@@ -775,26 +851,36 @@ export function getBoletimDaEtapa(
       notasDoEstudante: [],
     };
   }
-  const avaliacoes = db.prepare(
+  const avaliacoes = (await db.prepare(
     `SELECT nome, tipo, data, valor, media FROM caderneta_avaliacoes
      WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND disciplina = ? ORDER BY posicao`,
   )
-    .all(id, selected, etapa, escolhida) as unknown as AvaliacaoDaCaderneta[];
-  const notas = db.prepare(
+    .all(id, selected, etapa, escolhida)) as unknown as AvaliacaoDaCaderneta[];
+  const notas = (await db.prepare(
     `SELECT matricula, avaliacao, valor FROM caderneta_notas
      WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND disciplina = ?`,
   )
-    .all(id, selected, etapa, escolhida) as unknown as NotaDaCaderneta[];
-  const notasDoEstudante = db.prepare(
+    .all(id, selected, etapa, escolhida)) as unknown as NotaDaCaderneta[];
+  const notasDoEstudante = (await db.prepare(
     `SELECT matricula, origem, calculada, parcial, personalizada FROM caderneta_notas_do_estudante
      WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND disciplina = ?`,
   )
-    .all(id, selected, etapa, escolhida) as unknown as NotaDoEstudanteDaCaderneta[];
+    .all(id, selected, etapa, escolhida)) as unknown as NotaDoEstudanteDaCaderneta[];
   return {
     ...base,
-    avaliacoes,
-    notas,
-    notasDoEstudante
+    avaliacoes: avaliacoes.map(avaliacao => ({
+      ...avaliacao,
+      valor: numero(avaliacao.valor),
+      media: numero(avaliacao.media),
+    })),
+    notas: notas.map(nota => ({ ...nota, valor: Number(nota.valor) })),
+    notasDoEstudante: notasDoEstudante.map(nota => ({
+      matricula: nota.matricula,
+      origem: numero(nota.origem),
+      calculada: numero(nota.calculada),
+      parcial: numero(nota.parcial),
+      personalizada: numero(nota.personalizada),
+    })),
   };
 }
 
@@ -814,14 +900,16 @@ export interface NotaDoEstudanteGravada {
   personalizada?: number | null;
 }
 
-export function marcarNotasLancadas(
-  db: DatabaseSync,
+export async function marcarNotasLancadas(
+  db: Database,
   id: string,
   notas: readonly NotaGravada[],
   notasDoEstudante: readonly NotaDoEstudanteGravada[] = [],
   turma?: string,
-): number {
-  const selected = selectedTurma(db, id, turma);
+): Promise<number> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof marcarNotasLancadas>>>('cadernetas.marcarNotasLancadas', [id, notas, notasDoEstudante, turma]);
+  const selected = await selectedTurma(db, id, turma);
   const conhece = db.prepare(
     'SELECT 1 FROM caderneta_avaliacoes WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND disciplina = ? AND nome = ?',
   );
@@ -832,17 +920,19 @@ export function marcarNotasLancadas(
   const upsertDoEstudante = db.prepare(
     `INSERT INTO caderneta_notas_do_estudante (caderneta_id, turma, etapa, disciplina, matricula, parcial, personalizada)
      VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (caderneta_id, turma, etapa, disciplina, matricula)
-     DO UPDATE SET parcial = COALESCE(excluded.parcial, parcial), personalizada = COALESCE(excluded.personalizada, personalizada)`,
+     DO UPDATE SET
+       parcial = COALESCE(excluded.parcial, caderneta_notas_do_estudante.parcial),
+       personalizada = COALESCE(excluded.personalizada, caderneta_notas_do_estudante.personalizada)`,
   );
-  return transaction(db, () => {
+  return await transaction(db, async () => {
     let gravadas = 0;
     for (const nota of notas) {
-      if (!conhece.get(id, selected, nota.etapa, nota.disciplina, nota.avaliacao)) continue;
-      upsert.run(id, selected, nota.etapa, nota.disciplina, nota.matricula, nota.avaliacao, nota.valor);
+      if (!(await conhece.get(id, selected, nota.etapa, nota.disciplina, nota.avaliacao))) continue;
+      await upsert.run(id, selected, nota.etapa, nota.disciplina, nota.matricula, nota.avaliacao, nota.valor);
       gravadas += 1;
     }
     for (const nota of notasDoEstudante) {
-      upsertDoEstudante.run(
+      await upsertDoEstudante.run(
         id,
         selected,
         nota.etapa,

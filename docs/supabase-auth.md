@@ -1,6 +1,6 @@
 # Supabase Auth setup
 
-The desktop app uses Supabase Auth while keeping application data and encrypted credenciais do professor in SQLite. A separate administration process handles privileged Auth operations. No application table is migrated to hosted Postgres in this phase.
+This guide covers the initial Auth/SQLite mode. A separate administration process handles privileged Auth operations. For hosted application data and the Postgres administration journal, continue with [Postgres setup and rollout](supabase-postgres.md). The same CPF/portal-senha admission rule applies in both modes.
 
 ## Configure the project
 

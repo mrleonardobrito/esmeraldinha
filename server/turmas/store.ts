@@ -1,5 +1,8 @@
+import { callData } from '../database/remote';
+import { env } from '../env';
+import { transaction } from '../database/types';
 import { randomUUID } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Database } from '../database/types';
 
 import { turnoDaTurma } from './turno';
 
@@ -91,22 +94,34 @@ const SELECT_TURMA = `
  * novas ganham data nova, então a ordem dependeria de quando cada uma
  * apareceu, e não do que a pessoa lê na tela.
  */
-export function listTurmas(db: DatabaseSync, professorId: string): Turma[] {
-  const rows = db
+export async function listTurmas(
+  db: Database,
+  professorId: string,
+): Promise<Turma[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof listTurmas>>>(
+      'turmas.listTurmas',
+      [professorId],
+    );
+  const rows = (await db
     .prepare(
       `${SELECT_TURMA} WHERE t.professor_id = ?
         GROUP BY t.id ORDER BY t.nome ASC`,
     )
-    .all(professorId) as unknown as TurmaRow[];
+    .all(professorId)) as unknown as TurmaRow[];
 
   return rows.map(toTurma);
 }
 
 /** @throws {TurmaNotFoundError} quando `id` não é de nenhuma turma. */
-export function getTurma(db: DatabaseSync, id: string): Turma {
-  const row = db
+export async function getTurma(db: Database, id: string): Promise<Turma> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof getTurma>>>('turmas.getTurma', [
+      id,
+    ]);
+  const row = (await db
     .prepare(`${SELECT_TURMA} WHERE t.id = ? GROUP BY t.id`)
-    .get(id) as unknown as TurmaRow | undefined;
+    .get(id)) as unknown as TurmaRow | undefined;
 
   if (!row) throw new TurmaNotFoundError(id);
 
@@ -123,40 +138,47 @@ export function getTurma(db: DatabaseSync, id: string): Turma {
  * é a mesma turma, relida, só com o período atualizado. Uma que sumiu do
  * portal sai daqui junto com eles.
  */
-export function replaceTurmas(
-  db: DatabaseSync,
+export async function replaceTurmas(
+  db: Database,
   professorId: string,
   turmas: readonly TurmaEncontrada[],
-): Turma[] {
+): Promise<Turma[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof replaceTurmas>>>(
+      'turmas.replaceTurmas',
+      [professorId, turmas],
+    );
   const nomes = turmas.map((turma) => turma.nome);
   const insert = db.prepare(
     `INSERT INTO turmas (id, professor_id, nome, turno, periodo_letivo, grupo_diario, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
-  const update = db.prepare('UPDATE turmas SET periodo_letivo = ?, grupo_diario = ? WHERE id = ?');
+  const update = db.prepare(
+    'UPDATE turmas SET periodo_letivo = ?, grupo_diario = ? WHERE id = ?',
+  );
   const existentes = new Map(
-    listTurmas(db, professorId).map((turma) => [turma.nome, turma]),
+    (await listTurmas(db, professorId)).map((turma) => [turma.nome, turma]),
   );
   const createdAt = new Date().toISOString();
 
-  db.exec('BEGIN');
-  try {
+  await transaction(db, async () => {
     for (const turma of existentes.values()) {
       if (!nomes.includes(turma.nome)) {
-        db.prepare('DELETE FROM turma_estudantes WHERE turma_id = ?').run(turma.id);
-        db.prepare('DELETE FROM turmas WHERE id = ?').run(turma.id);
+        await db
+          .prepare('DELETE FROM turma_estudantes WHERE turma_id = ?')
+          .run(turma.id);
+        await db.prepare('DELETE FROM turmas WHERE id = ?').run(turma.id);
       }
     }
-
     for (const { nome, periodoLetivo, grupoDiario } of turmas) {
       const existente = existentes.get(nome);
 
       if (existente) {
-        update.run(periodoLetivo ?? null, grupoDiario ?? null, existente.id);
+        await update.run(periodoLetivo ?? null, grupoDiario ?? null, existente.id);
         continue;
       }
 
-      insert.run(
+      await insert.run(
         randomUUID(),
         professorId,
         nome,
@@ -166,14 +188,9 @@ export function replaceTurmas(
         createdAt,
       );
     }
+  });
 
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-
-  return listTurmas(db, professorId);
+  return await listTurmas(db, professorId);
 }
 
 /**
@@ -182,26 +199,43 @@ export function replaceTurmas(
  * período ser guardado: nesse caso a sessão fica no período em que está, que
  * é o comportamento de antes.
  */
-export function periodoLetivoDaTurma(
-  db: DatabaseSync,
+export async function periodoLetivoDaTurma(
+  db: Database,
   professorId: string,
   nome: string,
-): string | undefined {
-  const row = db
-    .prepare('SELECT periodo_letivo FROM turmas WHERE professor_id = ? AND nome = ?')
-    .get(professorId, nome) as unknown as { periodo_letivo: string | null } | undefined;
+): Promise<string | undefined> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof periodoLetivoDaTurma>>>(
+      'turmas.periodoLetivoDaTurma',
+      [professorId, nome],
+    );
+  const row = (await db
+    .prepare(
+      'SELECT periodo_letivo FROM turmas WHERE professor_id = ? AND nome = ?',
+    )
+    .get(professorId, nome)) as unknown as
+    | { periodo_letivo: string | null }
+    | undefined;
 
   return row?.periodo_letivo ?? undefined;
 }
 
 /** Os estudantes da turma, na ordem em que o portal os lista. */
-export function listEstudantes(db: DatabaseSync, turmaId: string): EstudanteDaTurma[] {
-  const rows = db
+export async function listEstudantes(
+  db: Database,
+  turmaId: string,
+): Promise<EstudanteDaTurma[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof listEstudantes>>>(
+      'turmas.listEstudantes',
+      [turmaId],
+    );
+  const rows = (await db
     .prepare(
       `SELECT matricula, nome, situacao, data_matricula FROM turma_estudantes
         WHERE turma_id = ? ORDER BY ordem ASC`,
     )
-    .all(turmaId) as unknown as {
+    .all(turmaId)) as unknown as {
     matricula: string;
     nome: string;
     situacao: string | null;
@@ -223,24 +257,29 @@ export function listEstudantes(db: DatabaseSync, turmaId: string): EstudanteDaTu
  *
  * @throws {TurmaNotFoundError} quando `turmaId` não é de nenhuma turma.
  */
-export function replaceEstudantes(
-  db: DatabaseSync,
+export async function replaceEstudantes(
+  db: Database,
   turmaId: string,
   estudantes: readonly EstudanteDaTurma[],
-): EstudanteDaTurma[] {
-  getTurma(db, turmaId);
+): Promise<EstudanteDaTurma[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof replaceEstudantes>>>(
+      'turmas.replaceEstudantes',
+      [turmaId, estudantes],
+    );
+  await getTurma(db, turmaId);
 
   const insert = db.prepare(
     `INSERT INTO turma_estudantes (turma_id, matricula, nome, situacao, data_matricula, ordem)
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
 
-  db.exec('BEGIN');
-  try {
-    db.prepare('DELETE FROM turma_estudantes WHERE turma_id = ?').run(turmaId);
-
-    estudantes.forEach((estudante, ordem) => {
-      insert.run(
+  await transaction(db, async () => {
+    await db
+      .prepare('DELETE FROM turma_estudantes WHERE turma_id = ?')
+      .run(turmaId);
+    for (const [ordem, estudante] of estudantes.entries()) {
+      await insert.run(
         turmaId,
         estudante.matricula,
         estudante.nome,
@@ -248,27 +287,56 @@ export function replaceEstudantes(
         estudante.dataMatricula ?? null,
         ordem,
       );
-    });
+    }
+  });
 
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-
-  return listEstudantes(db, turmaId);
+  return await listEstudantes(db, turmaId);
 }
 import { limparNomeDoEstudante } from '../scrape/nome-do-estudante';
 
-export function updateTurma(db: DatabaseSync, id: string, input: { nome: string; turno: string | null; periodoLetivo: string | null }): Turma {
-  getTurma(db, id);
-  db.prepare('UPDATE turmas SET nome = ?, turno = ?, periodo_letivo = ? WHERE id = ?').run(input.nome, input.turno, input.periodoLetivo, id);
-  return getTurma(db, id);
+export async function updateTurma(
+  db: Database,
+  id: string,
+  input: { nome: string; turno: string | null; periodoLetivo: string | null },
+): Promise<Turma> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof updateTurma>>>(
+      'turmas.updateTurma',
+      [id, input],
+    );
+  await getTurma(db, id);
+  await db
+    .prepare(
+      'UPDATE turmas SET nome = ?, turno = ?, periodo_letivo = ? WHERE id = ?',
+    )
+    .run(input.nome, input.turno, input.periodoLetivo, id);
+  return await getTurma(db, id);
 }
 
-export function updateEstudante(db: DatabaseSync, turmaId: string, matricula: string, input: EstudanteDaTurma): EstudanteDaTurma[] {
-  getTurma(db, turmaId);
-  const result = db.prepare('UPDATE turma_estudantes SET matricula = ?, nome = ?, situacao = ?, data_matricula = ? WHERE turma_id = ? AND matricula = ?').run(input.matricula, input.nome, input.situacao, input.dataMatricula, turmaId, matricula);
+export async function updateEstudante(
+  db: Database,
+  turmaId: string,
+  matricula: string,
+  input: EstudanteDaTurma,
+): Promise<EstudanteDaTurma[]> {
+  if (env.dataApiUrl)
+    return callData<Awaited<ReturnType<typeof updateEstudante>>>(
+      'turmas.updateEstudante',
+      [turmaId, matricula, input],
+    );
+  await getTurma(db, turmaId);
+  const result = await db
+    .prepare(
+      'UPDATE turma_estudantes SET matricula = ?, nome = ?, situacao = ?, data_matricula = ? WHERE turma_id = ? AND matricula = ?',
+    )
+    .run(
+      input.matricula,
+      input.nome,
+      input.situacao,
+      input.dataMatricula,
+      turmaId,
+      matricula,
+    );
   if (!result.changes) throw new Error('Estudante não encontrado.');
-  return listEstudantes(db, turmaId);
+  return await listEstudantes(db, turmaId);
 }

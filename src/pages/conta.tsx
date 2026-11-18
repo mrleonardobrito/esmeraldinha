@@ -1,26 +1,26 @@
-import * as React from "react";
-import type { Pronouns } from "@shared/pronouns";
-import { requestApi } from "@/lib/api";
+import * as React from 'react';
+import type { Pronouns } from '@shared/pronouns';
+import { requestApi } from '@/lib/api';
 import {
   IconLoader,
   IconLock,
   IconTrash,
   IconUpload,
-} from "@tabler/icons-react";
-import { toast } from "sonner";
+} from '@tabler/icons-react';
+import { toast } from 'sonner';
 
-import { useConta } from "@/components/conta-provider";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
+import { useConta } from '@/components/conta-provider';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   atualizarConta,
   contaSchema,
@@ -28,8 +28,9 @@ import {
   trocarSenha,
   MIN_SENHA,
   type ContaField,
-} from "@/lib/conta";
-import { getInitials, readImageAsDataUrl } from "@/lib/professores";
+} from '@/lib/conta';
+import { getInitials, readImageAsDataUrl } from '@/lib/professores';
+import { LocalDataImport } from '@/components/local-data-import';
 
 type ErrosDoPerfil = Partial<Record<ContaField, string>>;
 
@@ -40,8 +41,8 @@ function mensagem(error: unknown, padrao: string): string {
 /** O perfil do auxiliar de ensino: foto, nome e e-mail. O login não se edita. */
 function Perfil() {
   const { conta, guardarConta } = useConta();
-  const [nome, setNome] = React.useState(conta?.nome ?? "");
-  const [email, setEmail] = React.useState(conta?.email ?? "");
+  const [nome, setNome] = React.useState(conta?.nome ?? '');
+  const [email, setEmail] = React.useState(conta?.email ?? '');
   const [imagem, setImagem] = React.useState<string | undefined>(
     conta?.imagem ?? undefined,
   );
@@ -51,7 +52,7 @@ function Perfil() {
 
   async function handleImageChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    event.target.value = "";
+    event.target.value = '';
     if (!file) return;
 
     try {
@@ -60,7 +61,7 @@ function Perfil() {
     } catch (error) {
       setErros((atual) => ({
         ...atual,
-        imagem: mensagem(error, "Imagem inválida."),
+        imagem: mensagem(error, 'Imagem inválida.'),
       }));
     }
   }
@@ -83,9 +84,9 @@ function Perfil() {
     try {
       guardarConta(await atualizarConta(parsed.data));
       setErros({});
-      toast.success("Perfil atualizado.");
+      toast.success('Perfil atualizado.');
     } catch (error) {
-      toast.error(mensagem(error, "Não foi possível salvar o perfil."));
+      toast.error(mensagem(error, 'Não foi possível salvar o perfil.'));
     } finally {
       setSalvando(false);
     }
@@ -102,12 +103,16 @@ function Perfil() {
       <CardContent>
         {/* A validação é a mesma do servidor (zod), então a do navegador só
             atrapalharia: ela barra o envio antes e com outra mensagem. */}
-        <form className="flex flex-col gap-4" noValidate onSubmit={handleSubmit}>
+        <form
+          className="flex flex-col gap-4"
+          noValidate
+          onSubmit={handleSubmit}
+        >
           <div className="flex items-center gap-4">
             <Avatar className="size-16 rounded-full">
               {imagem && <AvatarImage src={imagem} alt="" />}
               <AvatarFallback className="rounded-full">
-                {getInitials(nome || "Auxiliar de ensino")}
+                {getInitials(nome || 'Auxiliar de ensino')}
               </AvatarFallback>
             </Avatar>
             <div className="flex flex-col gap-2">
@@ -191,9 +196,9 @@ function Perfil() {
 /** A troca da senha definitiva, fora do primeiro acesso. */
 function Senha() {
   const { guardarConta } = useConta();
-  const [senhaAtual, setSenhaAtual] = React.useState("");
-  const [senha, setSenha] = React.useState("");
-  const [confirmacao, setConfirmacao] = React.useState("");
+  const [senhaAtual, setSenhaAtual] = React.useState('');
+  const [senha, setSenha] = React.useState('');
+  const [confirmacao, setConfirmacao] = React.useState('');
   const [erro, setErro] = React.useState<string | null>(null);
   const [salvando, setSalvando] = React.useState(false);
 
@@ -202,12 +207,12 @@ function Senha() {
 
     const parsed = novaSenhaSchema.safeParse({ senhaAtual, senha });
     if (!parsed.success) {
-      setErro(parsed.error.issues[0]?.message ?? "Senha inválida.");
+      setErro(parsed.error.issues[0]?.message ?? 'Senha inválida.');
       return;
     }
 
     if (senha !== confirmacao) {
-      setErro("As senhas não conferem.");
+      setErro('As senhas não conferem.');
       return;
     }
 
@@ -215,12 +220,12 @@ function Senha() {
     setErro(null);
     try {
       guardarConta(await trocarSenha(parsed.data));
-      setSenhaAtual("");
-      setSenha("");
-      setConfirmacao("");
-      toast.success("Senha alterada. As outras sessões foram encerradas.");
+      setSenhaAtual('');
+      setSenha('');
+      setConfirmacao('');
+      toast.success('Senha alterada. As outras sessões foram encerradas.');
     } catch (error) {
-      setErro(mensagem(error, "Não foi possível alterar a senha."));
+      setErro(mensagem(error, 'Não foi possível alterar a senha.'));
     } finally {
       setSalvando(false);
     }
@@ -291,14 +296,24 @@ export function ContaPage() {
   const { conta } = useConta();
   return (
     <div className="flex min-w-full flex-1 flex-col gap-4 bg-zinc-50 p-4 font-sans lg:p-6 dark:bg-black">
-      {conta?.papel === "professor" ? <PronounsPreference /> : <><Perfil /><Senha /></>}
+      {conta?.papel === 'professor' ? (
+        <PronounsPreference />
+      ) : (
+        <>
+          <Perfil />
+          <Senha />
+          <LocalDataImport />
+        </>
+      )}
     </div>
   );
 }
 
 function PronounsPreference() {
   const { conta, guardarConta } = useConta();
-  const [pronouns, setPronouns] = React.useState<Pronouns>(conta?.pronouns ?? null);
+  const [pronouns, setPronouns] = React.useState<Pronouns>(
+    conta?.pronouns ?? null,
+  );
   const [saving, setSaving] = React.useState(false);
 
   async function save(event: React.FormEvent) {
@@ -311,7 +326,7 @@ function PronounsPreference() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pronouns }),
       });
-      const saved = await response.json() as { pronouns: Pronouns };
+      const saved = (await response.json()) as { pronouns: Pronouns };
       guardarConta({ ...conta, pronouns: saved.pronouns });
       toast.success('Preferência salva.');
     } catch (error) {
@@ -321,25 +336,39 @@ function PronounsPreference() {
     }
   }
 
-  return <Card>
-    <CardHeader>
-      <CardTitle>Como devemos tratar você?</CardTitle>
-      <CardDescription>Escolha seus pronomes para personalizar as mensagens de boas-vindas.</CardDescription>
-    </CardHeader>
-    <CardContent>
-      <form onSubmit={save} className="flex max-w-sm flex-col gap-4">
-        <Label htmlFor="pronouns">Pronomes (opcional)</Label>
-        <select id="pronouns" value={pronouns ?? ''} disabled={saving}
-          onChange={(event) => setPronouns((event.target.value || null) as Pronouns)}
-          aria-describedby="pronouns-help"
-          className="h-10 rounded-md border bg-background px-3 text-foreground">
-          <option value="">Não informar</option>
-          <option value="ele/dele">Ele/dele — bem-vindo</option>
-          <option value="ela/dela">Ela/dela — bem-vinda</option>
-        </select>
-        <p id="pronouns-help" className="text-sm text-muted-foreground">Sem preferência informada, usaremos o masculino.</p>
-        <Button type="submit" disabled={saving}>{saving ? 'Salvando…' : 'Salvar preferência'}</Button>
-      </form>
-    </CardContent>
-  </Card>;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Como devemos tratar você?</CardTitle>
+        <CardDescription>
+          Escolha seus pronomes para personalizar as mensagens de boas-vindas.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={save} className="flex max-w-sm flex-col gap-4">
+          <Label htmlFor="pronouns">Pronomes (opcional)</Label>
+          <select
+            id="pronouns"
+            value={pronouns ?? ''}
+            disabled={saving}
+            onChange={(event) =>
+              setPronouns((event.target.value || null) as Pronouns)
+            }
+            aria-describedby="pronouns-help"
+            className="h-10 rounded-md border bg-background px-3 text-foreground"
+          >
+            <option value="">Não informar</option>
+            <option value="ele/dele">Ele/dele — bem-vindo</option>
+            <option value="ela/dela">Ela/dela — bem-vinda</option>
+          </select>
+          <p id="pronouns-help" className="text-sm text-muted-foreground">
+            Sem preferência informada, usaremos o masculino.
+          </p>
+          <Button type="submit" disabled={saving}>
+            {saving ? 'Salvando…' : 'Salvar preferência'}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
 }

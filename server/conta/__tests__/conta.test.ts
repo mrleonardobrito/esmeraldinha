@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../../app';
-import { authDeTeste, autenticar, SENHA_DE_TESTE } from '../../__tests__/sessao-de-teste';
+import {
+  authDeTeste,
+  autenticar,
+  SENHA_DE_TESTE,
+} from '../../__tests__/sessao-de-teste';
 
 const LOGIN = 'auxiliar-de-teste';
 const SENHA_TEMPORARIA = 'senha-inicial-de-teste';
@@ -58,14 +62,16 @@ describe('conta do auxiliar de ensino', () => {
     process.env.ESMERALDINHA_ENCRYPTION_KEY = originalEnv.encryptionKey;
 
     const { closeDb } = await import('../../professores/db');
-    closeDb();
+    await closeDb();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('recusa quem não entrou nas rotas dos professores', async () => {
     const app = await freshApp();
 
-    const response = await app.fetch(new Request('http://localhost/api/professores'));
+    const response = await app.fetch(
+      new Request('http://localhost/api/professores'),
+    );
 
     expect(response.status).toBe(401);
   });
@@ -94,7 +100,9 @@ describe('conta do auxiliar de ensino', () => {
     const senhaErrada = await app.fetch(entrar('outra-senha'));
     expect(senhaErrada.status).toBe(401);
 
-    const loginErrado = await app.fetch(entrar(SENHA_TEMPORARIA, 'outro-login'));
+    const loginErrado = await app.fetch(
+      entrar(SENHA_TEMPORARIA, 'outro-login'),
+    );
     expect(loginErrado.status).toBe(401);
   });
 
@@ -102,7 +110,9 @@ describe('conta do auxiliar de ensino', () => {
     process.env.ESMERALDINHA_ENCRYPTION_KEY = 'chave-de-teste-para-professor';
     const app = await freshApp();
     const { createEncryptionPort } = await import('../../encryption');
-    const { createProfessor, setProfessorAcesso } = await import('../../professores/store');
+    const { createProfessor, setProfessorAcesso } = await import(
+      '../../professores/store'
+    );
     const { getDb } = await import('../../professores/db');
 
     const professor = await createProfessor(getDb(), createEncryptionPort(), {
@@ -111,51 +121,93 @@ describe('conta do auxiliar de ensino', () => {
       senha: 'senha-do-portal',
       escola: 'Escola Municipal',
     });
-    const bloqueada = await app.fetch(entrar('senha-do-portal', '529.982.247-25'));
+    const bloqueada = await app.fetch(
+      entrar('senha-do-portal', '529.982.247-25'),
+    );
     expect(bloqueada.status).toBe(403);
-    setProfessorAcesso(getDb(), professor.id, true);
-    auth.identities.set('professor@example.test', { id: '00000000-0000-4000-8000-000000000002', senha: 'senha-do-portal' });
-    getDb().prepare("UPDATE professores SET auth_email = 'professor@example.test', supabase_auth_id = '00000000-0000-4000-8000-000000000002', auth_sync_status = 'ready' WHERE id = ?").run(professor.id);
+    await setProfessorAcesso(getDb(), professor.id, true);
+    auth.identities.set('professor@example.test', {
+      id: '00000000-0000-4000-8000-000000000002',
+      senha: 'senha-do-portal',
+    });
+    await getDb()
+      .prepare(
+        "UPDATE professores SET auth_email = 'professor@example.test', supabase_auth_id = '00000000-0000-4000-8000-000000000002', auth_sync_status = 'ready' WHERE id = ?",
+      )
+      .run(professor.id);
 
-    const entrada = await app.fetch(entrar('senha-do-portal', '529.982.247-25'));
+    const entrada = await app.fetch(
+      entrar('senha-do-portal', '529.982.247-25'),
+    );
     expect(entrada.status).toBe(200);
     const { token, conta } = (await entrada.json()) as {
       token: string;
       conta: { papel: string; professorId: string };
     };
-    expect(conta).toMatchObject({ papel: 'professor', professorId: professor.id });
+    expect(conta).toMatchObject({
+      papel: 'professor',
+      professorId: professor.id,
+    });
 
-    const preference = await app.fetch(comToken(new Request('http://localhost/api/conta/pronouns', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pronouns: 'ela/dela', professorId: 'another-professor' }),
-    }), token));
+    const preference = await app.fetch(
+      comToken(
+        new Request('http://localhost/api/conta/pronouns', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pronouns: 'ela/dela',
+            professorId: 'another-professor',
+          }),
+        }),
+        token,
+      ),
+    );
     expect(preference.status).toBe(200);
     const reentry = await app.fetch(entrar('senha-do-portal', professor.login));
-    await expect(reentry.json()).resolves.toMatchObject({ conta: { pronouns: 'ela/dela' } });
-    const cleared = await app.fetch(comToken(new Request('http://localhost/api/conta/pronouns', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pronouns: null }),
-    }), token));
+    await expect(reentry.json()).resolves.toMatchObject({
+      conta: { pronouns: 'ela/dela' },
+    });
+    const cleared = await app.fetch(
+      comToken(
+        new Request('http://localhost/api/conta/pronouns', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pronouns: null }),
+        }),
+        token,
+      ),
+    );
     expect(cleared.status).toBe(200);
-    const current = await app.fetch(comToken(new Request('http://localhost/api/conta'), token));
+    const current = await app.fetch(
+      comToken(new Request('http://localhost/api/conta'), token),
+    );
     await expect(current.json()).resolves.toMatchObject({ pronouns: null });
 
     const proprias = await app.fetch(
       comToken(
-        new Request(`http://localhost/api/cadernetas?professorId=${professor.id}`),
+        new Request(
+          `http://localhost/api/cadernetas?professorId=${professor.id}`,
+        ),
         token,
       ),
     );
     expect(proprias.status).toBe(200);
 
-    setProfessorAcesso(getDb(), professor.id, false);
-    const revogada = await app.fetch(entrar('senha-do-portal', '529.982.247-25'));
+    await setProfessorAcesso(getDb(), professor.id, false);
+    const revogada = await app.fetch(
+      entrar('senha-do-portal', '529.982.247-25'),
+    );
     expect(revogada.status).toBe(403);
-    setProfessorAcesso(getDb(), professor.id, true);
-    auth.identities.set('professor@example.test', { id: '00000000-0000-4000-8000-000000000002', senha: 'senha-do-portal' });
-    getDb().prepare("UPDATE professores SET auth_email = 'professor@example.test', supabase_auth_id = '00000000-0000-4000-8000-000000000002', auth_sync_status = 'ready' WHERE id = ?").run(professor.id);
+    await setProfessorAcesso(getDb(), professor.id, true);
+    auth.identities.set('professor@example.test', {
+      id: '00000000-0000-4000-8000-000000000002',
+      senha: 'senha-do-portal',
+    });
+    await getDb()
+      .prepare(
+        "UPDATE professores SET auth_email = 'professor@example.test', supabase_auth_id = '00000000-0000-4000-8000-000000000002', auth_sync_status = 'ready' WHERE id = ?",
+      )
+      .run(professor.id);
 
     const gestao = await app.fetch(
       comToken(new Request('http://localhost/api/professores'), token),
@@ -167,7 +219,9 @@ describe('conta do auxiliar de ensino', () => {
       '/api/cadernetas/turmas?sessionId=unknown-session',
       '/api/cadernetas/sessoes/unknown-session',
     ]) {
-      const denied = await app.fetch(comToken(new Request(`http://localhost${path}`), token));
+      const denied = await app.fetch(
+        comToken(new Request(`http://localhost${path}`), token),
+      );
       expect(denied.status).toBe(403);
     }
 
@@ -176,11 +230,16 @@ describe('conta do auxiliar de ensino', () => {
       '/api/cadernetas/sessoes/unknown-session/envios/aulas/preenchimentos-assistidos',
       '/api/cadernetas/sessoes/unknown-session/envios/boletim/preenchimentos-assistidos',
     ]) {
-      const denied = await app.fetch(comToken(new Request(`http://localhost${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ professorId: 'another-professor' }),
-      }), token));
+      const denied = await app.fetch(
+        comToken(
+          new Request(`http://localhost${path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ professorId: 'another-professor' }),
+          }),
+          token,
+        ),
+      );
       expect(denied.status).toBe(403);
     }
   });
@@ -213,7 +272,9 @@ describe('conta do auxiliar de ensino', () => {
 
   it('rejects reusing the current senha as the definitive senha', async () => {
     const app = await freshApp();
-    const { token } = (await (await app.fetch(entrar(SENHA_TEMPORARIA))).json()) as {
+    const { token } = (await (
+      await app.fetch(entrar(SENHA_TEMPORARIA))
+    ).json()) as {
       token: string;
     };
 
@@ -275,7 +336,9 @@ describe('conta do auxiliar de ensino', () => {
 
     // A sessão que trocou a senha continua de pé: quem trocou não é deslogado.
     const rotated = (await changed.json()) as { token: string };
-    const atual = await app.fetch(comToken(new Request('http://localhost/api/conta'), rotated.token));
+    const atual = await app.fetch(
+      comToken(new Request('http://localhost/api/conta'), rotated.token),
+    );
     expect(atual.status).toBe(200);
   });
 
@@ -303,8 +366,12 @@ describe('conta do auxiliar de ensino', () => {
       login: LOGIN,
     });
 
-    const relida = await sessao.fetch(new Request('http://localhost/api/conta'));
-    await expect(relida.json()).resolves.toMatchObject({ nome: 'Joana Auxiliar' });
+    const relida = await sessao.fetch(
+      new Request('http://localhost/api/conta'),
+    );
+    await expect(relida.json()).resolves.toMatchObject({
+      nome: 'Joana Auxiliar',
+    });
   });
 
   it('recusa e-mail inválido', async () => {
@@ -331,7 +398,9 @@ describe('conta do auxiliar de ensino', () => {
     );
     expect(saida.status).toBe(204);
 
-    const depois = await sessao.fetch(new Request('http://localhost/api/conta'));
+    const depois = await sessao.fetch(
+      new Request('http://localhost/api/conta'),
+    );
     expect(depois.status).toBe(401);
   });
 });

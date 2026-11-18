@@ -49,19 +49,25 @@ const SCHEMA_ANTIGO = `
 `;
 
 /** Um professor e a caderneta dele: as chaves estrangeiras exigem os dois. */
-function semearCaderneta(db: DatabaseSync): void {
-  db.prepare(
-    `INSERT INTO professores (id, nome, login, senha_encrypted, escola, created_at)
+async function semearCaderneta(db: DatabaseSync): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO professores (id, nome, login, senha_encrypted, escola, created_at)
      VALUES ('p1', 'Maria', '111', X'00', 'Escola', '2026-01-01T00:00:00.000Z')`,
-  ).run();
-  db.prepare(
-    `INSERT INTO cadernetas (id, professor_id, turma, created_at)
+    )
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO cadernetas (id, professor_id, turma, created_at)
      VALUES ('c1', 'p1', '3º ANO A', '2026-01-01T00:00:00.000Z')`,
-  ).run();
+    )
+    .run();
 }
 
-function colunas(db: DatabaseSync, tabela: string): string[] {
-  const rows = db.prepare(`PRAGMA table_info(${tabela})`).all() as unknown as {
+async function colunas(db: DatabaseSync, tabela: string): Promise<string[]> {
+  const rows = (await db
+    .prepare(`PRAGMA table_info(${tabela})`)
+    .all()) as unknown as {
     name: string;
   }[];
 
@@ -69,68 +75,74 @@ function colunas(db: DatabaseSync, tabela: string): string[] {
 }
 
 describe('migrate: tabelas do boletim', () => {
-  it('acrescenta a disciplina às tabelas que nasceram sem ela', () => {
+  it('acrescenta a disciplina às tabelas que nasceram sem ela', async () => {
     const db = new DatabaseSync(':memory:');
-    db.exec(SCHEMA_ANTIGO);
-    db.exec(SCHEMA);
+    await db.exec(SCHEMA_ANTIGO);
+    await db.exec(SCHEMA);
 
     migrate(db);
 
-    expect(colunas(db, 'caderneta_avaliacoes')).toContain('disciplina');
-    expect(colunas(db, 'caderneta_notas')).toContain('disciplina');
-    expect(colunas(db, 'caderneta_notas_do_estudante')).toContain('disciplina');
+    expect(await colunas(db, 'caderneta_avaliacoes')).toContain('disciplina');
+    expect(await colunas(db, 'caderneta_notas')).toContain('disciplina');
+    expect(await colunas(db, 'caderneta_notas_do_estudante')).toContain(
+      'disciplina',
+    );
   });
 
-  it('deixa a caderneta e as suas aulas em paz', () => {
+  it('deixa a caderneta e as suas aulas em paz', async () => {
     const db = new DatabaseSync(':memory:');
-    db.exec(SCHEMA_ANTIGO);
-    db.exec(SCHEMA);
-    semearCaderneta(db);
+    await db.exec(SCHEMA_ANTIGO);
+    await db.exec(SCHEMA);
+    await semearCaderneta(db);
 
     migrate(db);
 
-    const { total } = db.prepare('SELECT COUNT(*) AS total FROM cadernetas').get() as
-      unknown as { total: number };
+    const { total } = (await db
+      .prepare('SELECT COUNT(*) AS total FROM cadernetas')
+      .get()) as unknown as { total: number };
     expect(Number(total)).toBe(1);
   });
 
-  it('não recria as tabelas quando o banco já está em dia', () => {
+  it('não recria as tabelas quando o banco já está em dia', async () => {
     const db = new DatabaseSync(':memory:');
-    db.exec(SCHEMA);
-    semearCaderneta(db);
+    await db.exec(SCHEMA);
+    await semearCaderneta(db);
     migrate(db);
 
-    db.prepare(
-      `INSERT INTO caderneta_disciplinas (caderneta_id, nome, posicao)
+    await db
+      .prepare(
+        `INSERT INTO caderneta_disciplinas (caderneta_id, nome, posicao)
        VALUES ('c1', 'MATEMÁTICA', 0)`,
-    ).run();
+      )
+      .run();
 
     // A segunda passada é a que aconteceria no próximo `getDb()`.
     migrate(db);
 
-    const { total } = db
+    const { total } = (await db
       .prepare('SELECT COUNT(*) AS total FROM caderneta_disciplinas')
-      .get() as unknown as { total: number };
+      .get()) as unknown as { total: number };
     expect(Number(total)).toBe(1);
   });
 
-  it('grava uma avaliação com disciplina depois de migrar', () => {
+  it('grava uma avaliação com disciplina depois de migrar', async () => {
     const db = new DatabaseSync(':memory:');
-    db.exec(SCHEMA_ANTIGO);
-    db.exec(SCHEMA);
-    semearCaderneta(db);
+    await db.exec(SCHEMA_ANTIGO);
+    await db.exec(SCHEMA);
+    await semearCaderneta(db);
 
     migrate(db);
 
     // É exatamente o INSERT que quebrava com "no column named disciplina".
-    expect(() =>
-      db
-        .prepare(
-          `INSERT INTO caderneta_avaliacoes
+    expect(
+      async () =>
+        await db
+          .prepare(
+            `INSERT INTO caderneta_avaliacoes
              (caderneta_id, etapa, disciplina, nome, tipo, data, valor, media, posicao)
            VALUES ('c1', '1ª Etapa', 'MATEMÁTICA', 'PROVA 1', NULL, NULL, 10, 5, 0)`,
-        )
-        .run(),
+          )
+          .run(),
     ).not.toThrow();
   });
 });

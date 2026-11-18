@@ -1,9 +1,8 @@
 /**
  * Seam through which a professor's senha is encrypted before storage and
- * decrypted when needed. Two adapters implement this port: one keyed off
- * the OS keychain under Electron, one keyed off a development env var
- * everywhere else (see `dev-encryption-adapter.ts` and
- * `electron-encryption-adapter.ts`).
+ * decrypted when needed. Electron uses the OS keychain; the controlled
+ * API uses a separate server key. A development adapter supports local
+ * fixtures and the one-time import of earlier development databases.
  */
 export interface EncryptionPort {
   encrypt(plainText: string): Promise<Buffer>;

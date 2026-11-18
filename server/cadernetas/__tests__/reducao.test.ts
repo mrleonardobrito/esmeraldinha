@@ -23,14 +23,14 @@ const cachedTables = [
   'caderneta_disciplinas', 'caderneta_avaliacoes', 'caderneta_notas', 'caderneta_notas_do_estudante',
 ] as const;
 
-beforeEach(() => {
+beforeEach(async () => {
   db = new DatabaseSync(':memory:');
   db.exec(SCHEMA);
   db.exec(`INSERT INTO professores (id, nome, login, senha_encrypted, escola, created_at)
     VALUES ('p1', 'Maria', '111', X'00', 'Escola', '2026'),
       ('p2', 'Rita', '222', X'0102', 'Escola', '2026')`);
 });
-afterEach(() => db.close());
+afterEach(async () => db.close());
 
 function addTurma(nome: string, grupoDiario: string | null, professorId = 'p1') {
   db.prepare(`INSERT INTO turmas (id, professor_id, nome, grupo_diario, created_at)
@@ -54,18 +54,20 @@ function raspagem(turma: string, valor = 8) {
   };
 }
 
-function fiveCadernetas() {
-  return [...reducao, regente].map((turma, index) => {
+async function fiveCadernetas() {
+  const cadernetas = [];
+  for (const [index, turma] of [...reducao, regente].entries()) {
     addTurma(turma, turma === regente ? 'REGENTE MANHÃ' : index === 3 ? 'REDUÇÃO VITORIA' : 'REDUÇÃO TARDE');
-    const caderneta = createCaderneta(db, { professorId: 'p1', turma });
-    syncCaderneta(db, caderneta.id, raspagem(turma, index + 1));
+    const caderneta = await createCaderneta(db, { professorId: 'p1', turma });
+    await syncCaderneta(db, caderneta.id, raspagem(turma, index + 1));
     db.prepare(`UPDATE cadernetas SET created_at = ?, synced_at = ?,
       valor_recebido = ?, valor_a_receber = ? WHERE id = ?`).run(
       `2026-01-0${index + 1}`, `2026-02-0${index + 1}`,
       [null, 5, 10, null, 100][index], [1, null, 4, null, 200][index], caderneta.id,
     );
-    return getCaderneta(db, caderneta.id);
-  });
+    cadernetas.push(await getCaderneta(db, caderneta.id));
+  }
+  return cadernetas;
 }
 
 function snapshot() {
@@ -76,9 +78,9 @@ function snapshot() {
 }
 
 describe('automatic reconciliation of cadernetas de redução', () => {
-  it('consolidates the five-caderneta case into one redução caderneta and one regente caderneta', () => {
-    const before = fiveCadernetas();
-    const result = reconcileCadernetasDeReducao(db, 'p1');
+  it('consolidates the five-caderneta case into one redução caderneta and one regente caderneta', async () => {
+    const before = await fiveCadernetas();
+    const result = await reconcileCadernetasDeReducao(db, 'p1');
     expect(result).toHaveLength(2);
     const merged = result.find((caderneta) => caderneta.turmas.length === 4)!;
     expect(merged).toMatchObject({
@@ -92,11 +94,11 @@ describe('automatic reconciliation of cadernetas de redução', () => {
       totalDeEstudantes: 4,
       etapas: [{ totalDeAulas: 4, aulasPreenchidas: 4, totalDeNotas: 4, notasLancadas: 4 }],
     });
-    expect(getCaderneta(db, before[4].id)).toEqual(before[4]);
+    expect(await getCaderneta(db, before[4].id)).toEqual(before[4]);
     for (const [index, turma] of reducao.entries()) {
-      expect(listAulasDaEtapa(db, merged.id, '1ª Etapa', turma)[0].desenvolvimento).toBe(turma);
-      expect(listEstudantes(db, merged.id, turma)[0]).toMatchObject({ matricula: '1', nome: turma, dataMatricula: '01/02/2026' });
-      expect(getBoletimDaEtapa(db, merged.id, '1ª Etapa', undefined, turma)).toMatchObject({
+      expect((await listAulasDaEtapa(db, merged.id, '1ª Etapa', turma))[0].desenvolvimento).toBe(turma);
+      expect((await listEstudantes(db, merged.id, turma))[0]).toMatchObject({ matricula: '1', nome: turma, dataMatricula: '01/02/2026' });
+      expect(await getBoletimDaEtapa(db, merged.id, '1ª Etapa', undefined, turma)).toMatchObject({
         disciplinas: ['Português'],
         avaliacoes: [{ nome: 'Prova', valor: 10 }],
         notas: [{ matricula: '1', avaliacao: 'Prova', valor: index + 1 }],
@@ -109,85 +111,85 @@ describe('automatic reconciliation of cadernetas de redução', () => {
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
   });
 
-  it('keeps the ficha de desempenho prévia of a turma that joins a group', () => {
-    const before = fiveCadernetas();
+  it('keeps the ficha de desempenho prévia of a turma that joins a group', async () => {
+    const before = await fiveCadernetas();
     const previa = {
       areas: [0], etapas: [1, 2, 3, 4] as (1 | 2 | 3 | 4)[], gerais: [], naoResolvidos: [], descartadas: [], resposta: '',
       estudantes: [{ matricula: '1', nome: reducao[2], situacao: 'ATIVO', trechos: [], conceitos: { '0.0': ['RD', 'RD', 'R', 'R'] as ('R' | 'RD' | 'NR' | null)[] } }],
     };
-    salvarPrevia(db, before[2].id, reducao[2], previa);
+    await salvarPrevia(db, before[2].id, reducao[2], previa);
 
-    const merged = reconcileCadernetasDeReducao(db, 'p1').find((caderneta) => caderneta.turmas.length === 4)!;
+    const merged = (await reconcileCadernetasDeReducao(db, 'p1')).find((caderneta) => caderneta.turmas.length === 4)!;
 
-    expect(getPrevia(db, merged.id, reducao[2])).toMatchObject(previa);
+    expect(await getPrevia(db, merged.id, reducao[2])).toMatchObject(previa);
   });
 
-  it('is idempotent and does not change another professor', () => {
-    fiveCadernetas();
+  it('is idempotent and does not change another professor', async () => {
+    await fiveCadernetas();
     addTurma('Other A', 'REDUÇÃO NOITE', 'p2');
     addTurma('Other B', 'REDUÇÃO NOITE', 'p2');
-    createCaderneta(db, { professorId: 'p2', turma: 'Other A' });
-    createCaderneta(db, { professorId: 'p2', turma: 'Other B' });
-    const other = listCadernetas(db, 'p2');
-    reconcileCadernetasDeReducao(db, 'p1');
+    await createCaderneta(db, { professorId: 'p2', turma: 'Other A' });
+    await createCaderneta(db, { professorId: 'p2', turma: 'Other B' });
+    const other = await listCadernetas(db, 'p2');
+    await reconcileCadernetasDeReducao(db, 'p1');
     const once = snapshot();
-    reconcileCadernetasDeReducao(db, 'p1');
+    await reconcileCadernetasDeReducao(db, 'p1');
     expect(snapshot()).toEqual(once);
-    expect(listCadernetas(db, 'p2')).toEqual(other);
+    expect(await listCadernetas(db, 'p2')).toEqual(other);
   });
 
-  it('preserves an established group and uses its free slots before creating another group', () => {
+  it('preserves an established group and uses its free slots before creating another group', async () => {
     const names = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
     names.forEach((nome) => addTurma(nome, 'REDUÇÃO NOITE'));
-    const existing = createCaderneta(db, { professorId: 'p1', turmas: ['C', 'D'] });
-    syncCadernetaTurmas(db, existing.id, ['C', 'D'].map((turma) => ({ turma, raspagem: raspagem(turma) })));
-    for (const nome of ['A', 'B', 'E', 'F', 'G']) createCaderneta(db, { professorId: 'p1', turma: nome });
-    const merged = reconcileCadernetasDeReducao(db, 'p1');
+    const existing = await createCaderneta(db, { professorId: 'p1', turmas: ['C', 'D'] });
+    await syncCadernetaTurmas(db, existing.id, ['C', 'D'].map((turma) => ({ turma, raspagem: raspagem(turma) })));
+    for (const nome of ['A', 'B', 'E', 'F', 'G']) await createCaderneta(db, { professorId: 'p1', turma: nome });
+    const merged = await reconcileCadernetasDeReducao(db, 'p1');
     expect(merged).toHaveLength(2);
     expect(merged.map((caderneta) => caderneta.turmas.length).sort()).toEqual([3, 4]);
-    expect(getCaderneta(db, existing.id).turmas.slice(0, 2)).toEqual(['C', 'D']);
+    expect((await getCaderneta(db, existing.id)).turmas.slice(0, 2)).toEqual(['C', 'D']);
     expect(merged.every((caderneta) => caderneta.turmas.length <= 4)).toBe(true);
   });
 
-  it('keeps unknown grupo diário separate and preserves all-null monetary amounts', () => {
+  it('keeps unknown grupo diário separate and preserves all-null monetary amounts', async () => {
     for (const nome of ['A', 'B']) {
       addTurma(nome, 'REDUÇÃO TARDE');
-      createCaderneta(db, { professorId: 'p1', turma: nome });
+      await createCaderneta(db, { professorId: 'p1', turma: nome });
     }
     addTurma('Unknown', null);
-    const unknown = createCaderneta(db, { professorId: 'p1', turma: 'Unknown' });
-    const result = reconcileCadernetasDeReducao(db, 'p1');
+    const unknown = await createCaderneta(db, { professorId: 'p1', turma: 'Unknown' });
+    const result = await reconcileCadernetasDeReducao(db, 'p1');
     expect(result).toHaveLength(2);
     expect(result.find((caderneta) => caderneta.turmas.length === 2)).toMatchObject({
       valorRecebido: null, valorAReceber: null, syncedAt: null, syncStatus: 'pendente',
     });
-    expect(getCaderneta(db, unknown.id)).toEqual(unknown);
+    expect(await getCaderneta(db, unknown.id)).toEqual(unknown);
   });
 
-  it('defers every merge while any candidate is synchronizing', () => {
-    const rows = fiveCadernetas();
+  it('defers every merge while any candidate is synchronizing', async () => {
+    const rows = await fiveCadernetas();
     db.prepare("UPDATE cadernetas SET sync_status = 'sincronizando' WHERE id = ?").run(rows[1].id);
     const before = snapshot();
-    expect(reconcileCadernetasDeReducao(db, 'p1')).toHaveLength(5);
+    expect(await reconcileCadernetasDeReducao(db, 'p1')).toHaveLength(5);
     expect(snapshot()).toEqual(before);
     db.prepare("UPDATE cadernetas SET sync_status = 'sincronizada' WHERE id = ?").run(rows[1].id);
-    expect(reconcileCadernetasDeReducao(db, 'p1')).toHaveLength(2);
+    expect(await reconcileCadernetasDeReducao(db, 'p1')).toHaveLength(2);
   });
 
-  it('retains failed status and conservative timestamps from partly synchronized sources', () => {
-    const rows = fiveCadernetas();
+  it('retains failed status and conservative timestamps from partly synchronized sources', async () => {
+    const rows = await fiveCadernetas();
     db.prepare("UPDATE cadernetas SET sync_status = 'falhou', sync_error = 'Portal timeout' WHERE id = ?").run(rows[1].id);
     db.prepare("UPDATE cadernetas SET sync_status = 'pendente', synced_at = NULL WHERE id = ?").run(rows[2].id);
-    const merged = reconcileCadernetasDeReducao(db, 'p1').find((caderneta) => caderneta.turmas.length === 4)!;
+    const merged = (await reconcileCadernetasDeReducao(db, 'p1')).find((caderneta) => caderneta.turmas.length === 4)!;
     expect(merged).toMatchObject({ syncStatus: 'falhou', syncError: 'Portal timeout', syncedAt: null });
   });
 
-  it('rolls back every moved record, membership and amount when consolidation fails', () => {
-    fiveCadernetas();
+  it('rolls back every moved record, membership and amount when consolidation fails', async () => {
+    await fiveCadernetas();
     db.exec(`CREATE TRIGGER reject_move BEFORE UPDATE OF caderneta_id ON caderneta_notas
       WHEN NEW.caderneta_id <> OLD.caderneta_id BEGIN SELECT RAISE(ABORT, 'Blocked move'); END`);
     const before = snapshot();
-    expect(() => reconcileCadernetasDeReducao(db, 'p1')).toThrow('Blocked move');
+    await expect(reconcileCadernetasDeReducao(db, 'p1')).rejects.toThrow('Blocked move');
     expect(snapshot()).toEqual(before);
   });
 });

@@ -11,7 +11,7 @@ const LEGACY_SCHEMA = SCHEMA
   .replace('    grupo_diario TEXT,\n', '');
 
 describe('migration to turmas de redução', () => {
-  it('preserves every cached part, caderneta identity, money and encrypted credenciais', () => {
+  it('preserves every cached part, caderneta identity, money and encrypted credenciais', async () => {
     const db = new DatabaseSync(':memory:');
     try {
       db.exec(LEGACY_SCHEMA);
@@ -33,7 +33,7 @@ describe('migration to turmas de redução', () => {
       db.exec(SCHEMA);
       migrate(db);
       migrate(db);
-      expect(getCaderneta(db, 'c1')).toMatchObject({
+      expect(await getCaderneta(db, 'c1')).toMatchObject({
         id: 'c1',
         turmas: ['Turma A'],
         valorRecebido: 20,
@@ -48,17 +48,17 @@ describe('migration to turmas de redução', () => {
           notasLancadas: 1
         }]
       });
-      expect(listAulasDaEtapa(db, 'c1', '1ª Etapa')[0]).toMatchObject({
+      expect((await listAulasDaEtapa(db, 'c1', '1ª Etapa'))[0]).toMatchObject({
         codigoCR: 'CR1',
         desenvolvimento: 'Development',
         ferramentas: 'Resources'
       });
-      expect(listEstudantes(db, 'c1')[0]).toMatchObject({
+      expect((await listEstudantes(db, 'c1'))[0]).toMatchObject({
         matricula: '1',
         nome: 'Ana',
         dataMatricula: '01/02/2026'
       });
-      expect(getBoletimDaEtapa(db, 'c1', '1ª Etapa')).toMatchObject({
+      expect(await getBoletimDaEtapa(db, 'c1', '1ª Etapa')).toMatchObject({
         disciplinas: ['Português'],
         avaliacoes: [{
           nome: 'Prova',

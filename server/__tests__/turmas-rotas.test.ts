@@ -33,11 +33,19 @@ const catalogo = {
     {
       nome: '1ª Etapa',
       periodoLetivo: '2026',
-      turmas: ['9º ANO - 9º ANO A - VESPERTINO', '9º ANO - 9º ANO B - MATUTINO'],
+      turmas: [
+        '9º ANO - 9º ANO A - VESPERTINO',
+        '9º ANO - 9º ANO B - MATUTINO',
+      ],
       meses: ['MARÇO'],
     },
     // A mesma turma em duas etapas não vira duas turmas.
-    { nome: '2ª Etapa', periodoLetivo: '2026', turmas: ['9º ANO - 9º ANO A - VESPERTINO'], meses: ['JUNHO'] },
+    {
+      nome: '2ª Etapa',
+      periodoLetivo: '2026',
+      turmas: ['9º ANO - 9º ANO A - VESPERTINO'],
+      meses: ['JUNHO'],
+    },
   ],
 };
 
@@ -64,7 +72,9 @@ async function freshApp() {
     escola: 'Escola',
   });
 
-  getDb().prepare('UPDATE professores SET id = ? WHERE id = ?').run(professorId, professor.id);
+  await getDb()
+    .prepare('UPDATE professores SET id = ? WHERE id = ?')
+    .run(professorId, professor.id);
 
   // As rotas do app exigem uma sessão do auxiliar de ensino: o helper entra
   // uma vez e devolve o mesmo `fetch`, com o token em cada requisição.
@@ -72,9 +82,8 @@ async function freshApp() {
 }
 
 async function stubSession() {
-  const { retomarSessao, getCatalogo, openSession, closeSession } = await import(
-    '../portal-sessions'
-  );
+  const { retomarSessao, getCatalogo, openSession, closeSession } =
+    await import('../portal-sessions');
   const session = {
     id: sessionId,
     professorId,
@@ -99,7 +108,10 @@ async function stubSession() {
 function request(path: string, init?: RequestInit) {
   // Sem barra sobrando: o Hono não casa `/api/turmas/` com a rota `/`.
   const base = 'http://localhost/api/turmas';
-  return new Request(path.startsWith('/?') ? `${base}${path.slice(1)}` : `${base}${path}`, init);
+  return new Request(
+    path.startsWith('/?') ? `${base}${path.slice(1)}` : `${base}${path}`,
+    init,
+  );
 }
 
 function json(body: unknown): RequestInit {
@@ -124,12 +136,14 @@ describe('rotas de turmas', () => {
 
   afterEach(async () => {
     const { closeDb } = await import('../professores/db');
-    closeDb();
+    await closeDb();
 
-    if (originalEnv.dbPath === undefined) delete process.env.ESMERALDINHA_DB_PATH;
+    if (originalEnv.dbPath === undefined)
+      delete process.env.ESMERALDINHA_DB_PATH;
     else process.env.ESMERALDINHA_DB_PATH = originalEnv.dbPath;
 
-    if (originalEnv.key === undefined) delete process.env.ESMERALDINHA_ENCRYPTION_KEY;
+    if (originalEnv.key === undefined)
+      delete process.env.ESMERALDINHA_ENCRYPTION_KEY;
     else process.env.ESMERALDINHA_ENCRYPTION_KEY = originalEnv.key;
 
     rmSync(tempDir, { recursive: true, force: true });
@@ -140,11 +154,17 @@ describe('rotas de turmas', () => {
       const app = await freshApp();
 
       const response = await app.fetch(
-        request('/validacoes', json({ login: '111', senha: 'segredo', escola: 'Escola' })),
+        request(
+          '/validacoes',
+          json({ login: '111', senha: 'segredo', escola: 'Escola' }),
+        ),
       );
 
       expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ valida: true, escola: 'Escola' });
+      expect(await response.json()).toMatchObject({
+        valida: true,
+        escola: 'Escola',
+      });
     });
 
     it('fecha a sessão que abriu só para conferir', async () => {
@@ -152,7 +172,10 @@ describe('rotas de turmas', () => {
       const { closeSession } = await import('../portal-sessions');
 
       await app.fetch(
-        request('/validacoes', json({ login: '111', senha: 'segredo', escola: 'Escola' })),
+        request(
+          '/validacoes',
+          json({ login: '111', senha: 'segredo', escola: 'Escola' }),
+        ),
       );
 
       expect(vi.mocked(closeSession)).toHaveBeenCalledWith(sessionId);
@@ -164,10 +187,15 @@ describe('rotas de turmas', () => {
       // Importado depois do `resetModules` para o `instanceof` da rota casar:
       // um import estático seria de outra instância do módulo.
       const { LoginError } = await import('../scrape/errors');
-      vi.mocked(openSession).mockRejectedValue(new LoginError('Login não foi bem-sucedido.'));
+      vi.mocked(openSession).mockRejectedValue(
+        new LoginError('Login não foi bem-sucedido.'),
+      );
 
       const response = await app.fetch(
-        request('/validacoes', json({ login: '111', senha: 'errada', escola: 'Escola' })),
+        request(
+          '/validacoes',
+          json({ login: '111', senha: 'errada', escola: 'Escola' }),
+        ),
       );
 
       expect(response.status).toBe(422);
@@ -204,7 +232,9 @@ describe('rotas de turmas', () => {
     it('guarda as turmas do portal com o turno lido do nome', async () => {
       const app = await freshApp();
 
-      const response = await app.fetch(request('/buscas', json({ professorId })));
+      const response = await app.fetch(
+        request('/buscas', json({ professorId })),
+      );
       const body = (await response.json()) as {
         turmas: { nome: string; turno: string | null }[];
       };
@@ -232,20 +262,26 @@ describe('rotas de turmas', () => {
         ],
       });
 
-      const response = await app.fetch(request('/buscas', json({ professorId })));
+      const response = await app.fetch(
+        request('/buscas', json({ professorId })),
+      );
       const body = (await response.json()) as {
         turmas: { nome: string; periodoLetivo: string | null }[];
       };
 
       expect(response.status).toBe(200);
-      expect(body.turmas.map((turma) => [turma.nome, turma.periodoLetivo])).toEqual([
+      expect(
+        body.turmas.map((turma) => [turma.nome, turma.periodoLetivo]),
+      ).toEqual([
         ['9º ANO - 9º ANO A - VESPERTINO', '2026'],
         ['9º ANO - 9º ANO B - MATUTINO', '2026'],
         ['EJA - 1ª FASE - NOTURNO', '2026 EJA'],
       ]);
 
       const { listEstudantes } = await import('../scrape/portal');
-      expect(vi.mocked(listEstudantes).mock.calls.map(([, filtro]) => filtro)).toEqual([
+      expect(
+        vi.mocked(listEstudantes).mock.calls.map(([, filtro]) => filtro),
+      ).toEqual([
         { turma: '9º ANO - 9º ANO A - VESPERTINO', periodoLetivo: '2026' },
         { turma: '9º ANO - 9º ANO B - MATUTINO', periodoLetivo: '2026' },
         { turma: 'EJA - 1ª FASE - NOTURNO', periodoLetivo: '2026 EJA' },
@@ -291,7 +327,10 @@ describe('rotas de turmas', () => {
       ).json()) as { turmas: { id: string }[] };
 
       const response = await app.fetch(
-        request(`/${turmas.turmas[0].id}/estudantes/buscas`, json({ sessionId })),
+        request(
+          `/${turmas.turmas[0].id}/estudantes/buscas`,
+          json({ sessionId }),
+        ),
       );
 
       expect(response.status).toBe(200);
@@ -319,7 +358,10 @@ describe('rotas de turmas', () => {
       ).json()) as { turmas: { id: string }[] };
 
       const response = await app.fetch(
-        request(`/${turmas.turmas[0].id}/estudantes/buscas`, json({ sessionId })),
+        request(
+          `/${turmas.turmas[0].id}/estudantes/buscas`,
+          json({ sessionId }),
+        ),
       );
 
       expect(await response.json()).toEqual({

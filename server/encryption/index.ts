@@ -1,12 +1,19 @@
 import { env } from '../env';
 import { DevEncryptionAdapter } from './dev-encryption-adapter';
-import { ElectronEncryptionAdapter, type SafeStorage } from './electron-encryption-adapter';
+import {
+  ElectronEncryptionAdapter,
+  type SafeStorage,
+} from './electron-encryption-adapter';
 import type { EncryptionPort } from './port';
 import { requireElectron } from './require-electron';
+import { ServerEncryptionAdapter } from './server-encryption-adapter';
 
 export type { EncryptionPort } from './port';
 export { DevEncryptionAdapter } from './dev-encryption-adapter';
-export { ElectronEncryptionAdapter, type SafeStorage } from './electron-encryption-adapter';
+export {
+  ElectronEncryptionAdapter,
+  type SafeStorage,
+} from './electron-encryption-adapter';
 
 /**
  * Picks the encryption adapter per `env.encryptionAdapter`, itself derived
@@ -15,6 +22,8 @@ export { ElectronEncryptionAdapter, type SafeStorage } from './electron-encrypti
  * keychain and `pnpm dev:api` never needs Electron running.
  */
 export function createEncryptionPort(): EncryptionPort {
+  if (env.encryptionAdapter === 'server')
+    return new ServerEncryptionAdapter(env.serverEncryptionKey);
   if (env.encryptionAdapter === 'electron') {
     const { safeStorage } = requireElectron<{ safeStorage: SafeStorage }>();
     return new ElectronEncryptionAdapter(safeStorage);
