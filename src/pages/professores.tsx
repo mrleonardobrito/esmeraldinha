@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 import { ProfessorDetails } from "@/components/professor-details";
 import { ProfessorForm } from "@/components/professor-form";
+import { AcessoDoProfessor } from '@/components/acesso-do-professor';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,6 +48,7 @@ import {
   maskCpf,
   updateProfessor,
   setProfessorAcesso,
+  reconciliarAcesso,
   type Professor,
   type ProfessorInput,
   type ProfessorUpdateInput,
@@ -59,6 +61,8 @@ type ListState =
   | { status: "ready" };
 
 export function Professores() {
+  const [confirmingAccess, setConfirmingAccess] = React.useState<Professor | null>(null);
+  const [changingAccess, setChangingAccess] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [professores, setProfessores] = React.useState<Professor[]>([]);
   const [listState, setListState] = React.useState<ListState>({
@@ -136,6 +140,9 @@ export function Professores() {
       setProfessores((current) => [...current, created]);
       toast.success("Professor cadastrado.");
       return created;
+    } catch (error) {
+      retryFetchProfessores();
+      throw error;
     } finally {
       setIsSubmitting(false);
     }
@@ -178,15 +185,23 @@ export function Professores() {
           ? error.message
           : "Não foi possível excluir o professor.",
       );
+      retryFetchProfessores();
     }
   }
 
   async function handleAcesso(professor: Professor) {
+    if (changingAccess) return;
+    if (professor.authStatus === 'verifying') { setConfirmingAccess(professor); return; }
+    setChangingAccess(true);
     try {
-      const updated = await setProfessorAcesso(professor.id, !professor.acessoLiberado);
+      const updated = professor.authStatus === 'pending'
+        ? await reconciliarAcesso(professor.id)
+        : await setProfessorAcesso(professor.id, !professor.acessoLiberado);
+      if (!updated) { setProfessores((current) => current.filter((item) => item.id !== professor.id)); setSelectedId(null); return; }
       setProfessores((current) =>
         current.map((item) => (item.id === updated.id ? updated : item)),
       );
+      if (updated.authStatus === 'verifying') { setConfirmingAccess(updated); return; }
       toast.success(
         updated.acessoLiberado
           ? "Acesso ao sistema liberado."
@@ -198,17 +213,26 @@ export function Professores() {
           ? error.message
           : "Não foi possível alterar o acesso.",
       );
-    }
+      retryFetchProfessores();
+    } finally { setChangingAccess(false); }
   }
+
+  const accessDialog = <AcessoDoProfessor professor={confirmingAccess} onClose={() => setConfirmingAccess(null)} onVerified={(updated) => {
+    setProfessores((current) => current.map((item) => item.id === updated.id ? updated : item));
+    setConfirmingAccess(null);
+    toast.success(updated.acessoLiberado ? 'Acesso do professor confirmado.' : 'Acesso atualizado.');
+  }} />;
 
   const selected = professores.find((professor) => professor.id === selectedId);
   if (selected) return <>
+    {accessDialog}
     <ProfessorDetails professor={selected} onBack={() => setSelectedId(null)} onEdit={() => openEditForm(selected)} onAccess={() => void handleAcesso(selected)} />
     <ProfessorForm open={isFormOpen} onOpenChange={setIsFormOpen} professor={editedProfessor} onSubmit={handleSubmit} isSubmitting={isSubmitting} />
   </>;
 
   return (
     <div className="min-w-full flex-1 bg-zinc-50 p-4 font-sans lg:p-6 dark:bg-black">
+      {accessDialog}
       <Card>
         <CardHeader>
           <CardTitle>Professores</CardTitle>
@@ -320,7 +344,7 @@ export function Professores() {
                           </DropdownMenuItem>
                           <DropdownMenuItem onSelect={() => void handleAcesso(professor)}>
                             {professor.acessoLiberado ? <IconLock /> : <IconLockOpen />}
-                            {professor.acessoLiberado
+                            {professor.authStatus === 'verifying' ? 'Confirmar e-mail de acesso' : professor.authStatus === 'pending' ? 'Retomar sincronização do acesso' : professor.acessoLiberado
                               ? "Revogar acesso ao sistema"
                               : "Criar acesso ao sistema"}
                           </DropdownMenuItem>

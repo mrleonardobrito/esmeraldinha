@@ -17,6 +17,7 @@ export type { ContaField, ContaInput, EntrarInput, NovaSenhaInput };
 
 /** A conta do auxiliar de ensino como a API a devolve: nunca com a senha. */
 export interface Conta {
+  acessoPorCodigo?: boolean;
   pronouns?: Pronouns;
   id: string;
   login: string;
@@ -24,7 +25,7 @@ export interface Conta {
   email: string;
   /** Nulo quando não há foto: é assim que o banco a guarda. */
   imagem: string | null;
-  /** Verdadeiro enquanto a senha em uso ainda é a temporária do ambiente. */
+  /** Requires primeiro acesso or a verified senha recovery before app access. */
   precisaTrocarSenha: boolean;
   /** Define os limites da sessão atual; prepara o acesso freemium sem o implementar. */
   papel: "auxiliar de ensino" | "professor";
@@ -94,5 +95,22 @@ export async function trocarSenha(input: NovaSenhaInput): Promise<Conta> {
     headers: json,
     body: JSON.stringify(input),
   });
-  return (await response.json()) as Conta;
+  const { token, ...conta } = (await response.json()) as Conta & { token: string };
+  guardarToken(token);
+  return conta;
+}
+
+export async function lerConfiguracaoDeAcesso(): Promise<import('@shared/conta').ConfiguracaoDeAcesso> {
+  return (await requestApi('/api/conta/configuracao')).json();
+}
+
+export async function enviarCodigoDeAcesso(login: string, tipo: 'setup' | 'recovery' = 'recovery'): Promise<void> {
+  await requestApi('/api/conta/codigos', { method: 'POST', headers: json, body: JSON.stringify({ login, tipo }) });
+}
+
+export async function verificarCodigoDeAcesso(input: { login: string; codigo: string; senhaLocal?: string }): Promise<Conta> {
+  const response = await requestApi('/api/conta/codigos/verificacoes', { method: 'POST', headers: json, body: JSON.stringify(input) });
+  const { token, conta } = (await response.json()) as { token: string; conta: Conta };
+  guardarToken(token);
+  return conta;
 }

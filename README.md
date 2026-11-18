@@ -35,44 +35,22 @@ A página inicial é o painel, em `src/pages/painel.tsx`; o shell da aplicação
 dia. `pnpm dev:electron` sobe o app de verdade, com a API Hono in-process — use
 quando a mudança tocar o processo principal ou o roteamento `app://`.
 
-## Entrar na Esmeraldinha
+## Authentication
 
-O app fica atrás de uma conta: só o auxiliar de ensino entra, porque é dele o
-acesso às credenciais dos professores guardadas aqui.
+Esmeraldinha authenticates the auxiliar de ensino and professores through
+Supabase Auth. Professores continue entering with CPF and senha do portal.
+The local API keeps provider tokens in memory and enforces app idleness;
+application data and encrypted credenciais do professor remain in SQLite.
 
-Na primeira execução, o login e a senha vêm do ambiente
-(`ESMERALDINHA_LOGIN` e `ESMERALDINHA_SENHA_TEMPORARIA`, padrões `auxiliar` e
-`esmeraldinha`). Essa senha é temporária: o primeiro acesso obriga a trocá-la
-por uma definitiva, que fica no SQLite como hash `scrypt` e passa a ser a
-única que entra. O perfil (nome, e-mail e foto) e a troca de senha vivem em
-**Conta**, no menu do rodapé da barra lateral, ao lado de **Sair**.
+Configure the project, SMTP, the intended auxiliar identity, and the separate
+administration service before using the migrated app. Follow
+[Supabase Auth setup](docs/supabase-auth.md) for environment variables,
+primeiro acesso, existing-installation binding, professor enrollment, and validation.
 
-As sessões moram na memória do processo da API: fechar o app já encerra a
-sessão, e uma janela ociosa por `ESMERALDINHA_SESSAO_IDLE_MS` (8 horas por
-padrão) pede a senha de novo.
-
-### Login e senha nos builds do CI
-
-O app instalado não lê `.env` — o instalador é um arquivo só. Por isso o login
-e a senha temporária entram no bundle na hora de empacotar, a partir de dois
-secrets do repositório (Settings → Secrets and variables → Actions):
-
-| Secret | Vira |
-| --- | --- |
-| `ESMERALDINHA_LOGIN` | o login da conta do auxiliar de ensino |
-| `ESMERALDINHA_SENHA_TEMPORARIA` | a senha do primeiro acesso |
-
-Quem faz isso é [electron/build-defines.mjs](electron/build-defines.mjs), lido
-por `pnpm build:electron`: cada variável presente no ambiente vira um `define`
-do esbuild. Sem os secrets configurados, o build sai com os padrões de
-`server/env.ts` (`auxiliar` / `esmeraldinha`) — que estão neste repositório
-público, então configure os dois antes de distribuir. Localmente vale o mesmo
-mecanismo: `ESMERALDINHA_LOGIN=... pnpm dist`.
-
-Um valor embutido no bundle é extraível de dentro do instalador por quem
-souber procurar — é obscuridade, não segredo. Ele serve para o primeiro
-acesso e só: a senha definitiva que o auxiliar de ensino escolhe é a única
-que entra depois, e ela nasce na máquina dele, como hash `scrypt` no SQLite.
+Desktop builds embed only public project configuration. The shared
+`ESMERALDINHA_SENHA_TEMPORARIA` bootstrap is retired; no administrative Auth
+key belongs in the installed application. Missing configuration shows a setup
+error and cannot enable local-password fallback.
 
 ## Distribuição
 

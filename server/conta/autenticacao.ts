@@ -1,13 +1,16 @@
 import type { MiddlewareHandler } from 'hono';
 
 import { getDb } from '../professores/db';
-import { lerConta, type Conta } from './store';
+import { lerConta, lerVinculoDaConta, type Conta } from './store';
 import { getProfessor, type Professor } from '../professores/store';
-import { usarSessao, type IdentidadeDaSessao } from './sessoes';
+import { encerrarSessao, naSessaoDoAuxiliar, usarSessao, type IdentidadeDaSessao, type SessaoDaEsmeraldinha } from './sessoes';
+import { AuthFailure, type AuthProvider } from './supabase';
 
 /** O que a autenticação deixa no contexto para as rotas protegidas. */
 export interface ContaEnv {
   Variables: {
+    auth: AuthProvider;
+    sessao: SessaoDaEsmeraldinha;
     identidade: IdentidadeDaSessao;
     conta?: Conta;
     professor?: Professor;
@@ -31,24 +34,36 @@ function lerToken(header: string | undefined): string | null {
  */
 export const exigirSessao: MiddlewareHandler<ContaEnv> = async (context, next) => {
   const token = lerToken(context.req.header('Authorization'));
-  const identidade = token ? usarSessao(token) : null;
+  let sessao: SessaoDaEsmeraldinha | null = null;
+  try { sessao = token ? await usarSessao(token) : null; }
+  catch (error) {
+    if (error instanceof AuthFailure && error.status === 401 && token) void encerrarSessao(token);
+    throw error;
+  }
 
-  if (!token || !identidade) return context.json({ error: SEM_SESSAO }, 401);
+  if (!token || !sessao) return context.json({ error: SEM_SESSAO }, 401);
+  const identidade = sessao.identidade;
 
   if (identidade.papel === 'auxiliar de ensino') {
     const conta = lerConta(getDb());
-    if (!conta || conta.id !== identidade.contaId) return context.json({ error: SEM_SESSAO }, 401);
+    if (!conta || conta.id !== identidade.contaId || lerVinculoDaConta(getDb())?.id !== sessao.provider.userId) return context.json({ error: SEM_SESSAO }, 401);
     context.set('conta', conta);
   } else {
     const professor = getProfessor(getDb(), identidade.professorId);
     if (!professor) return context.json({ error: SEM_SESSAO }, 401);
+    const binding = getDb().prepare('SELECT supabase_auth_id, auth_sync_status, auth_revision FROM professores WHERE id = ?').get(professor.id) as { supabase_auth_id: string; auth_sync_status: string; auth_revision: number };
+    if (!professor.acessoLiberado || binding.auth_sync_status !== 'ready' || binding.auth_revision !== identidade.authRevision || binding.supabase_auth_id !== sessao.provider.userId) {
+      void encerrarSessao(token);
+      return context.json({ error: 'O acesso do professor foi suspenso. Procure o auxiliar de ensino.' }, 403);
+    }
     context.set('professor', professor);
   }
 
   context.set('identidade', identidade);
   context.set('token', token);
+  context.set('sessao', sessao);
 
-  await next();
+  await naSessaoDoAuxiliar(token, next);
 };
 
 /**
@@ -61,7 +76,7 @@ export const exigirSenhaDefinitiva: MiddlewareHandler<ContaEnv> = async (
   next,
 ) => {
   const conta = context.get('conta');
-  if (conta?.precisaTrocarSenha) {
+  if (conta?.precisaTrocarSenha || context.get('sessao').purpose !== 'full') {
     return context.json({ error: PRIMEIRO_ACESSO }, 403);
   }
 

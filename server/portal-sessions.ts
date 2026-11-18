@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { registrarLimpezaDeSessao, sessaoAindaAtiva, tokenDaSessaoAtual } from './conta/sessoes';
+import { AuthFailure } from './conta/supabase';
 
 import { listConteudoOptions, login } from './scrape/portal';
 import type { ConteudoCatalogo, ProfessorCredenciais } from './scrape/types';
@@ -35,6 +37,18 @@ interface TrackedSession extends PortalSession {
 }
 
 const sessions = new Map<string, TrackedSession>();
+const appOwners = new Map<string, Set<string>>();
+function trackOwner(id: string): void {
+  const owners = appOwners.get(id) ?? new Set<string>();
+  owners.add(tokenDaSessaoAtual() ?? 'system');
+  appOwners.set(id, owners);
+}
+registrarLimpezaDeSessao(async (token) => {
+  for (const [id, owners] of appOwners) if (owners.delete(token) && owners.size === 0) {
+    appOwners.delete(id);
+    await closeSession(id);
+  }
+});
 /** De quem era cada sessão, para saber com qual login refazê-la ao expirar. */
 const donos = new Map<string, string>();
 /** As retomadas em voo, para dois pedidos juntos não fazerem dois logins. */
@@ -127,6 +141,11 @@ export async function openSession(
     throw error;
   }
 
+  const appToken = tokenDaSessaoAtual();
+  if (appToken && !sessaoAindaAtiva(appToken)) {
+    await context.close().catch(() => {});
+    throw new AuthFailure('Entre novamente para continuar.', 401);
+  }
   const now = Date.now();
   const session: TrackedSession = {
     // Uma sessão retomada mantém o id: a tela que a abriu continua com ele na mão.
@@ -142,6 +161,7 @@ export async function openSession(
   };
 
   sessions.set(session.id, session);
+  trackOwner(session.id);
   if (session.professorId) donos.set(session.id, session.professorId);
   scheduleExpiration(session);
 
@@ -160,6 +180,7 @@ export async function openSession(
 export function touchSession(id: string): PortalSession | undefined {
   const session = sessions.get(id);
   if (!session) return undefined;
+  trackOwner(id);
 
   session.lastUsedAt = Date.now();
   scheduleExpiration(session);
@@ -227,7 +248,7 @@ export async function retomarSessao(id: string): Promise<PortalSession | undefin
   if (!professorId) return undefined;
 
   const emVoo = retomando.get(id);
-  if (emVoo) return emVoo;
+  if (emVoo) { const resumed = await emVoo; if (resumed) trackOwner(resumed.id); return resumed; }
 
   const promessa = (async () => {
     const credenciais = await getProfessorCredenciais(
@@ -253,6 +274,7 @@ export async function retomarSessao(id: string): Promise<PortalSession | undefin
 }
 
 export async function closeSession(id: string): Promise<boolean> {
+  appOwners.delete(id);
   // Encerrar de propósito é diferente de expirar: esta sessão não volta.
   donos.delete(id);
 

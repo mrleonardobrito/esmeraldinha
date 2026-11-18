@@ -4,7 +4,7 @@ import { definesDoBuild } from './build-defines.mjs';
 
 const define = definesDoBuild();
 
-// O valor é secreto, então só os nomes aparecem no log — nunca o conteúdo.
+// Log configuration names only, even though these build values are public.
 if (Object.keys(define).length > 0) {
   console.log(`Embutidas no bundle: ${Object.keys(define).join(', ')}`);
 }

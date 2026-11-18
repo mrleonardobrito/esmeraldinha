@@ -5,6 +5,7 @@ import { iniciarAgendaSemanal, pararAgendaSemanal } from './cadernetas/agenda';
 import { closeAllSessions } from './portal-sessions';
 import { fecharSessoesHeaded } from './sessoes-headed';
 import { env } from './env';
+import { encerrarTodasAsSessoes } from './conta/sessoes';
 
 const app = createApp();
 
@@ -27,7 +28,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     server.close();
     pararAgendaSemanal();
-    void Promise.all([closeAllSessions(), fecharSessoesHeaded()]).finally(() =>
+    void Promise.all([encerrarTodasAsSessoes(), closeAllSessions(), fecharSessoesHeaded()]).finally(() =>
       process.exit(0),
     );
   });

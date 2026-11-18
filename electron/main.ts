@@ -5,6 +5,7 @@ import { app, BrowserWindow, net, protocol, shell } from 'electron';
 import electronUpdater from 'electron-updater';
 
 import type { Hono } from 'hono';
+import type { ContaEnv } from '../server/conta/autenticacao';
 
 import { startUpdates } from './updates';
 
@@ -62,8 +63,8 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-let apiPromise: Promise<Hono> | null = null;
-function getApi(): Promise<Hono> {
+let apiPromise: Promise<Hono<ContaEnv>> | null = null;
+function getApi(): Promise<Hono<ContaEnv>> {
   if (!apiPromise) {
     process.env.PORTAL_DEBUG_DIR ||= join(app.getPath('userData'), 'portal-debug');
     process.env.ESMERALDINHA_DB_PATH ||= join(app.getPath('userData'), 'esmeraldinha.db');
@@ -227,6 +228,7 @@ if (!app.requestSingleInstanceLock()) {
       .catch(() => {});
 
     void Promise.all([
+      import('../server/conta/sessoes').then(({ encerrarTodasAsSessoes }) => encerrarTodasAsSessoes()),
       import('../server/portal-sessions').then(({ closeAllSessions }) =>
         closeAllSessions(),
       ),

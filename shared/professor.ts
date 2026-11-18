@@ -28,6 +28,7 @@ export function isValidCpf(value: string) {
 }
 
 export const professorSchema = z.object({
+  email: z.union([z.email(), z.literal('')]).optional(),
   nome: z
     .string()
     .trim()

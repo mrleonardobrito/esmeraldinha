@@ -16,6 +16,9 @@ export const SCHEMA = `
     id TEXT PRIMARY KEY,
     login TEXT NOT NULL UNIQUE,
     senha_hash TEXT,
+    supabase_auth_id TEXT,
+    supabase_auth_email TEXT,
+    auth_setup_complete INTEGER NOT NULL DEFAULT 0,
     nome TEXT NOT NULL,
     email TEXT NOT NULL DEFAULT '',
     imagem TEXT,
@@ -28,6 +31,10 @@ export const SCHEMA = `
     login TEXT NOT NULL UNIQUE,
     senha_encrypted BLOB NOT NULL,
     acesso_liberado INTEGER NOT NULL DEFAULT 0,
+    supabase_auth_id TEXT,
+    auth_email TEXT NOT NULL DEFAULT '',
+    auth_sync_status TEXT NOT NULL DEFAULT 'unlinked',
+    auth_revision INTEGER NOT NULL DEFAULT 0,
     pronouns TEXT,
     escola TEXT NOT NULL,
     imagem TEXT,
@@ -242,6 +249,13 @@ export const SCHEMA = `
  * aplicada aqui — nulável, para as linhas antigas continuarem válidas.
  */
 const COLUNAS_NOVAS: readonly { tabela: string; coluna: string; tipo: string }[] = [
+  { tabela: 'conta', coluna: 'supabase_auth_id', tipo: 'TEXT' },
+  { tabela: 'conta', coluna: 'supabase_auth_email', tipo: 'TEXT' },
+  { tabela: 'conta', coluna: 'auth_setup_complete', tipo: 'INTEGER NOT NULL DEFAULT 0' },
+  { tabela: 'professores', coluna: 'supabase_auth_id', tipo: 'TEXT' },
+  { tabela: 'professores', coluna: 'auth_email', tipo: "TEXT NOT NULL DEFAULT ''" },
+  { tabela: 'professores', coluna: 'auth_sync_status', tipo: "TEXT NOT NULL DEFAULT 'unlinked'" },
+  { tabela: 'professores', coluna: 'auth_revision', tipo: 'INTEGER NOT NULL DEFAULT 0' },
   { tabela: 'professores', coluna: 'acesso_liberado', tipo: 'INTEGER NOT NULL DEFAULT 0' },
   { tabela: 'professores', coluna: 'pronouns', tipo: 'TEXT' },
   { tabela: 'caderneta_aulas', coluna: 'codigo_cr', tipo: 'TEXT' },
@@ -404,6 +418,16 @@ export function getDb(): DatabaseSync {
   db.prepare(`UPDATE cadernetas SET sync_status = 'falhou',
     sync_error = 'Synchronization was interrupted. Synchronize the caderneta again.'
     WHERE sync_status = 'sincronizando'`).run();
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS conta_auth_id ON conta(supabase_auth_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS professores_auth_id ON professores(supabase_auth_id);
+    CREATE TABLE IF NOT EXISTS professor_auth_operations (
+      professor_id TEXT PRIMARY KEY REFERENCES professores(id) ON DELETE CASCADE,
+      operation_id TEXT NOT NULL UNIQUE,
+      payload BLOB NOT NULL
+    );
+  `);
 
   return db;
 }

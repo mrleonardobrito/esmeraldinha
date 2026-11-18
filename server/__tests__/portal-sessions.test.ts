@@ -17,6 +17,8 @@ function novaPagina() {
     id: paginas.length + 1,
     fechada: false,
     isClosed: () => pagina.fechada,
+    bringToFront: vi.fn(async () => {}),
+    on: vi.fn(),
   };
   paginas.push(pagina);
   return pagina;
@@ -93,6 +95,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  await (await import('../conta/sessoes')).encerrarTodasAsSessoes();
   const { closeDb } = await import('../professores/db');
   closeDb();
   rmSync(tempDir, { recursive: true, force: true });
@@ -271,3 +274,49 @@ async function expirar(id: string): Promise<void> {
   const { expireSession } = await import('../portal-sessions');
   await expireSession(id);
 }
+
+describe('app-session ownership of portal contexts', () => {
+  async function owners() {
+    const { authDeTeste } = await import('./auth-de-teste');
+    const sessions = await import('../conta/sessoes');
+    const auth = authDeTeste();
+    const first = sessions.abrirSessao({ papel: 'auxiliar de ensino', contaId: 'local-conta' }, auth.session(auth.auxiliarEmail));
+    const second = sessions.abrirSessao({ papel: 'auxiliar de ensino', contaId: 'local-conta' }, auth.session(auth.auxiliarEmail));
+    return { sessions, first, second };
+  }
+  it('closes a headless context only after its final app owner leaves', async () => {
+    const { sessions, first, second } = await owners();
+    const portal = await import('../portal-sessions');
+    const opened = await sessions.naSessaoDoAuxiliar(first, () => portal.openSession({ login: '111', senha: 'portal-senha', escola: 'Escola' }, { professorId }));
+    sessions.naSessaoDoAuxiliar(second, () => portal.touchSession(opened.id));
+    await sessions.encerrarSessao(first);
+    expect(paginas[0].fechada).toBe(false);
+    await sessions.encerrarSessao(second);
+    expect(paginas[0].fechada).toBe(true);
+  });
+  it('closes a visible context only after its final app owner leaves', async () => {
+    const { sessions, first, second } = await owners();
+    const { naSessaoHeaded } = await import('../sessoes-headed');
+    const credenciais = { login: '111', senha: 'portal-senha', escola: 'Escola' };
+    await sessions.naSessaoDoAuxiliar(first, () => naSessaoHeaded(professorId, credenciais, async () => {}));
+    await sessions.naSessaoDoAuxiliar(second, () => naSessaoHeaded(professorId, credenciais, async () => {}));
+    await sessions.encerrarSessao(first);
+    expect(paginas[0].fechada).toBe(false);
+    await sessions.encerrarSessao(second);
+    expect(paginas[0].fechada).toBe(true);
+  });
+  it('discards a portal login that finishes after its app session was ended', async () => {
+    const { sessions, first } = await owners();
+    const { login } = await import('../scrape/portal');
+    let complete!: () => void;
+    vi.mocked(login).mockImplementationOnce(() => new Promise<void>((resolve) => { complete = resolve; }));
+    const portal = await import('../portal-sessions');
+    const pending = sessions.naSessaoDoAuxiliar(first, () => portal.openSession({ login: '111', senha: 'portal-senha', escola: 'Escola' }, { professorId }));
+    const rejected = expect(pending).rejects.toMatchObject({ status: 401 });
+    await vi.waitFor(() => expect(complete).toBeDefined());
+    await sessions.encerrarSessao(first);
+    complete();
+    await rejected;
+    expect(paginas[0].fechada).toBe(true);
+  });
+});

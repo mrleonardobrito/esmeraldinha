@@ -1,79 +1,101 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 
 import { env } from '../env';
+import type { AuthSession } from './supabase';
 
-/**
- * A sessão do auxiliar de ensino — não confundir com a sessão do portal, que
- * é um navegador aberto com as credenciais de um professor. Esta é só a
- * prova de que quem está do outro lado já entrou com a senha da conta.
- *
- * Mora em memória de propósito: o processo que serve a API é o mesmo que o
- * app fecha ao sair, e uma sessão que não sobrevive a isso é exatamente o
- * que se quer de um app que guarda as credenciais dos professores.
- */
 export type IdentidadeDaSessao =
   | { readonly papel: 'auxiliar de ensino'; readonly contaId: string }
-  | { readonly papel: 'professor'; readonly professorId: string };
+  | { readonly papel: 'professor'; readonly professorId: string; readonly authRevision: number };
 
-interface SessaoDaEsmeraldinha {
+export interface SessaoDaEsmeraldinha {
   readonly identidade: IdentidadeDaSessao;
+  readonly provider: AuthSession;
+  purpose: 'full' | 'setup' | 'recovery';
   expiraEm: number;
 }
 
 const sessoes = new Map<string, SessaoDaEsmeraldinha>();
+const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const requestSession = new AsyncLocalStorage<string>();
+const cleanupHandlers = new Set<(token: string) => Promise<void>>();
 
-/** Sessões vencidas só ocupam memória: cada consulta aproveita para limpá-las. */
-function descartarVencidas(agora: number): void {
-  for (const [token, sessao] of sessoes) {
-    if (sessao.expiraEm <= agora) sessoes.delete(token);
-  }
+export function tokenDaSessaoAtual(): string | undefined { return requestSession.getStore(); }
+export function sessaoAindaAtiva(token: string): boolean { return (sessoes.get(token)?.expiraEm ?? 0) > Date.now(); }
+export function naSessaoDoAuxiliar<T>(token: string, work: () => T): T { return requestSession.run(token, work); }
+export function registrarLimpezaDeSessao(handler: (token: string) => Promise<void>): void { cleanupHandlers.add(handler); }
+
+function scheduleIdle(token: string, sessao: SessaoDaEsmeraldinha): void {
+  clearTimeout(idleTimers.get(token));
+  const timer = setTimeout(() => {
+    if (sessoes.get(token) !== sessao) return;
+    if (sessao.expiraEm <= Date.now()) void encerrarSessao(token);
+    else scheduleIdle(token, sessao);
+  }, Math.min(Math.max(1, sessao.expiraEm - Date.now()), 2_147_483_647));
+  timer.unref();
+  idleTimers.set(token, timer);
 }
 
-/** Abre uma sessão para a conta e devolve o token que a identifica. */
-export function abrirSessao(identidade: IdentidadeDaSessao): string {
-  const agora = Date.now();
-  descartarVencidas(agora);
-
+export function abrirSessao(identidade: IdentidadeDaSessao, provider: AuthSession, purpose: SessaoDaEsmeraldinha['purpose'] = 'full'): string {
+  for (const [token, sessao] of sessoes) if (sessao.expiraEm <= Date.now()) void encerrarSessao(token);
   const token = randomBytes(32).toString('base64url');
-  sessoes.set(token, { identidade, expiraEm: agora + env.conta.sessaoIdleMs });
-
+  sessoes.set(token, { identidade, provider, purpose, expiraEm: Date.now() + env.conta.sessaoIdleMs });
+  scheduleIdle(token, sessoes.get(token)!);
   return token;
 }
 
-/**
- * A conta dona do token, renovando a ociosidade — ou `null` se o token não
- * vale mais.
- */
-export function usarSessao(token: string): IdentidadeDaSessao | null {
-  const agora = Date.now();
+/** Provider refresh never extends app idleness; only an authenticated request does. */
+export async function usarSessao(token: string): Promise<SessaoDaEsmeraldinha | null> {
   const sessao = sessoes.get(token);
-
   if (!sessao) return null;
-
-  if (sessao.expiraEm <= agora) {
-    sessoes.delete(token);
+  if (sessao.expiraEm <= Date.now()) {
+    void encerrarSessao(token);
     return null;
   }
-
-  sessao.expiraEm = agora + env.conta.sessaoIdleMs;
-  return sessao.identidade;
+  await sessao.provider.accessToken();
+  if (sessoes.get(token) !== sessao || sessao.expiraEm <= Date.now()) return null;
+  sessao.expiraEm = Date.now() + env.conta.sessaoIdleMs;
+  scheduleIdle(token, sessao);
+  return sessao;
 }
 
-/** Encerra a sessão do token. É o que o botão de sair faz. */
-export function encerrarSessao(token: string): void {
+export async function encerrarSessao(token: string): Promise<void> {
+  const sessao = sessoes.get(token);
+  if (!sessao) return;
   sessoes.delete(token);
+  clearTimeout(idleTimers.get(token));
+  idleTimers.delete(token);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.allSettled([sessao.provider.signOut('local'), ...[...cleanupHandlers].map((handler) => handler(token))]),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, 2000); timer.unref(); }),
+    ]);
+  } finally { clearTimeout(timer); }
 }
 
-/**
- * Encerra todas as sessões da conta. Trocar a senha passa por aqui: uma
- * senha nova não deve deixar sessões antigas abertas por aí.
- */
-export function encerrarSessoesDaConta(contaId: string, exceto?: string): void {
-  for (const [token, sessao] of sessoes) {
-    if (
-      sessao.identidade.papel === 'auxiliar de ensino' &&
-      sessao.identidade.contaId === contaId &&
-      token !== exceto
-    ) sessoes.delete(token);
-  }
+export async function encerrarSessoesDaConta(contaId: string, exceto?: string): Promise<void> {
+  await Promise.all([...sessoes].filter(([token, sessao]) =>
+    token !== exceto && sessao.identidade.papel === 'auxiliar de ensino' && sessao.identidade.contaId === contaId,
+  ).map(([token]) => encerrarSessao(token)));
+}
+
+export async function encerrarSessoesDoProfessor(professorId: string): Promise<void> {
+  await Promise.all([...sessoes].filter(([, sessao]) =>
+    sessao.identidade.papel === 'professor' && sessao.identidade.professorId === professorId,
+  ).map(([token]) => encerrarSessao(token)));
+}
+
+export async function encerrarTodasAsSessoes(): Promise<void> {
+  await Promise.all([...sessoes.keys()].map(encerrarSessao));
+}
+
+export function renovarSessao(token: string): string {
+  const sessao = sessoes.get(token);
+  if (!sessao) throw new Error('Cannot rotate an ended sessão do auxiliar.');
+  sessoes.delete(token);
+  clearTimeout(idleTimers.get(token));
+  idleTimers.delete(token);
+  for (const handler of cleanupHandlers) void handler(token).catch(() => {});
+  return abrirSessao(sessao.identidade, sessao.provider, 'full');
 }

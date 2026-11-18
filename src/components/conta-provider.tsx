@@ -22,11 +22,7 @@ interface ContaContexto {
 
 const Contexto = React.createContext<ContaContexto | null>(null);
 
-/**
- * Quem está usando a Esmeraldinha. Fica acima de tudo porque a resposta muda
- * a tela inteira: sem sessão só existe a entrada, e com a senha temporária
- * ainda em uso só existe o primeiro acesso.
- */
+/** Resolves entry, restricted primeiro acesso, and the authenticated app. */
 export function ContaProvider({ children }: { children: React.ReactNode }) {
   const [conta, setConta] = React.useState<Conta | null>(null);
   // Sem token guardado não há nada a conferir: a tela de entrada já pode vir.

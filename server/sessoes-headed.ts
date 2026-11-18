@@ -1,4 +1,6 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { registrarLimpezaDeSessao, sessaoAindaAtiva, tokenDaSessaoAtual } from './conta/sessoes';
+import { AuthFailure } from './conta/supabase';
 
 import { login } from './scrape/portal';
 import type { ProfessorCredenciais } from './scrape/types';
@@ -28,6 +30,13 @@ interface SessaoRastreada extends SessaoHeaded {
 }
 
 const sessoes = new Map<string, SessaoRastreada>();
+const appOwners = new Map<string, Set<string>>();
+registrarLimpezaDeSessao(async (token) => {
+  for (const [id, owners] of appOwners) if (owners.delete(token) && owners.size === 0) {
+    appOwners.delete(id);
+    await fecharSessaoHeaded(id);
+  }
+});
 /** Os logins em voo, para dois cliques seguidos não abrirem duas janelas. */
 const abrindo = new Map<string, Promise<SessaoRastreada>>();
 
@@ -121,6 +130,14 @@ export async function naSessaoHeaded<T>(
   trabalho: (page: Page) => Promise<T>,
 ): Promise<T> {
   const sessao = await obterSessao(professorId, credenciais);
+  const appToken = tokenDaSessaoAtual();
+  if (appToken && !sessaoAindaAtiva(appToken)) {
+    if (!appOwners.has(professorId)) await fecharSessaoHeaded(professorId);
+    throw new AuthFailure('Entre novamente para continuar.', 401);
+  }
+  const owners = appOwners.get(professorId) ?? new Set<string>();
+  owners.add(appToken ?? 'system');
+  appOwners.set(professorId, owners);
 
   const atual = sessao.fila.then(
     () => trabalho(sessao.page),
@@ -138,6 +155,7 @@ export async function naSessaoHeaded<T>(
 }
 
 export async function fecharSessaoHeaded(professorId: string): Promise<boolean> {
+  appOwners.delete(professorId);
   const sessao = sessoes.get(professorId);
   if (!sessao) return false;
 

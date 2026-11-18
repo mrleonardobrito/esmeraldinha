@@ -42,6 +42,7 @@ export type Professor = Omit<ProfessorInput, "senha" | "imagem"> & {
   /** Nulo quando o professor não tem imagem: é assim que o banco a guarda. */
   imagem: string | null;
   acessoLiberado?: boolean;
+  authStatus?: string;
   id: string;
   createdAt: string;
   valorRecebidoTotal?: number;
@@ -97,6 +98,18 @@ export async function setProfessorAcesso(
     body: JSON.stringify({ liberado }),
   });
   return (await response.json()) as Professor;
+}
+
+export async function reconciliarAcesso(id: string): Promise<Professor | null> {
+  return (await requestApi(`/api/professores/${id}/auth/reconciliacoes`, { method: 'POST' })).json();
+}
+
+export async function enviarCodigoDoProfessor(id: string): Promise<void> {
+  await requestApi(`/api/professores/${id}/auth/codigos`, { method: 'POST' });
+}
+
+export async function verificarCodigoDoProfessor(id: string, codigo: string): Promise<Professor> {
+  return (await requestApi(`/api/professores/${id}/auth/verificacoes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codigo }) })).json();
 }
 
 export function getInitials(nome: string) {

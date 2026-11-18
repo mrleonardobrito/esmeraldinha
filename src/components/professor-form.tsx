@@ -64,6 +64,7 @@ const TITULOS: Record<Passo, string> = {
 };
 
 const INITIAL_VALUES: ProfessorInput = {
+  email: '',
   nome: "",
   login: "",
   senha: "",
@@ -107,6 +108,7 @@ export function ProfessorForm({
       professor
         ? {
             nome: professor.nome,
+            email: professor.email ?? '',
             login: formatCpf(professor.login),
             // A senha não volta da API: editar deixa o campo em branco, e
             // em branco significa "manter a senha atual".
@@ -345,6 +347,10 @@ export function ProfessorForm({
                 />
               </Field>
 
+              <Field label="E-mail para confirmação do acesso" error={errors.email} htmlFor="professor-email">
+                <Input id="professor-email" type="email" value={values.email ?? ''} onChange={(event) => updateField('email', event.target.value)} disabled={Boolean(professor?.authStatus)} autoComplete="email" />
+                <p className="text-xs text-muted-foreground">Usado para confirmar o acesso. O professor continua entrando com CPF e senha do portal.</p>
+              </Field>
               {submitError && <ErrorMessage>{submitError}</ErrorMessage>}
             </form>
 

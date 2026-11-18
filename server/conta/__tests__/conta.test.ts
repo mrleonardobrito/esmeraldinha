@@ -5,10 +5,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../../app';
-import { autenticar, SENHA_DE_TESTE } from '../../__tests__/sessao-de-teste';
+import { authDeTeste, autenticar, SENHA_DE_TESTE } from '../../__tests__/sessao-de-teste';
 
 const LOGIN = 'auxiliar-de-teste';
-const SENHA_TEMPORARIA = 'temporaria-de-teste';
+const SENHA_TEMPORARIA = 'senha-inicial-de-teste';
+let auth: ReturnType<typeof authDeTeste>;
 
 const originalEnv = {
   dbPath: process.env.ESMERALDINHA_DB_PATH,
@@ -21,7 +22,8 @@ let tempDir: string;
 
 async function freshApp() {
   const { createApp } = await import('../../app');
-  return (createApp as typeof CreateApp)();
+  auth = authDeTeste();
+  return (createApp as typeof CreateApp)({ auth });
 }
 
 function entrar(senha: string, login = LOGIN) {
@@ -68,7 +70,7 @@ describe('conta do auxiliar de ensino', () => {
     expect(response.status).toBe(401);
   });
 
-  it('entra com a senha temporária e pede a troca antes de qualquer outra coisa', async () => {
+  it('requires a definitive senha after the first Supabase entry', async () => {
     const app = await freshApp();
 
     const entrada = await app.fetch(entrar(SENHA_TEMPORARIA));
@@ -112,6 +114,8 @@ describe('conta do auxiliar de ensino', () => {
     const bloqueada = await app.fetch(entrar('senha-do-portal', '529.982.247-25'));
     expect(bloqueada.status).toBe(403);
     setProfessorAcesso(getDb(), professor.id, true);
+    auth.identities.set('professor@example.test', { id: '00000000-0000-4000-8000-000000000002', senha: 'senha-do-portal' });
+    getDb().prepare("UPDATE professores SET auth_email = 'professor@example.test', supabase_auth_id = '00000000-0000-4000-8000-000000000002', auth_sync_status = 'ready' WHERE id = ?").run(professor.id);
 
     const entrada = await app.fetch(entrar('senha-do-portal', '529.982.247-25'));
     expect(entrada.status).toBe(200);
@@ -150,6 +154,8 @@ describe('conta do auxiliar de ensino', () => {
     const revogada = await app.fetch(entrar('senha-do-portal', '529.982.247-25'));
     expect(revogada.status).toBe(403);
     setProfessorAcesso(getDb(), professor.id, true);
+    auth.identities.set('professor@example.test', { id: '00000000-0000-4000-8000-000000000002', senha: 'senha-do-portal' });
+    getDb().prepare("UPDATE professores SET auth_email = 'professor@example.test', supabase_auth_id = '00000000-0000-4000-8000-000000000002', auth_sync_status = 'ready' WHERE id = ?").run(professor.id);
 
     const gestao = await app.fetch(
       comToken(new Request('http://localhost/api/professores'), token),
@@ -205,7 +211,7 @@ describe('conta do auxiliar de ensino', () => {
     await expect(response.json()).resolves.toEqual([]);
   });
 
-  it('não aceita a temporária como senha definitiva', async () => {
+  it('rejects reusing the current senha as the definitive senha', async () => {
     const app = await freshApp();
     const { token } = (await (await app.fetch(entrar(SENHA_TEMPORARIA))).json()) as {
       token: string;
@@ -251,7 +257,7 @@ describe('conta do auxiliar de ensino', () => {
       token: string;
     };
 
-    await sessao.fetch(
+    const changed = await sessao.fetch(
       new Request('http://localhost/api/conta/senha', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -268,7 +274,8 @@ describe('conta do auxiliar de ensino', () => {
     expect(antiga.status).toBe(401);
 
     // A sessão que trocou a senha continua de pé: quem trocou não é deslogado.
-    const atual = await sessao.fetch(new Request('http://localhost/api/conta'));
+    const rotated = (await changed.json()) as { token: string };
+    const atual = await app.fetch(comToken(new Request('http://localhost/api/conta'), rotated.token));
     expect(atual.status).toBe(200);
   });
 

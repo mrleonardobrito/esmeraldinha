@@ -1,26 +1,20 @@
-/**
- * O app empacotado não lê `.env`: o instalador é um arquivo só, e não há
- * onde colocá-lo na máquina do auxiliar de ensino. As variáveis abaixo, por
- * isso, entram no bundle na hora de empacotar — no CI elas vêm dos secrets
- * do repositório, e localmente do ambiente de quem roda `pnpm build:electron`.
- *
- * Só estas: são as que identificam a conta do auxiliar de ensino no primeiro
- * acesso. O resto continua sendo lido do ambiente em tempo de execução.
- */
+/** Only public desktop configuration is embedded in the installer. */
 export const VARIAVEIS_DE_BUILD = [
   'ESMERALDINHA_LOGIN',
-  'ESMERALDINHA_SENHA_TEMPORARIA',
+  'SUPABASE_URL',
+  'SUPABASE_PUBLISHABLE_KEY',
+  'SUPABASE_AUXILIAR_AUTH_ID',
+  'SUPABASE_AUXILIAR_EMAIL',
+  'SUPABASE_AUTH_ADMIN_URL',
 ];
 
-/**
- * O mapa de `define` do esbuild para as variáveis que o ambiente informou.
- * As que ele não informou ficam de fora de propósito: sem `define`, o código
- * segue lendo `process.env` como faz em `pnpm dev` e nos testes.
- */
 export function definesDoBuild(env = process.env) {
+  if (env.SUPABASE_PUBLISHABLE_KEY && !env.SUPABASE_PUBLISHABLE_KEY.startsWith('sb_publishable_')) {
+    throw new Error('SUPABASE_PUBLISHABLE_KEY must be a publishable key. Secret keys cannot enter a desktop build.');
+  }
   return Object.fromEntries(
-    VARIAVEIS_DE_BUILD.filter((nome) => (env[nome] ?? '').trim() !== '').map(
-      (nome) => [`process.env.${nome}`, JSON.stringify(env[nome])],
+    VARIAVEIS_DE_BUILD.filter((name) => (env[name] ?? '').trim() !== '').map(
+      (name) => [`process.env.${name}`, JSON.stringify(env[name])],
     ),
   );
 }

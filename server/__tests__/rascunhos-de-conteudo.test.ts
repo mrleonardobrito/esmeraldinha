@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../app';
-import { autenticar, type AppAutenticado } from './sessao-de-teste';
+import { authDeTeste, autenticar, type AppAutenticado } from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
@@ -39,7 +39,7 @@ let tempDir: string;
  */
 async function freshApp({ comCatalogo = true } = {}): Promise<AppAutenticado> {
   const { createApp } = await import('../app');
-  const app = (createApp as typeof CreateApp)();
+  const app = (createApp as typeof CreateApp)({ auth: authDeTeste() });
 
   const { getDb } = await import('../professores/db');
   const { createEncryptionPort } = await import('../encryption');

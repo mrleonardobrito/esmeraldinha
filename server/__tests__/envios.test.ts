@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { utils, write } from '@e965/xlsx';
 
 import type { createApp as CreateApp } from '../app';
-import { autenticar } from './sessao-de-teste';
+import { autenticar, authDeTeste } from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
@@ -62,7 +62,7 @@ async function enviar(body: FormData, id = sessionId): Promise<Response> {
   const { createApp } = await import('../app');
   // A rota exige uma sessão do auxiliar de ensino: o helper entra uma vez e
   // devolve o mesmo `fetch`, com o token na requisição.
-  const app = await autenticar((createApp as typeof CreateApp)());
+  const app = await autenticar((createApp as typeof CreateApp)({ auth: authDeTeste() }));
   return await app.fetch(
     request(`/sessoes/${id}/envios`, { method: 'POST', body }),
   );

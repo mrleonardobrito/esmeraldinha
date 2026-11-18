@@ -19,7 +19,7 @@ export async function openPortalSession(
 }
 
 export async function closePortalSession(sessionId: string): Promise<void> {
-  await fetch(`/api/cadernetas/sessoes/${sessionId}`, {
+  await requestApi(`/api/cadernetas/sessoes/${sessionId}`, {
     method: "DELETE",
   }).catch(() => {
     // encerrar sessão é best-effort: ela expira sozinha por ociosidade

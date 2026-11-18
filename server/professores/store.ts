@@ -8,6 +8,8 @@ import { textoConfere } from '../conta/senhas';
 
 /** A professor as returned by the API: never carries the senha. */
 export interface Professor {
+  email?: string;
+  authStatus?: string;
   id: string;
   nome: string;
   login: string;
@@ -36,6 +38,8 @@ export class ProfessorNotFoundError extends Error {
 }
 
 interface ProfessorRow {
+  auth_email?: string;
+  auth_sync_status?: string;
   id: string;
   nome: string;
   login: string;
@@ -56,6 +60,8 @@ function toProfessor(row: ProfessorRow): Professor {
     imagem: row.imagem,
     acessoLiberado: row.acesso_liberado === 1,
     createdAt: row.created_at,
+    ...(row.auth_email ? { email: row.auth_email } : {}),
+    ...(row.auth_sync_status && row.auth_sync_status !== 'unlinked' ? { authStatus: row.auth_sync_status } : {}),
     ...(row.valor_recebido_total !== undefined ? { valorRecebidoTotal: row.valor_recebido_total, valorAReceberTotal: row.valor_a_receber_total } : {}),
   };
 }
@@ -63,7 +69,7 @@ function toProfessor(row: ProfessorRow): Professor {
 /** Um professor pelo id, sem expor a senha guardada. */
 export function getProfessor(db: DatabaseSync, id: string): Professor | null {
   const row = db.prepare(
-    'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at FROM professores WHERE id = ?',
+    'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at, auth_email, auth_sync_status FROM professores WHERE id = ?',
   ).get(id) as unknown as ProfessorRow | undefined;
   return row ? toProfessor(row) : null;
 }
@@ -71,7 +77,7 @@ export function getProfessor(db: DatabaseSync, id: string): Professor | null {
 /** Finds a professor by portal login without reading their senha. */
 export function getProfessorPorLogin(db: DatabaseSync, login: string): Professor | null {
   const row = db.prepare(
-    'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at FROM professores WHERE login = ?',
+    'SELECT id, nome, login, escola, imagem, acesso_liberado, created_at, auth_email, auth_sync_status FROM professores WHERE login = ?',
   ).get(login) as unknown as ProfessorRow | undefined;
   return row ? toProfessor(row) : null;
 }
@@ -96,7 +102,7 @@ export async function autenticarProfessor(
 export function listProfessores(db: DatabaseSync): Professor[] {
   const rows = db
     .prepare(
-      `SELECT p.id, p.nome, p.login, p.escola, p.imagem, p.acesso_liberado, p.created_at,
+      `SELECT p.id, p.nome, p.login, p.escola, p.imagem, p.acesso_liberado, p.created_at, p.auth_email, p.auth_sync_status,
         COALESCE((SELECT SUM(c.valor_recebido) FROM cadernetas c WHERE c.professor_id = p.id), 0) AS valor_recebido_total,
         COALESCE((SELECT SUM(c.valor_a_receber) FROM cadernetas c WHERE c.professor_id = p.id), 0) AS valor_a_receber_total
        FROM professores p ORDER BY p.created_at ASC`,
@@ -131,8 +137,8 @@ export async function createProfessor(
   const senhaEncrypted = await encryption.encrypt(input.senha);
 
   db.prepare(
-    `INSERT INTO professores (id, nome, login, senha_encrypted, escola, imagem, acesso_liberado, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+    `INSERT INTO professores (id, nome, login, senha_encrypted, escola, imagem, acesso_liberado, created_at, auth_email)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
   ).run(
     id,
     input.nome,
@@ -141,17 +147,10 @@ export async function createProfessor(
     input.escola,
     input.imagem ?? null,
     createdAt,
+    input.email?.toLowerCase() ?? '',
   );
 
-  return {
-    id,
-    nome: input.nome,
-    login: input.login,
-    escola: input.escola,
-    imagem: input.imagem ?? null,
-    acessoLiberado: false,
-    createdAt,
-  };
+  return getProfessor(db, id)!;
 }
 
 /**
@@ -186,18 +185,18 @@ export async function updateProfessor(
   if (input.senha) {
     const senhaEncrypted = await encryption.encrypt(input.senha);
     db.prepare(
-      `UPDATE professores SET nome = ?, login = ?, senha_encrypted = ?, escola = ?, imagem = ?
+      `UPDATE professores SET nome = ?, login = ?, senha_encrypted = ?, escola = ?, imagem = ?, auth_email = COALESCE(?, auth_email)
        WHERE id = ?`,
-    ).run(input.nome, input.login, senhaEncrypted, input.escola, input.imagem ?? null, id);
+    ).run(input.nome, input.login, senhaEncrypted, input.escola, input.imagem ?? null, input.email?.toLowerCase() ?? null, id);
   } else {
     db.prepare(
-      `UPDATE professores SET nome = ?, login = ?, escola = ?, imagem = ?
+      `UPDATE professores SET nome = ?, login = ?, escola = ?, imagem = ?, auth_email = COALESCE(?, auth_email)
        WHERE id = ?`,
-    ).run(input.nome, input.login, input.escola, input.imagem ?? null, id);
+    ).run(input.nome, input.login, input.escola, input.imagem ?? null, input.email?.toLowerCase() ?? null, id);
   }
 
   const row = db
-    .prepare('SELECT id, nome, login, escola, imagem, acesso_liberado, created_at FROM professores WHERE id = ?')
+    .prepare('SELECT id, nome, login, escola, imagem, acesso_liberado, created_at, auth_email, auth_sync_status FROM professores WHERE id = ?')
     .get(id) as unknown as ProfessorRow;
 
   return toProfessor(row);

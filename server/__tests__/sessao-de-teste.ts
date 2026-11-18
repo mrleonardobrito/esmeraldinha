@@ -1,9 +1,9 @@
 import type { Hono } from 'hono';
+import type { ContaEnv } from '../conta/autenticacao';
+import { INITIAL_SENHA } from './auth-de-teste';
+export { authDeTeste } from './auth-de-teste';
 
-/**
- * A senha definitiva que os testes usam depois do primeiro acesso. Qualquer
- * uma serve, desde que não seja a temporária.
- */
+/** Definitive senha used by the injected test provider. */
 export const SENHA_DE_TESTE = 'senha-de-teste';
 
 /**
@@ -16,8 +16,8 @@ export interface AppAutenticado {
   token: string;
 }
 
-/** Entra com a senha temporária, define a definitiva e devolve a sessão pronta. */
-export async function autenticar(app: Hono): Promise<AppAutenticado> {
+/** Authenticates through the injected provider and completes primeiro acesso. */
+export async function autenticar(app: Hono<ContaEnv>): Promise<AppAutenticado> {
   const { env } = await import('../env');
 
   const entrada = await app.fetch(
@@ -26,14 +26,15 @@ export async function autenticar(app: Hono): Promise<AppAutenticado> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         login: env.conta.login,
-        senha: env.conta.senhaTemporaria,
+        senha: INITIAL_SENHA,
       }),
     }),
   );
 
-  const { token } = (await entrada.json()) as { token: string };
+  let { token } = (await entrada.json()) as { token: string };
+  if (entrada.status !== 200) throw new Error(`Test entry failed: ${entrada.status}`);
 
-  await app.fetch(
+  const changed = await app.fetch(
     new Request('http://localhost/api/conta/senha', {
       method: 'PUT',
       headers: {
@@ -41,11 +42,13 @@ export async function autenticar(app: Hono): Promise<AppAutenticado> {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        senhaAtual: env.conta.senhaTemporaria,
+        senhaAtual: INITIAL_SENHA,
         senha: SENHA_DE_TESTE,
       }),
     }),
   );
+  if (changed.status !== 200) throw new Error(`Test senha change failed: ${changed.status}`);
+  token = ((await changed.json()) as { token: string }).token;
 
   return {
     token,

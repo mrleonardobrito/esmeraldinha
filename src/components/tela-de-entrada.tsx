@@ -18,7 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useConta } from "@/components/conta-provider";
-import { entrarSchema, novaSenhaSchema, trocarSenha, MIN_SENHA } from "@/lib/conta";
+import { entrarSchema, novaSenhaSchema, trocarSenha, MIN_SENHA, enviarCodigoDeAcesso, verificarCodigoDeAcesso, lerConfiguracaoDeAcesso } from "@/lib/conta";
 
 function mensagem(error: unknown, padrao: string): string {
   return error instanceof Error ? error.message : padrao;
@@ -116,74 +116,82 @@ function Moldura({
 
 /** A entrada na Esmeraldinha: sem sessão, é a única tela que existe. */
 export function TelaDeEntrada() {
-  const { entrar } = useConta();
+  const { entrar, guardarConta } = useConta();
   const [login, setLogin] = React.useState("");
   const [senha, setSenha] = React.useState("");
+  const [senhaLocal, setSenhaLocal] = React.useState("");
+  const [codigo, setCodigo] = React.useState("");
+  const [usandoCodigo, setUsandoCodigo] = React.useState(false);
+  const [codePurpose, setCodePurpose] = React.useState<'setup' | 'recovery'>('setup');
+  const [configuracao, setConfiguracao] = React.useState<import("@shared/conta").ConfiguracaoDeAcesso | null>(null);
   const [erro, setErro] = React.useState<string | null>(null);
   const [enviando, setEnviando] = React.useState(false);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    lerConfiguracaoDeAcesso().then((value) => {
+      if (cancelled) return;
+      setConfiguracao(value);
+      if (!value.configurada) setErro("A autenticação desta instalação ainda precisa ser configurada.");
+    }).catch((error) => { if (!cancelled) setErro(mensagem(error, "Não foi possível verificar o acesso.")); });
+    return () => { cancelled = true; };
+  }, []);
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    const parsed = entrarSchema.safeParse({ login, senha });
-    if (!parsed.success) {
-      setErro(parsed.error.issues[0]?.message ?? "Dados de acesso inválidos.");
-      return;
-    }
-
     setEnviando(true);
     setErro(null);
     try {
-      await entrar(parsed.data);
-    } catch (error) {
-      setErro(mensagem(error, "Não foi possível entrar."));
-    } finally {
-      setEnviando(false);
-    }
+      if (usandoCodigo) {
+        guardarConta(await verificarCodigoDeAcesso({ login, codigo, senhaLocal: senhaLocal || undefined }));
+      } else {
+        const parsed = entrarSchema.safeParse({ login, senha, senhaLocal: senhaLocal || undefined });
+        if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Dados inválidos.");
+        await entrar(parsed.data);
+      }
+    } catch (error) { setErro(mensagem(error, "Não foi possível entrar.")); }
+    finally { setEnviando(false); }
+  }
+
+  async function sendCode(purpose: 'setup' | 'recovery') {
+    setEnviando(true);
+    setErro(null);
+    try { await enviarCodigoDeAcesso(login, purpose); setCodePurpose(purpose); setUsandoCodigo(true); }
+    catch (error) { setErro(mensagem(error, "Não foi possível enviar o código.")); }
+    finally { setEnviando(false); }
   }
 
   return (
-    <Moldura
-      titulo="Entrar na Esmeraldinha"
-      descricao="Entre com o login e a senha do auxiliar de ensino ou com seu CPF e senha do portal."
-    >
+    <Moldura titulo="Entrar na Esmeraldinha" descricao="Entre com o login do auxiliar de ensino ou com seu CPF e senha do portal.">
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <div className="flex flex-col gap-2">
           <Label htmlFor="login">Login ou CPF</Label>
-          <Input
-            id="login"
-            value={login}
-            autoFocus
-            autoComplete="username"
-            onChange={(event) => setLogin(event.target.value)}
-          />
+          <Input id="login" value={login} autoFocus autoComplete="username" onChange={(event) => setLogin(event.target.value)} />
         </div>
-        <CampoDeSenha
-          id="senha"
-          label="Senha"
-          value={senha}
-          autoComplete="current-password"
-          onChange={setSenha}
-        />
+        {usandoCodigo ? <div className="flex flex-col gap-2">
+          <Label htmlFor="codigo">Código recebido por e-mail</Label>
+          <Input id="codigo" value={codigo} inputMode="numeric" autoComplete="one-time-code" onChange={(event) => setCodigo(event.target.value)} />
+          <p className="text-xs text-muted-foreground">Após confirmar o código, você deverá definir sua senha.</p>
+        </div> : <CampoDeSenha id="senha" label="Senha" value={senha} autoComplete="current-password" onChange={setSenha} />}
+        {configuracao?.precisaVincular && <CampoDeSenha id="senha-local" label="Senha anterior desta instalação" value={senhaLocal} autoComplete="off" onChange={setSenhaLocal} descricao="Necessária somente para vincular a conta do auxiliar de ensino já existente." />}
         {erro && <Erro>{erro}</Erro>}
-        <Button type="submit" disabled={enviando}>
-          {enviando && (
-            <IconLoader data-icon="inline-start" className="animate-spin" />
-          )}
-          Entrar
+        <Button type="submit" disabled={enviando || configuracao?.configurada === false}>
+          {enviando && <IconLoader data-icon="inline-start" className="animate-spin" />}
+          {usandoCodigo ? "Confirmar código" : "Entrar"}
         </Button>
+        <Button type="button" variant="ghost" disabled={enviando || !login || configuracao?.configurada === false} onClick={() => void sendCode(usandoCodigo ? codePurpose : 'setup')}>
+          {usandoCodigo ? "Reenviar código" : "Primeiro acesso do auxiliar"}
+        </Button>
+        {!usandoCodigo && <Button type="button" variant="ghost" disabled={enviando || !login || configuracao?.configurada === false} onClick={() => void sendCode('recovery')}>Recuperar senha do auxiliar</Button>}
+        {usandoCodigo && <Button type="button" variant="ghost" onClick={() => setUsandoCodigo(false)}>Entrar com senha</Button>}
       </form>
     </Moldura>
   );
 }
 
-/**
- * O primeiro acesso. A senha temporária vem de um arquivo de ambiente e é
- * a mesma em toda instalação: trocá-la é a primeira coisa a fazer, e nada
- * mais do app abre antes disso.
- */
+/** Primeiro acesso and recovery sessions remain restricted until a senha is set. */
 export function PrimeiroAcesso() {
-  const { guardarConta, sair } = useConta();
+  const { conta, guardarConta, sair } = useConta();
   const [senhaAtual, setSenhaAtual] = React.useState("");
   const [senha, setSenha] = React.useState("");
   const [confirmacao, setConfirmacao] = React.useState("");
@@ -217,18 +225,18 @@ export function PrimeiroAcesso() {
   return (
     <Moldura
       titulo="Defina a sua senha"
-      descricao="A senha temporária serve só para este primeiro acesso."
+      descricao="Defina a senha da sua conta do auxiliar de ensino."
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-        <CampoDeSenha
-          id="senha-temporaria"
-          label="Senha temporária"
+        {!conta?.acessoPorCodigo && <CampoDeSenha
+          id="senha-atual"
+          label="Senha atual"
           value={senhaAtual}
           autoFocus
           autoComplete="current-password"
           onChange={setSenhaAtual}
           descricao="A mesma que você acabou de usar para entrar."
-        />
+        />}
         <CampoDeSenha
           id="senha-nova"
           label="Nova senha"

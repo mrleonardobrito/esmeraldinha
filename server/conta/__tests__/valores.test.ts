@@ -7,7 +7,7 @@ for (const papel of ['professor', 'auxiliar de ensino'] as const) {
   it(`restricts financial response fields for ${papel}`, async () => {
     const app = new Hono<ContaEnv>();
     app.use('*', async (c, next) => {
-      c.set('identidade', papel === 'professor' ? { papel, professorId: 'p1' } : { papel, contaId: 'a1' });
+      c.set('identidade', papel === 'professor' ? { papel, professorId: 'p1', authRevision: 0 } : { papel, contaId: 'a1' });
       await next();
     });
     app.use('*', restringirValores);

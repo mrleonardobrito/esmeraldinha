@@ -72,11 +72,19 @@ export function Cadernetas() {
   const { conta } = useConta();
   const retomada = React.useMemo(() => lerSessaoDeTrabalho(), []);
 
-  const [professoresState, setProfessoresState] =
+  const [loadedProfessoresState, setProfessoresState] =
     React.useState<ProfessoresState>({ status: "loading" });
-  const [selected, setSelected] = React.useState<Professor | null>(
+  const [selectedProfessor, setSelected] = React.useState<Professor | null>(
     retomada?.professor ?? null,
   );
+  const professorDaConta = React.useMemo<Professor | null>(() => conta?.papel === "professor" && conta.professorId ? {
+    id: conta.professorId, nome: conta.nome, login: conta.login,
+    escola: conta.escola ?? "", imagem: conta.imagem, createdAt: "",
+  } : null, [conta]);
+  const selected = professorDaConta ?? selectedProfessor;
+  const professoresState: ProfessoresState = professorDaConta
+    ? { status: "ready", professores: [professorDaConta] }
+    : loadedProfessoresState;
   const [status, setStatus] = React.useState<Status>(
     retomada?.session ? "connected" : "idle",
   );
@@ -112,19 +120,7 @@ export function Cadernetas() {
   React.useEffect(() => {
     let cancelled = false;
 
-    if (conta?.papel === "professor" && conta.professorId) {
-      const professor = {
-        id: conta.professorId,
-        nome: conta.nome,
-        login: conta.login,
-        escola: conta.escola ?? "",
-        imagem: conta.imagem,
-        createdAt: "",
-      };
-      setProfessoresState({ status: "ready", professores: [professor] });
-      setSelected(professor);
-      return () => { cancelled = true; };
-    }
+    if (conta?.papel === "professor") return;
 
     loadProfessores()
       .then((professores) => {

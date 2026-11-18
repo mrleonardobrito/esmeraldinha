@@ -21,11 +21,15 @@ The single account the auxiliar de ensino signs into Esmeraldinha with. Carries 
 _Avoid_: conta de usuário, account, perfil
 
 **senha temporária**:
-The senha the conta do auxiliar de ensino is born with, read from the environment and identical in every install. It only survives the primeiro acesso: nothing else in the app opens until it is replaced by a senha definitiva, kept as a hash.
+The shared bootstrap senha used by earlier installations. Retired by the Supabase Auth migration: new installations establish the senha definitiva through a código de acesso, and no shared senha is distributed in the installer. An existing local definitive senha is checked once when linking its installation to the intended remote identity.
 _Avoid_: senha padrão, temporary password
 
+**código de acesso**:
+A code delivered to the expected email to confirm access. For the auxiliar de ensino it opens only the primeiro acesso or senha recovery until a senha definitiva is established. For a professor it confirms enrollment without replacing ordinary CPF and senha do portal entry.
+_Avoid_: magic link, token de login
+
 **primeiro acesso**:
-The first entry into Esmeraldinha, where the senha temporária is exchanged for the senha definitiva. The only screen a conta with a senha temporária can reach.
+The restricted first entry into Esmeraldinha, where the auxiliar de ensino verifies a código de acesso and establishes the senha definitiva. Application data stays unavailable until it is completed. Recovery by código de acesso uses the same restricted senha-setting flow.
 _Avoid_: onboarding, first login
 
 **sessão do auxiliar**:
@@ -33,7 +37,7 @@ The proof that whoever is at the keyboard has signed into the conta do auxiliar 
 _Avoid_: login, sessão de usuário
 
 **professor**:
-The teacher a caderneta belongs to. They can enter Esmeraldinha with the same CPF and senha used in the portal, and can only access their own cadernetas.
+The teacher a caderneta belongs to. They can enter Esmeraldinha with the same CPF and senha used in the portal, and can only access their own cadernetas. A verified email links their access identity during enrollment; it does not introduce a different Esmeraldinha senha.
 _Avoid_: teacher, docente
 
 **credenciais do professor**:

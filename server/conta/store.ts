@@ -14,10 +14,7 @@ export interface Conta {
   nome: string;
   email: string;
   imagem: string | null;
-  /**
-   * Verdadeiro enquanto a senha em uso ainda é a temporária do ambiente. O
-   * primeiro acesso não deixa o auxiliar de ensino passar daqui.
-   */
+  /** Requires a completed primeiro acesso before application data is available. */
   precisaTrocarSenha: boolean;
 }
 
@@ -31,6 +28,9 @@ interface ContaRow {
   nome: string;
   email: string;
   imagem: string | null;
+  supabase_auth_id: string | null;
+  supabase_auth_email: string | null;
+  auth_setup_complete: number;
 }
 
 function toConta(row: ContaRow): Conta {
@@ -40,14 +40,14 @@ function toConta(row: ContaRow): Conta {
     nome: row.nome,
     email: row.email,
     imagem: row.imagem,
-    precisaTrocarSenha: row.senha_hash === null,
+    precisaTrocarSenha: row.supabase_auth_id ? row.auth_setup_complete !== 1 : row.senha_hash === null,
   };
 }
 
 function readRow(db: DatabaseSync): ContaRow | undefined {
   return db
     .prepare(
-      'SELECT id, login, senha_hash, nome, email, imagem FROM conta LIMIT 1',
+      'SELECT * FROM conta LIMIT 1',
     )
     .get() as unknown as ContaRow | undefined;
 }
@@ -58,10 +58,30 @@ export function lerConta(db: DatabaseSync): Conta | null {
   return row ? toConta(row) : null;
 }
 
-/**
- * Cria a conta do auxiliar de ensino sem senha definitiva — é o que o
- * primeiro acesso deixa para trás enquanto a senha temporária ainda vale.
- */
+export function lerVinculoDaConta(db: DatabaseSync): { id: string; email: string } | null {
+  const row = readRow(db);
+  return row?.supabase_auth_id && row.supabase_auth_email
+    ? { id: row.supabase_auth_id, email: row.supabase_auth_email }
+    : null;
+}
+
+export function contaPrecisaVinculo(db: DatabaseSync): boolean {
+  const row = readRow(db);
+  return Boolean(row?.senha_hash && !row.supabase_auth_id);
+}
+
+/** Called only after both the configured remote identity and local proof are verified. */
+export function vincularConta(db: DatabaseSync, id: string, authId: string, email: string): Conta {
+  db.prepare(`UPDATE conta SET supabase_auth_id = ?, supabase_auth_email = ?, senha_hash = NULL WHERE id = ? AND supabase_auth_id IS NULL`)
+    .run(authId, email, id);
+  return lerConta(db)!;
+}
+
+export function concluirPrimeiroAcesso(db: DatabaseSync, id: string): void {
+  db.prepare('UPDATE conta SET auth_setup_complete = 1, senha_hash = NULL WHERE id = ?').run(id);
+}
+
+/** Creates the local conta do auxiliar de ensino without a provider binding. */
 export function criarConta(db: DatabaseSync, login: string): Conta {
   const id = randomUUID();
 
@@ -80,7 +100,7 @@ export function criarConta(db: DatabaseSync, login: string): Conta {
   };
 }
 
-/** Grava a senha definitiva, encerrando o primeiro acesso. */
+/** Legacy-only writer retained for migration fixtures; normal senhas live in Auth. */
 export async function definirSenha(
   db: DatabaseSync,
   id: string,
@@ -92,10 +112,7 @@ export async function definirSenha(
   );
 }
 
-/**
- * Confere a senha definitiva da conta. Devolve `false` enquanto ela não
- * existe: nesse caso quem manda é a senha temporária do ambiente.
- */
+/** Verifies the legacy local proof needed once when binding an installation. */
 export async function conferirSenhaDefinitiva(
   db: DatabaseSync,
   senha: string,

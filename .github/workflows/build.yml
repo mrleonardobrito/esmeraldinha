@@ -62,9 +62,7 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/pw-browsers
 
-      # O login e a senha temporária da conta do auxiliar de ensino entram no
-      # bundle aqui (electron/build-defines.mjs): o app instalado não lê .env.
-      # Sem os secrets configurados, valem os padrões de server/env.ts.
+      # Only public Auth configuration enters the desktop bundle.
       - name: Build and package (${{ matrix.target }})
         run: |
           pnpm build
@@ -74,7 +72,11 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ESMERALDINHA_LOGIN: ${{ secrets.ESMERALDINHA_LOGIN }}
-          ESMERALDINHA_SENHA_TEMPORARIA: ${{ secrets.ESMERALDINHA_SENHA_TEMPORARIA }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_AUXILIAR_AUTH_ID: ${{ vars.SUPABASE_AUXILIAR_AUTH_ID }}
+          SUPABASE_AUXILIAR_EMAIL: ${{ vars.SUPABASE_AUXILIAR_EMAIL }}
+          SUPABASE_AUTH_ADMIN_URL: ${{ vars.SUPABASE_AUTH_ADMIN_URL }}
 
   release:
     needs: build

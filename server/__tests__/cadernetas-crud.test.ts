@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { createApp as CreateApp } from '../app';
-import { autenticar } from './sessao-de-teste';
+import { autenticar, authDeTeste } from './sessao-de-teste';
 
 vi.mock('../portal-sessions', () => ({
   touchSession: vi.fn(),
@@ -53,7 +53,7 @@ let tempDir: string;
 
 async function freshApp() {
   const { createApp } = await import('../app');
-  const app = (createApp as typeof CreateApp)();
+  const app = (createApp as typeof CreateApp)({ auth: authDeTeste() });
 
   const { createEncryptionPort } = await import('../encryption');
   const senhaEncrypted = await createEncryptionPort().encrypt('segredo');

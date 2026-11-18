@@ -12,17 +12,14 @@ export const MIN_SENHA = 8;
 export const entrarSchema = z.object({
   login: z.string().trim().min(1, "Informe o login."),
   senha: z.string().min(1, "Informe a senha."),
+  senhaLocal: z.string().optional(),
 });
 
 export type EntrarInput = z.infer<typeof entrarSchema>;
 
 export const novaSenhaSchema = z.object({
-  /**
-   * A senha em uso: a temporária no primeiro acesso, a definitiva depois.
-   * Trocar a senha sem conhecê-la deixaria a sessão aberta virar troca de
-   * dono da conta.
-   */
-  senhaAtual: z.string().min(1, "Informe a senha atual."),
+  /** Current senha; omitted only for an explicitly verified recovery session. */
+  senhaAtual: z.string().default(""),
   senha: z
     .string()
     .min(MIN_SENHA, `A senha precisa ter pelo menos ${MIN_SENHA} caracteres.`),
@@ -54,3 +51,14 @@ export const contaSchema = z.object({
 export type ContaInput = z.infer<typeof contaSchema>;
 
 export type ContaField = keyof ContaInput;
+
+export const codigoDeAcessoSchema = z.object({
+  login: z.string().trim().min(1),
+  codigo: z.string().regex(/^\d{6,10}$/, 'Informe o código recebido por e-mail.'),
+  senhaLocal: z.string().optional(),
+});
+
+export interface ConfiguracaoDeAcesso {
+  configurada: boolean;
+  precisaVincular: boolean;
+}
