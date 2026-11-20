@@ -1,6 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import {
-  closeMenuPanel,
   fillField,
   readMenuOptions,
   selectMenuOption,
@@ -128,12 +127,9 @@ export async function login(
 
 /** Escolhe o período no diálogo de ambiente já aberto e entra nele. */
 async function acessarPeriodoLetivo(page: Page, periodoLetivo: string): Promise<void> {
-  await page.locator(`[id$="${AMBIENTE.periodoLetivo}_label"]`).click();
-  // Um professor da EJA vê "2026 EJA" ao lado de "2026"; sem `exact` os dois casam.
-  await page.getByRole('option', { name: periodoLetivo, exact: true }).click();
-  await waitForAjax(page);
-  // No diálogo reaberto o painel fica aberto por cima do Acessar.
-  await closeMenuPanel(page, AMBIENTE.periodoLetivo);
+  // Use the underlying select and its AJAX handler. Opening the animated
+  // overlay can leave it stuck over Acessar, even after the widget's hide().
+  await selectMenuOption(page, page, AMBIENTE.periodoLetivo, periodoLetivo);
 
   await page.getByRole('button', { name: ' Acessar' }).click();
   await expect(page.locator(DIALOGO_DE_AMBIENTE)).toBeHidden({ timeout: AJAX_TIMEOUT_MS });
@@ -860,7 +856,16 @@ export async function prepararAulaParaPreenchimento(
   { periodoLetivo, etapa, turma, mes, data, ordem, conteudo }: PreenchimentoAssistidoFilter,
 ): Promise<void> {
   await selecionarPeriodoLetivo(page, periodoLetivo);
-  await openLancaConteudo(page);
+  await waitForAjax(page);
+
+  // Reopening Lançamento de Conteúdo reloads the table and discards unsaved
+  // aulas. Reuse the actual form so advancing within the same mês preserves
+  // earlier fields, including changes made manually by the auxiliar de ensino.
+  const hasConteudoForm =
+    (await page.locator(`[id$="${FILTER.mes}_input"]`).count()) === 1 &&
+    (await page.locator(`[id$="${FIELD.desenvolvimento}"]`).count()) > 0;
+
+  if (!hasConteudoForm) await openLancaConteudo(page);
 
   await selectMenuOption(page, page, FILTER.etapa, etapa);
   await selectMenuOption(page, page, await filtroDeTurma(page), turma);

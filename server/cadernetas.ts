@@ -47,7 +47,6 @@ import {
   listAulasDaEtapa,
   listCadernetas,
   listEstudantes,
-  marcarConteudoPreenchido,
   marcarNotasLancadas,
   type Caderneta,
 } from './cadernetas/store';
@@ -506,7 +505,7 @@ cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (co
     return context.json({ error: 'Informe o professor, a turma, a etapa e a aula.' }, 400);
   }
 
-  const { professorId, cadernetaId, etapa, mes, turma, aula } = parsed.data;
+  const { professorId, etapa, mes, turma, aula } = parsed.data;
   const { data, ordem, ...conteudo } = aula;
 
   const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), professorId);
@@ -530,16 +529,6 @@ cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (co
       }),
     );
 
-    if (cadernetaId) {
-      try {
-        marcarConteudoPreenchido(getDb(), cadernetaId, [{ etapa, data, ordem: ordem ?? null }]);
-      } catch (error) {
-        // O preenchimento assistido só escreve na tela; o auxiliar ainda vai
-        // salvar por conta própria. Um progresso desatualizado se resolve numa
-        // sincronização, e não vale interromper o fluxo por isso.
-        console.error('Falha ao atualizar o progresso da caderneta:', error);
-      }
-    }
 
     return context.json({ etapa, mes, data, ordem: ordem ?? null });
   } catch (error) {

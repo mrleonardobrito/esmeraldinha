@@ -142,6 +142,42 @@ describe('preenchimento assistido do boletim', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it.each([false, true])('preserves the last portal conteúdo status (%s) when only preparing an aula', async (preenchida) => {
+    const { app, professorId: id } = await freshApp();
+    const { getDb } = await import('../professores/db');
+    const { createCaderneta, syncCaderneta, listAulasDaEtapa } = await import('../cadernetas/store');
+    const db = getDb();
+    const caderneta = createCaderneta(db, { professorId: id, turma });
+    syncCaderneta(db, caderneta.id, {
+      etapas: [{
+        nome: '1ª Etapa',
+        meses: ['MARÇO'],
+        aulas: [{
+          mes: 'MARÇO', data: '05/03/2026', ordem: 5, preenchida,
+          ...(preenchida ? { desenvolvimento: 'Previously saved conteúdo.' } : {}),
+        }],
+      }],
+      estudantes: [],
+    });
+    const before = listAulasDaEtapa(db, caderneta.id, '1ª Etapa');
+
+    const response = await app.fetch(request(
+      `/sessoes/${sessionId}/envios/aulas/preenchimentos-assistidos`,
+      json({
+        professorId: id, cadernetaId: caderneta.id, turma,
+        etapa: '1ª Etapa', mes: 'MARÇO',
+        aula: { data: '05/03/2026', ordem: 5, desenvolvimento: 'Unsaved conteúdo.' },
+      }),
+    ));
+
+    expect(response.status).toBe(200);
+    const { prepararAulaParaPreenchimento } = await import('../scrape/portal');
+    expect(prepararAulaParaPreenchimento).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      data: '05/03/2026', ordem: 5, conteudo: { desenvolvimento: 'Unsaved conteúdo.' },
+    }));
+    expect(listAulasDaEtapa(db, caderneta.id, '1ª Etapa')).toEqual(before);
+  });
+
   it('leva as notas editadas para o boletim na sessão headed', async () => {
     const { app, professorId: id } = await freshApp();
     const caderneta = await cadastrarCaderneta(app, id);

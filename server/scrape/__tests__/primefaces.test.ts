@@ -77,4 +77,27 @@ describe('selectMenuOption', () => {
       disponiveis: ['1ª Etapa', '2ª Etapa'],
     });
   });
+
+  it('keeps unsaved fields when the selected option is correct but the widget label is stale', async () => {
+    await page.setContent(MENU + '<textarea>Unsaved conteúdo</textarea>');
+    await page.locator('select').evaluate((select: HTMLSelectElement) => {
+      select.value = '2';
+      select.addEventListener('change', () => {
+        document.querySelector('textarea')!.value = '';
+      });
+    });
+
+    expect(await selectMenuOption(page, page, ETAPA, '2ª Etapa')).toBe('unchanged');
+    expect(await page.locator('textarea').inputValue()).toBe('Unsaved conteúdo');
+  });
+
+  it('selects the actual option even when the widget already displays its label', async () => {
+    await page.setContent(MENU);
+    await page.locator('.ui-selectonemenu-label').evaluate((label) => {
+      label.textContent = '2ª Etapa';
+    });
+
+    expect(await selectMenuOption(page, page, ETAPA, '2ª Etapa')).toBe('updated');
+    expect(await page.locator('select').inputValue()).toBe('2');
+  });
 });

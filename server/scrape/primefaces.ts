@@ -57,9 +57,6 @@ export async function selectMenuOption(
   );
   if (isDisabled) return 'disabled';
 
-  const current = (await menu.locator('.ui-selectonemenu-label').innerText()).trim();
-  if (current === label) return 'unchanged';
-
   // A troca de tela precisa ter terminado antes de mexer no menu, seja qual
   // for o caminho: um `<select>` que ainda vai ser substituído não adianta.
   await waitForAjax(page);
@@ -67,10 +64,11 @@ export async function selectMenuOption(
   const select = scope.locator(`[id$="${idSuffix}_input"]`);
 
   if ((await select.count()) === 1) {
-    await selecionarPeloSelect(page, select, label);
-
-    return 'updated';
+    return await selecionarPeloSelect(page, select, label);
   }
+
+  const current = (await menu.locator('.ui-selectonemenu-label').innerText()).trim();
+  if (current === label) return 'unchanged';
 
   await selecionarPeloPainel(page, menu, idSuffix, label);
 
@@ -92,7 +90,7 @@ async function selecionarPeloSelect(
   page: Page,
   select: Locator,
   label: string,
-): Promise<void> {
+): Promise<FieldStatus> {
   // Em caso de falha o retorno j\u00e1 traz as op\u00e7\u00f5es que o DOM tinha no momento
   // exato da tentativa: uma nova leitura depois correria o risco de pegar um
   // menu que j\u00e1 recarregou por causa de outra troca de tela.
@@ -102,7 +100,7 @@ async function selecionarPeloSelect(
       texto.replace(/&nbsp;|&#160;/g, ' ').replace(/[\s\u00a0]+/g, ' ').trim();
 
     const opcao = Array.from(campo.options).find(
-      (candidata) => normaliza(candidata.text) === alvo,
+      (candidata) => normaliza(candidata.text) === normaliza(alvo),
     );
 
     if (!opcao) {
@@ -114,17 +112,24 @@ async function selecionarPeloSelect(
       };
     }
 
+    // The widget label can be stale or have different whitespace. The native
+    // value is what the portal submits; avoid AJAX when it is already correct.
+    if (campo.value === opcao.value) return { escolheu: true as const, changed: false };
+
     campo.value = opcao.value;
     campo.dispatchEvent(new Event('change', { bubbles: true }));
 
-    return { escolheu: true as const };
+    return { escolheu: true as const, changed: true };
   }, label);
 
   if (!resultado.escolheu) {
     throw new OptionNotFoundError(label, resultado.disponiveis);
   }
 
+  if (!resultado.changed) return 'unchanged';
+
   await waitForAjax(page);
+  return 'updated';
 }
 
 /**

@@ -2,7 +2,7 @@ import type { Page } from 'playwright';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { listConteudoOptions } from '../portal';
-import { readMenuOptions } from '../primefaces';
+import { readMenuOptions, selectMenuOption } from '../primefaces';
 
 vi.mock('@playwright/test', () => ({
   expect: () => ({
@@ -52,6 +52,13 @@ function createPortal(periodosLetivos: string[], available: string[]) {
     if (suffix.includes('grupoDiario')) return ['Regular'];
     if (suffix.includes('mes')) return ['MARÇO'];
     throw new Error(`Unexpected menu: ${suffix}`);
+  });
+  vi.mocked(selectMenuOption).mockImplementation(async (_page, _scope, suffix, label) => {
+    if (suffix.includes('periodoLetivo') && label) {
+      current = label;
+      visited.push(label);
+    }
+    return 'updated';
   });
 
   return { page, visited, opened };
