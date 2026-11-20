@@ -31,13 +31,13 @@ function createPortal(periodosLetivos: string[], available: string[]) {
       click: async () => {},
       count: async () => 0,
     }),
-    getByRole: (role: string, { name }: { name: string }) => ({
+    getByRole: (role: string, { name }: { name: string | RegExp }) => ({
       count: async () => available.includes(current) ? 1 : 0,
       click: async () => {
-        if (role === 'option') {
+        if (role === 'option' && typeof name === 'string') {
           current = name;
           visited.push(name);
-        } else if (name === 'Etapa') {
+        } else if (name instanceof RegExp && name.test('Etapa \uf107')) {
           if (!available.includes(current)) throw new Error('Etapa menu missing');
           opened.push(current);
         }
