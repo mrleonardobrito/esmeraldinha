@@ -2,7 +2,6 @@ import * as React from "react";
 import {
   IconAlertTriangle,
   IconArrowLeft,
-  IconArrowRight,
   IconCheck,
   IconCircleCheck,
   IconClock,
@@ -35,6 +34,8 @@ import {
   aulasComConteudo,
   chaveDaAula,
   gerarRascunhos,
+  preencherConteudosNoPortal,
+  verificarConteudosNoPortal,
   habilidadesDoCodigoCR,
   mesmaAula,
   type MensagemDaConversa,
@@ -42,7 +43,6 @@ import {
   type ReferenciaDeAula,
 } from "@/lib/conteudos";
 import { diffDePalavras } from "@/lib/diff-de-palavras";
-import { preencherAulaDoEnvioNoPortal } from "@/lib/envios";
 import { cn } from "@/lib/utils";
 
 const ACCEPT =
@@ -71,12 +71,9 @@ interface Rascunho extends RascunhoDeConteudo {
 /** Os rascunhos, pela chave da aula. */
 type Rascunhos = Record<string, Rascunho>;
 
-/** O preenchimento assistido em andamento: as aulas na fila, uma de cada vez. */
 interface Preenchimento {
   fila: AulaDaCaderneta[];
-  indice: number;
-  abrindo: boolean;
-  aberta: boolean;
+  fase: "preparing" | "reviewing" | "verifying" | "failed";
   erro: string | null;
 }
 
@@ -130,14 +127,13 @@ function mesmoConteudo(a: RascunhoDeConteudo, b: RascunhoDeConteudo): boolean {
  * O chat de conteúdos: à esquerda a conversa com o agente, à direita as aulas
  * do escopo — as que o portal já tem, as pendentes e os rascunhos que o agente
  * escreveu. Nada vai ao portal até o auxiliar de ensino mandar, e mesmo então
- * cada aula abre numa janela visível para ele conferir e salvar.
+ * todas as aulas selecionadas são preparadas para conferência e salvamento no portal.
  */
 export function ChatDeConteudos({
   caderneta,
   etapa,
   aulas,
   mesInicial,
-  sessionId,
   onVoltar,
   onGravou,
 }: ChatDeConteudosProps) {
@@ -303,75 +299,53 @@ export function ChatDeConteudos({
     });
   }
 
-  // O preenchimento assistido, uma aula por vez: abre a janela, o auxiliar
-  // confere e salva por lá, e só então pede a próxima.
-  async function abrirNoPortal(atual: Preenchimento) {
-    const aula = atual.fila[atual.indice];
-    const rascunho = rascunhos[chaveDaAula(aula)];
-    if (!aula || !rascunho) return;
-
-    setPreenchimento({ ...atual, abrindo: true, erro: null });
-    mostrarAula(aula);
-
+  async function preencherTodas(fila: AulaDaCaderneta[]) {
+    setPreenchimento({ fila, fase: "preparing", erro: null });
     try {
-      await preencherAulaDoEnvioNoPortal(sessionId, {
-        professorId: caderneta.professorId,
-        cadernetaId: caderneta.id,
+      await preencherConteudosNoPortal(caderneta.id, {
         etapa,
-        mes: aula.mes,
-        turma: caderneta.turma,
-        aula: {
-          data: aula.data,
-          ordem: aula.ordem,
-          codigoCR: rascunho.codigoCR,
-          desenvolvimento: rascunho.desenvolvimento,
-          ferramentas: rascunho.ferramentas,
-          isRecuperacao: "Não",
-          isInteracao: "Não",
-        },
+        aulas: fila.map((aula) => ({
+          mes: aula.mes,
+          ...semDecoracao(rascunhos[chaveDaAula(aula)]),
+        })),
       });
-      setPreenchimento({ ...atual, abrindo: false, aberta: true, erro: null });
+      setPreenchimento({ fila, fase: "reviewing", erro: null });
     } catch (error) {
-      setPreenchimento({
-        ...atual,
-        abrindo: false,
-        aberta: false,
-        erro: error instanceof Error ? error.message : "Não foi possível abrir a aula no portal.",
-      });
+      setPreenchimento({ fila, fase: "failed", erro: error instanceof Error ? error.message : "Não foi possível preencher as aulas." });
     }
   }
 
   function iniciarPreenchimento() {
     const fila = noEscopo.filter((aula) => rascunhos[chaveDaAula(aula)]?.selecionada);
-    if (fila.length === 0) return;
-    const inicio: Preenchimento = { fila, indice: 0, abrindo: false, aberta: false, erro: null };
-    setPreenchimento(inicio);
-    void abrirNoPortal(inicio);
+    if (fila.length > 0) void preencherTodas(fila);
   }
 
-  function proximaDoPreenchimento() {
+  async function verificarPreenchimento() {
     if (!preenchimento) return;
-    const aula = preenchimento.fila[preenchimento.indice];
-    if (aula) descartarRascunho(chaveDaAula(aula));
-    onGravou();
-
-    const indice = preenchimento.indice + 1;
-    if (indice >= preenchimento.fila.length) {
-      setPreenchimento(null);
-      toast.success(
-        preenchimento.fila.length === 1
-          ? "Aula levada ao portal."
-          : `${preenchimento.fila.length} aulas levadas ao portal.`,
-      );
-      return;
+    const fila = preenchimento.fila;
+    setPreenchimento({ fila, fase: "verifying", erro: null });
+    try {
+      const resultado = await verificarConteudosNoPortal(caderneta.id, {
+        etapa,
+        aulas: fila.map(({ mes, data, ordem }) => ({ mes, data, ordem })),
+      });
+      const salvas = new Set(resultado.aulas.filter((aula) => aula.preenchida).map(chaveDaAula));
+      setRascunhos((atuais) => Object.fromEntries(Object.entries(atuais).filter(([chave]) => !salvas.has(chave))));
+      onGravou();
+      const pendentes = fila.filter((aula) => !salvas.has(chaveDaAula(aula)));
+      if (pendentes.length === 0) {
+        setPreenchimento(null);
+        toast.success(`${fila.length} ${fila.length === 1 ? "aula confirmada" : "aulas confirmadas"} no portal.`);
+      } else {
+        setPreenchimento({
+          fila: pendentes, fase: "reviewing",
+          erro: `Ainda não foi confirmado o salvamento de: ${pendentes.map((aula) => dataCurta(aula.data)).join(", ")}. Confira e salve no portal, depois verifique novamente.`,
+        });
+      }
+    } catch (error) {
+      setPreenchimento({ fila, fase: "reviewing", erro: error instanceof Error ? error.message : "Não foi possível verificar as aulas. Os rascunhos foram mantidos." });
     }
-
-    const proximo: Preenchimento = { ...preenchimento, indice, aberta: false, erro: null };
-    setPreenchimento(proximo);
-    void abrirNoPortal(proximo);
   }
-
-  const emPreenchimento = preenchimento?.fila[preenchimento.indice] ?? null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -468,7 +442,7 @@ export function ChatDeConteudos({
                         aula={aula}
                         rascunho={rascunho}
                         editando={editando === chave}
-                        preenchendo={emPreenchimento !== null && mesmaAula(emPreenchimento, aula)}
+                        preenchendo={preenchimento?.fase === "preparing" && preenchimento.fila.some((item) => chaveDaAula(item) === chave)}
                         bloqueado={gerando || preenchimento !== null}
                         onSelecionar={(selecionada) => atualizarRascunho(chave, { selecionada })}
                         onEditar={() => setEditando(chave)}
@@ -494,12 +468,9 @@ export function ChatDeConteudos({
           {preenchimento ? (
             <RodapeDoPreenchimento
               preenchimento={preenchimento}
-              onAbrir={() => void abrirNoPortal(preenchimento)}
-              onProxima={proximaDoPreenchimento}
-              onParar={() => {
-                onGravou();
-                setPreenchimento(null);
-              }}
+              onPreencher={() => void preencherTodas(preenchimento.fila)}
+              onVerificar={() => void verificarPreenchimento()}
+              onParar={() => setPreenchimento(null)}
             />
           ) : (
             rascunhosNoEscopo.length > 0 && (
@@ -1402,68 +1373,46 @@ function RodapeDeEnvio({
 }
 
 function RodapeDoPreenchimento({
-  preenchimento,
-  onAbrir,
-  onProxima,
-  onParar,
+  preenchimento, onPreencher, onVerificar, onParar,
 }: {
   preenchimento: Preenchimento;
-  onAbrir: () => void;
-  onProxima: () => void;
+  onPreencher: () => void;
+  onVerificar: () => void;
   onParar: () => void;
 }) {
-  const { fila, indice, abrindo, aberta, erro } = preenchimento;
-  const aula = fila[indice];
-  const ultima = indice === fila.length - 1;
+  const { fila, fase, erro } = preenchimento;
+  const busy = fase === "preparing" || fase === "verifying";
+  const meses = new Set(fila.map((aula) => aula.mes)).size;
 
   return (
-    <div className="flex flex-col gap-2 rounded-2xl border bg-card px-3 py-2.5">
-      <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-col gap-2 rounded-2xl border bg-card px-3 py-2.5" role="status">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          {abrindo ? (
-            <IconLoader className="size-4 shrink-0 animate-spin text-caderneta-parte" />
-          ) : erro ? (
-            <IconAlertTriangle className="size-4 shrink-0 text-destructive" />
-          ) : (
-            <IconExternalLink className="size-4 shrink-0 text-caderneta-parte" />
-          )}
+          {busy ? <IconLoader className="size-4 shrink-0 animate-spin text-caderneta-parte" />
+            : erro ? <IconAlertTriangle className="size-4 shrink-0 text-destructive" />
+              : <IconExternalLink className="size-4 shrink-0 text-caderneta-parte" />}
           <div className="flex min-w-0 flex-col">
             <span className="text-sm font-medium">
-              {abrindo ? "Abrindo no portal" : erro ? "Não abriu" : "Aberta no portal"} · {indice + 1} de{" "}
-              {fila.length}
+              {fase === "preparing" ? `Preenchendo ${fila.length} aulas no portal…`
+                : fase === "verifying" ? "Verificando o que foi salvo no portal…"
+                  : fase === "failed" ? "Não foi possível preparar todas as aulas"
+                    : `${fila.length} ${fila.length === 1 ? "aula para conferir" : "aulas para conferir"}`}
             </span>
             <span className={cn("text-xs", erro ? "text-destructive" : "text-muted-foreground")}>
-              {erro ??
-                (abrindo
-                  ? `Aula de ${dataCurta(aula.data)} · Lançamento de Conteúdo.`
-                  : `Aula de ${dataCurta(aula.data)} com o conteúdo preenchido. Confira e salve por lá — o sistema não salva por você.`)}
+              {erro ?? (fase === "preparing" ? "Aguarde o preenchimento de todas as aulas selecionadas."
+                : fase === "verifying" ? "Consultando os dados salvos, sem alterar as abas de conferência."
+                  : `Confira os conteúdos e clique em Salvar no portal${meses > 1 ? ", em cada aba de mês" : ""}. Depois, clique em Concluí, verificar.`)}
             </span>
           </div>
         </div>
-
-        <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" size="sm" onClick={onParar} disabled={abrindo}>
-            <IconPlayerStop data-icon="inline-start" />
-            Parar
-          </Button>
-          {erro ? (
-            <Button size="sm" onClick={onAbrir}>
-              Tentar de novo
-            </Button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onParar} disabled={busy}>Voltar</Button>
+          {fase === "failed" ? (
+            <Button size="sm" onClick={onPreencher}>Tentar novamente</Button>
           ) : (
-            <Button size="sm" onClick={onProxima} disabled={abrindo || !aberta}>
-              {ultima ? "Concluir" : "Próxima"}
-              {!ultima && <IconArrowRight data-icon="inline-end" />}
-            </Button>
+            <Button size="sm" onClick={onVerificar} disabled={busy}>Concluí, verificar</Button>
           )}
         </div>
-      </div>
-
-      <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-        <div
-          className="h-full rounded-full bg-caderneta-parte transition-[width] duration-500"
-          style={{ width: `${((indice + (aberta ? 1 : 0.5)) / fila.length) * 100}%` }}
-        />
       </div>
     </div>
   );

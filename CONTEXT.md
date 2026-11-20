@@ -215,8 +215,10 @@ _Avoid_: filtro, período
 **rascunho de conteúdo**:
 The conteúdo of one aula as the agent wrote it — código CR, desenvolvimento
 and ferramentas — before the auxiliar de ensino reviews it. Lives only on the
-screen: it reaches the portal one aula at a time, through the preenchimento
-assistido, and only for the aulas the auxiliar keeps marked.
+screen: the preenchimento assistido prepares all aulas the auxiliar keeps
+marked, with a separate portal tab for each mês. The auxiliar reviews and
+saves there, then asks Esmeraldinha to verify the saved conteúdo in a fresh
+sessão do portal. Only verified aulas lose their rascunhos; pending ones stay.
 _Avoid_: sugestão, geração, draft
 
 **aula de referência**:

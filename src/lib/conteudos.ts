@@ -1,4 +1,18 @@
 import { requestApi } from "@/lib/api";
+import type { PreenchimentoDeConteudos, VerificacaoDeConteudos, ConteudosVerificados } from "@shared/preenchimento-de-conteudos";
+
+export async function preencherConteudosNoPortal(cadernetaId: string, input: PreenchimentoDeConteudos): Promise<void> {
+  await requestApi(`/api/cadernetas/${encodeURIComponent(cadernetaId)}/conteudos/preenchimentos-assistidos`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  });
+}
+
+export async function verificarConteudosNoPortal(cadernetaId: string, input: VerificacaoDeConteudos): Promise<ConteudosVerificados> {
+  const response = await requestApi(`/api/cadernetas/${encodeURIComponent(cadernetaId)}/conteudos/verificacoes`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  });
+  return await response.json() as ConteudosVerificados;
+}
 import type { AulaDaCaderneta } from "@/lib/cadernetas";
 
 /** Quem falou no chat de conteúdos. */

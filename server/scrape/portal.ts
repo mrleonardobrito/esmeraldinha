@@ -899,3 +899,25 @@ export async function prepararAulaParaPreenchimento(
   // procurá-la numa tabela de um mês inteiro.
   await row.scrollIntoViewIfNeeded().catch(() => {});
 }
+
+/** Keep each mês in its own tab so changing filters cannot discard unsaved aulas. */
+export async function prepararAulasParaPreenchimento(
+  page: Page,
+  aulas: readonly PreenchimentoAssistidoFilter[],
+): Promise<void> {
+  const porMes = new Map<string, PreenchimentoAssistidoFilter[]>();
+  for (const aula of aulas) {
+    const grupo = porMes.get(aula.mes) ?? [];
+    grupo.push(aula);
+    porMes.set(aula.mes, grupo);
+  }
+
+  const initialUrl = page.url();
+  let first = true;
+  for (const grupo of porMes.values()) {
+    const tab = first ? page : await page.context().newPage();
+    if (!first) await tab.goto(initialUrl);
+    first = false;
+    for (const aula of grupo) await prepararAulaParaPreenchimento(tab, aula);
+  }
+}

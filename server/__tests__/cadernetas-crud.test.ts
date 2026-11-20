@@ -527,7 +527,7 @@ describe('cadernetas CRUD', () => {
     expect(caderneta.etapas[0]).toMatchObject({ totalDeAulas: 3, conteudo: 'concluido' });
   });
 
-  it('marca a aula gravada quando o preenchimento assistido do envio é confirmado', async () => {
+  it('keeps an aula pending until saved conteúdo is verified in the portal', async () => {
     const app = await freshApp();
     const { id } = (await (await cadastrar(app)).json()) as { id: string };
     await esperarSincronizacao(app, id);
@@ -590,7 +590,7 @@ describe('cadernetas CRUD', () => {
       await app.fetch(request(`/${id}/etapas/${encodeURIComponent('1ª Etapa')}/aulas`))
     ).json()) as { aulas: { data: string; conteudoPreenchido: boolean }[] };
 
-    expect(aulas.aulas.find((aula) => aula.data === '12/03/2026')?.conteudoPreenchido).toBe(true);
+    expect(aulas.aulas.find((aula) => aula.data === '12/03/2026')?.conteudoPreenchido).toBe(false);
   });
 
   it('exclui a caderneta', async () => {

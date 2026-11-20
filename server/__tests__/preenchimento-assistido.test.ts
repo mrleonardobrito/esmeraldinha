@@ -23,6 +23,7 @@ vi.mock('../scrape/portal', () => ({
   listDisciplinas: vi.fn(),
   listEstudantes: vi.fn(),
   prepararAulaParaPreenchimento: vi.fn(),
+  prepararAulasParaPreenchimento: vi.fn(),
   prepararNotasParaPreenchimento: vi.fn(),
   PORTAL_URL: 'https://portal.example/teste',
 }));
@@ -202,6 +203,94 @@ describe('preenchimento assistido do boletim', () => {
       notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }],
       notasDoEstudante: [],
     });
+  });
+
+  async function batchFixture() {
+    const { app, professorId: id } = await freshApp();
+    const { getDb } = await import('../professores/db');
+    const { createCaderneta, syncCaderneta } = await import('../cadernetas/store');
+    const db = getDb();
+    const caderneta = createCaderneta(db, { professorId: id, turma });
+    const aulas = ['05/03/2026', '12/03/2026', '19/03/2026'].map((data) => ({
+      data, mes: 'MARÇO', ordem: 5, codigoCR: 'CR', desenvolvimento: `Conteúdo ${data}`, ferramentas: 'Livro',
+    }));
+    syncCaderneta(db, caderneta.id, {
+      etapas: [{ nome: '1ª Etapa', meses: ['MARÇO'], aulas: [
+        ...aulas.map((aula) => ({ mes: aula.mes, data: aula.data, ordem: aula.ordem, preenchida: false })),
+        { mes: 'MARÇO', data: '19/03/2026', ordem: 6, preenchida: false },
+      ] }], estudantes: [],
+    });
+    return { app, db, caderneta, aulas };
+  }
+
+  it('prepares all selected aulas in one request without marking them saved', async () => {
+    const { app, db, caderneta, aulas } = await batchFixture();
+    const response = await app.fetch(request(`/${caderneta.id}/conteudos/preenchimentos-assistidos`,
+      json({ etapa: '1ª Etapa', aulas })));
+    expect(response.status).toBe(200);
+    const { prepararAulasParaPreenchimento, listAulas } = await import('../scrape/portal');
+    expect(prepararAulasParaPreenchimento).toHaveBeenCalledOnce();
+    expect(vi.mocked(prepararAulasParaPreenchimento).mock.calls[0][1]).toHaveLength(3);
+    expect(listAulas).not.toHaveBeenCalled();
+    const { listAulasDaEtapa } = await import('../cadernetas/store');
+    expect(listAulasDaEtapa(db, caderneta.id, '1ª Etapa').every((aula) => !aula.conteudoPreenchido)).toBe(true);
+  });
+
+  it('verifies saved values in a fresh session and reports unsaved aulas by data and ordem', async () => {
+    const { app, db, caderneta, aulas } = await batchFixture();
+    const { openSession, closeSession } = await import('../portal-sessions');
+    const { listAulas } = await import('../scrape/portal');
+    const freshPage = { fresh: true };
+    vi.mocked(openSession).mockResolvedValue({ id: 'fresh-verification', page: freshPage } as never);
+    vi.mocked(listAulas).mockResolvedValue([
+      { data: aulas[0].data, ordem: 5, preenchida: true, desenvolvimento: 'Manually reviewed and saved.' },
+      { data: aulas[1].data, ordem: 5, preenchida: false },
+      { data: aulas[2].data, ordem: 6, preenchida: true, desenvolvimento: 'Another aula on the same data.' },
+    ]);
+
+    const response = await app.fetch(request(`/${caderneta.id}/conteudos/verificacoes`,
+      json({ etapa: '1ª Etapa', aulas })));
+    expect(response.status).toBe(200);
+    const result = await response.json() as { aulas: { preenchida: boolean }[] };
+    expect(result.aulas.map((aula) => aula.preenchida)).toEqual([true, false, false]);
+    expect(listAulas).toHaveBeenCalledWith(freshPage, expect.objectContaining({ turma, mes: 'MARÇO' }));
+    expect(closeSession).toHaveBeenCalledWith('fresh-verification');
+    const { listAulasDaEtapa } = await import('../cadernetas/store');
+    expect(listAulasDaEtapa(db, caderneta.id, '1ª Etapa')[0]).toMatchObject({
+      conteudoPreenchido: true, desenvolvimento: 'Manually reviewed and saved.',
+    });
+
+    vi.mocked(listAulas).mockResolvedValue(aulas.map((aula) => ({ ...aula, preenchida: true })));
+    const retry = await app.fetch(request(`/${caderneta.id}/conteudos/verificacoes`,
+      json({ etapa: '1ª Etapa', aulas })));
+    expect((await retry.json() as { aulas: { preenchida: boolean }[] }).aulas.every((aula) => aula.preenchida)).toBe(true);
+  });
+
+  it('keeps the last verified status when the portal cannot be read', async () => {
+    const { app, db, caderneta, aulas } = await batchFixture();
+    const { listAulasDaEtapa } = await import('../cadernetas/store');
+    const before = listAulasDaEtapa(db, caderneta.id, '1ª Etapa');
+    const { openSession, closeSession } = await import('../portal-sessions');
+    vi.mocked(openSession).mockResolvedValue({ id: 'failed-verification', page: {} } as never);
+    const { listAulas } = await import('../scrape/portal');
+    vi.mocked(listAulas).mockRejectedValue(new Error('Portal unavailable'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const response = await app.fetch(request(`/${caderneta.id}/conteudos/verificacoes`,
+        json({ etapa: '1ª Etapa', aulas })));
+      expect(response.status).toBe(502);
+      expect(listAulasDaEtapa(db, caderneta.id, '1ª Etapa')).toEqual(before);
+      expect(closeSession).toHaveBeenCalledWith('failed-verification');
+    } finally { log.mockRestore(); }
+  });
+
+  it('rejects aulas outside the caderneta before opening the portal', async () => {
+    const { app, caderneta, aulas } = await batchFixture();
+    const response = await app.fetch(request(`/${caderneta.id}/conteudos/preenchimentos-assistidos`,
+      json({ etapa: '1ª Etapa', aulas: [{ ...aulas[0], mes: 'ABRIL' }] })));
+    expect(response.status).toBe(422);
+    const { naSessaoHeaded } = await import('../sessoes-headed');
+    expect(naSessaoHeaded).not.toHaveBeenCalled();
   });
 
   it('leva a sessão headed ao período letivo em que a turma mora', async () => {

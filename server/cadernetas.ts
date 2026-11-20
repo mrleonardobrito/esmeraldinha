@@ -56,6 +56,7 @@ import { TurmaNaoEncontradaError } from './cadernetas/raspagem';
 import { turmasDoCatalogo } from './turmas/busca';
 import { periodoLetivoDaTurma } from './turmas/store';
 import { sincronizarEmSegundoPlano } from './cadernetas/sincronizacao';
+import { preenchimentosDeConteudo } from './cadernetas/preenchimento-de-conteudos';
 import { env } from './env';
 import { createEncryptionPort } from './encryption';
 import { getDb } from './professores/db';
@@ -195,6 +196,8 @@ cadernetas.use('*', async (context, next) => {
 
   await next();
 });
+
+cadernetas.route('/', preenchimentosDeConteudo);
 
 cadernetas.post('/sessoes', async (context) => {
   const body = await context.req.json().catch(() => null);

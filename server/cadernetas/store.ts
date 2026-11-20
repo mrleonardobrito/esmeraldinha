@@ -512,6 +512,34 @@ export interface RaspagemDaTurma {
   estudantes: readonly EstudanteDaCaderneta[];
 }
 
+/** Update only conteúdo from a fresh portal read, preserving the rest of the caderneta. */
+export function atualizarConteudosDoMes(
+  db: DatabaseSync,
+  cadernetaId: string,
+  etapa: string,
+  mes: string,
+  aulas: readonly AulaDoPortal[],
+): void {
+  const update = db.prepare(`UPDATE caderneta_aulas
+    SET conteudo_preenchido = ?, codigo_cr = ?, desenvolvimento = ?, ferramentas = ?
+    WHERE caderneta_id = ? AND etapa = ? AND mes = ? AND data = ? AND ordem = ?`);
+  const existentes = listAulasDaEtapa(db, cadernetaId, etapa).filter((aula) => aula.mes === mes);
+  db.exec('BEGIN');
+  try {
+    for (const existente of existentes) {
+      const aula = aulas.find((candidate) => candidate.data === existente.data &&
+        (candidate.ordem ?? null) === existente.ordem);
+      update.run(aula?.preenchida ? 1 : 0, aula?.codigoCR ?? null,
+        aula?.desenvolvimento ?? null, aula?.ferramentas ?? null,
+        cadernetaId, etapa, mes, existente.data, existente.ordem ?? SEM_ORDEM);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 function replaceEstudantes(
   db: DatabaseSync,
   cadernetaId: string,
