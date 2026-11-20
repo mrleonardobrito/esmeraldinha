@@ -6,11 +6,6 @@ export interface PortalSession {
   expiresInMs: number;
 }
 
-/**
- * Abre uma sessão headless no portal para o professor identificado por
- * `professorId`. A senha nunca sai do servidor: o backend resolve e
- * decifra as credenciais armazenadas antes de logar no portal.
- */
 export async function openPortalSession(
   professorId: string,
 ): Promise<PortalSession> {

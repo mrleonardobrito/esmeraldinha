@@ -67,8 +67,6 @@ type ProfessoresState =
 
 export function Cadernetas() {
   const { conta } = useConta();
-  // Voltar para esta tela deve cair onde se estava, não no começo: o que a
-  // visita anterior deixou em aberto é o estado inicial desta.
   const retomada = React.useMemo(() => lerSessaoDeTrabalho(), []);
 
   const [professoresState, setProfessoresState] =
@@ -88,7 +86,6 @@ export function Cadernetas() {
     retomada?.cadernetas ?? [],
   );
   const [cadernetasToken, setCadernetasToken] = React.useState(0);
-  /** Falso só depois da primeira leitura: antes dela a grade é um esqueleto. */
   const [carregandoCadernetas, setCarregandoCadernetas] = React.useState(
     retomada === null,
   );
@@ -142,14 +139,11 @@ export function Cadernetas() {
     };
   }, [conta, reloadToken]);
 
-  // O que a próxima visita retoma. Fica fora do React porque precisa
-  // sobreviver ao desmonte que a troca de página provoca.
   React.useEffect(() => {
     if (!selected) return;
     guardarSessaoDeTrabalho({ professor: selected, session, cadernetas });
   }, [selected, session, cadernetas]);
 
-  /** Sobe a cada envio gravado, para a grade refletir o portal. */
   const recarregarCadernetas = React.useCallback(() => {
     setCadernetasToken((atual) => atual + 1);
   }, []);
@@ -181,11 +175,6 @@ export function Cadernetas() {
     };
   }, [selected?.id, cadernetasToken]);
 
-  /**
-   * A raspagem roda no servidor, em segundo plano, e não tem como avisar a
-   * tela quando termina. Enquanto alguma caderneta estiver sincronizando, a
-   * grade se recarrega sozinha; quando nenhuma estiver, o efeito para.
-   */
   const sincronizando = cadernetas.some(
     (caderneta) => caderneta.syncStatus === "sincronizando",
   );
@@ -205,10 +194,6 @@ export function Cadernetas() {
     setReloadToken((current) => current + 1);
   }
 
-  /**
-   * A conexão parte do clique, não de um efeito: com StrictMode um efeito
-   * rodaria duas vezes em dev e abriria duas sessões no portal.
-   */
   async function connect(professor: Professor) {
     setStatus("connecting");
     setErrorMessage(null);
@@ -228,14 +213,6 @@ export function Cadernetas() {
     }
   }
 
-  /**
-   * A sessão sumiu do servidor sem a tela saber — um restart do processo em
-   * dev é o caso comum, mas ociosidade de verdade também some assim. Não há
-   * o que recuperar dela no id velho, mas a tela não pode ficar sem `session`
-   * nem por um instante: é ele que mantém o modal de envio montado, com o
-   * texto e os anexos que o auxiliar de ensino já tinha preenchido — zerar
-   * primeiro descartaria tudo isso antes da sessão nova chegar.
-   */
   async function reabrirSessao() {
     if (!selected) return;
 
@@ -253,11 +230,6 @@ export function Cadernetas() {
     }
   }
 
-  /**
-   * O que há para editar numa caderneta é o que o portal diz sobre ela: turma,
-   * aulas e estudantes vêm todos de lá, e nenhum é nosso para reescrever.
-   * Atualizar é reler — a raspagem roda em segundo plano e a grade acompanha.
-   */
   async function atualizarCaderneta(caderneta: Caderneta) {
     if (!session) return;
 
@@ -596,10 +568,6 @@ export function Cadernetas() {
   );
 }
 
-/**
- * O portal demora para responder ao login, então a espera mostra o que vem
- * depois — o cabeçalho e a grade em cinza — em vez de uma tela vazia.
- */
 function ConectandoAoPortal({ nome }: { nome: string }) {
   return (
     <Card>
