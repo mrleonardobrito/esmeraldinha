@@ -64,6 +64,9 @@ const AMBIENTE = {
 
 const DIALOGO_DE_AMBIENTE = '#dialogConfiguracoesAmbiente';
 
+// The portal includes the dropdown icon in the Etapa link's accessible name.
+const ETAPA_MENU_NAME = /^Etapa\b/;
+
 /**
  * A turma da EJA é multisseriada, e o portal a serve por outro componente:
  * nas telas de um período letivo da EJA o menu de turma é o `turmaComMulti`,
@@ -205,7 +208,7 @@ export async function selecionarPeriodoLetivo(
 }
 
 export async function openLancaConteudo(page: Page): Promise<void> {
-  await page.getByRole('link', { name: 'Etapa' }).click();
+  await page.getByRole('link', { name: ETAPA_MENU_NAME }).click();
   await page.getByRole('link', { name: 'Lançamento de Conteúdo' }).click();
   await waitForAjax(page);
 }
@@ -222,6 +225,14 @@ export async function listConteudoOptions(page: Page): Promise<ConteudoCatalogo>
 
   for (const periodoLetivo of await listPeriodosLetivos(page)) {
     await selecionarPeriodoLetivo(page, periodoLetivo);
+    await waitForAjax(page);
+
+    // Some períodos letivos expose only the home page for this professor.
+    // Keep searching the others when the portal offers no Etapa menu.
+    if ((await page.getByRole('link', { name: ETAPA_MENU_NAME }).count()) === 0) {
+      continue;
+    }
+
     await openLancaConteudo(page);
 
     const nomes = await readMenuOptions(page, FILTER.etapa);
