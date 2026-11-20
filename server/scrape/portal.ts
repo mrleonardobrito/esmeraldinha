@@ -222,6 +222,14 @@ export async function listConteudoOptions(page: Page): Promise<ConteudoCatalogo>
 
   for (const periodoLetivo of await listPeriodosLetivos(page)) {
     await selecionarPeriodoLetivo(page, periodoLetivo);
+    await waitForAjax(page);
+
+    // Some períodos letivos expose only the home page for this professor.
+    // Keep searching the others when the portal offers no Etapa menu.
+    if ((await page.getByRole('link', { name: 'Etapa', exact: true }).count()) === 0) {
+      continue;
+    }
+
     await openLancaConteudo(page);
 
     const nomes = await readMenuOptions(page, FILTER.etapa);
