@@ -238,6 +238,34 @@ The grade an estudante closes an etapa with, written on their row of the
 boletim. Editable, unlike the nota parcial and the nota calculada.
 _Avoid_: final grade, média
 
+### Ficha de desempenho
+
+**área de conhecimento**:
+A group of habilidades in the ficha de desempenho: one per componente
+curricular (Língua Portuguesa, Matemática…) and, in some séries,
+_Sócio-afetivos_; in Educação Infantil, the campos de experiência. Which áreas
+a ficha has depends on the série, so they are read from the portal, never
+assumed. The auxiliar de ensino chooses which áreas to fill, for every
+estudante of the turma at once.
+_Avoid_: disciplina, componente, matéria
+
+**habilidade**:
+One item an estudante is assessed on in the ficha de desempenho, numbered
+within its área (`1°`, `2°`…). The portal labels the column _Descritores_.
+_Avoid_: descritor, skill, competência
+
+**conceito**:
+How an estudante did in one habilidade in one etapa: `R` (realiza), `RD`
+(realiza com dificuldades) or `NR` (não realiza), ordered `NR < RD < R`. A
+conceito never decreases from one etapa to the next, without exception.
+_Avoid_: nota, resposta, avaliação
+
+**observação**:
+What the professor says about an estudante's desempenho, sent as text, image
+or PDF. An estudante the professor does not mention did well: `R` in every
+habilidade of the chosen áreas.
+_Avoid_: parecer, comentário
+
 ### Chat de conteúdos
 
 **chat de conteúdos**:
