@@ -138,7 +138,7 @@ describe('ficha de desempenho routes', () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.estudantes).toEqual([{ matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Ana' }] }]);
+    expect(body.estudantes).toEqual([{ matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', escrito: 'Ana Ruthe', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Ana' }] }]);
     expect(body.turma.map((e: { matricula: string }) => e.matricula)).toEqual(['10315', '10316']);
   });
 

@@ -42,7 +42,7 @@ describe('interpretarObservacoes', () => {
     const resultado = await interpretarObservacoes({ ...base, complete });
 
     expect(resultado.estudantes).toEqual([
-      { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', excecoes: [{ area: 3, habilidade: 0, conceito: 'NR', trecho: 'ainda não dialoga' }] },
+      { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', escrito: 'Ana Ruthe', excecoes: [{ area: 3, habilidade: 0, conceito: 'NR', trecho: 'ainda não dialoga' }] },
     ]);
     expect(resultado.naoResolvidos).toEqual([]);
     expect(resultado.resposta).toBe('ok');
@@ -97,7 +97,62 @@ describe('interpretarObservacoes', () => {
 
     const resultado = await interpretarObservacoes({ ...base, complete });
 
-    expect(resultado.gerais).toEqual([{ trecho: 'a turma ainda não dialoga', excecoes: [{ area: 3, habilidade: 0, conceito: 'RD' }] }]);
+    expect(resultado.gerais).toEqual([{ trecho: 'a turma ainda não dialoga', estudante: null, excecoes: [{ area: 3, habilidade: 0, conceito: 'RD' }] }]);
+  });
+
+  it('does not trust a matrícula the observação never wrote: an ambiguous name stays unresolved', async () => {
+    const complete = agente({
+      resposta: '',
+      estudantes: [{ estudante: 'João', matricula: '10316', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'João' }] }],
+      gerais: [],
+    });
+
+    const resultado = await interpretarObservacoes({ ...base, texto: 'João não lê sílabas.', complete });
+
+    expect(resultado.estudantes).toEqual([]);
+    expect(resultado.naoResolvidos[0]).toMatchObject({ estudante: 'João', candidatos: ['10316', '10317'] });
+  });
+
+  it('accepts a matrícula written in the observação', async () => {
+    const complete = agente({
+      resposta: '',
+      estudantes: [{ estudante: 'João', matricula: '10317', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'João' }] }],
+      gerais: [],
+    });
+
+    const resultado = await interpretarObservacoes({ ...base, texto: 'João (10317) não lê sílabas.', complete });
+
+    expect(resultado.estudantes[0]).toMatchObject({ matricula: '10317', escrito: 'João' });
+  });
+
+  it('keeps the name as written next to the resolved estudante', async () => {
+    const complete = agente({
+      resposta: '',
+      estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [] }],
+      gerais: [],
+    });
+
+    const resultado = await interpretarObservacoes({ ...base, complete });
+
+    expect(resultado.estudantes[0]).toMatchObject({ matricula: '10315', escrito: 'Ana Ruthe' });
+  });
+
+  it('resolves an área-wide observação about a named estudante to that estudante, as a suggestion', async () => {
+    const complete = agente({
+      resposta: '',
+      estudantes: [],
+      gerais: [
+        { trecho: 'Ana tem dificuldade em EO', estudante: 'Ana Ruthe', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD' }] },
+        { trecho: 'a turma não escuta', estudante: '', excecoes: [{ area: 3, habilidade: 0, conceito: 'RD' }] },
+      ],
+    });
+
+    const resultado = await interpretarObservacoes({ ...base, complete });
+
+    expect(resultado.gerais).toEqual([
+      { trecho: 'Ana tem dificuldade em EO', estudante: { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA' }, excecoes: [{ area: 0, habilidade: 0, conceito: 'RD' }] },
+      { trecho: 'a turma não escuta', estudante: null, excecoes: [{ area: 3, habilidade: 0, conceito: 'RD' }] },
+    ]);
   });
 
   it('throws EnvioInvalidoError when there is no text and no file', async () => {

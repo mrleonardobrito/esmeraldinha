@@ -1,10 +1,7 @@
 import { z } from 'zod';
 
 import type { AreaDeConhecimento, Excecao } from '../../shared/ficha-de-desempenho';
-import {
-  EstudanteAmbiguoError,
-  resolverMatriculaDaNota,
-} from '../notas/estudantes';
+import { EstudanteAmbiguoError, resolverMatricula } from '../notas/estudantes';
 import { EnvioInvalidoError } from './errors';
 import { buildContentParts, type ArquivoEnviado } from './interpretar-envio';
 import { chatCompletion } from './openrouter';
@@ -14,11 +11,15 @@ export type ExcecaoComTrecho = Excecao & { trecho: string };
 export interface ObservacoesInterpretadas {
   /** A short reply from the agent to the auxiliar de ensino. */
   resposta: string;
-  estudantes: { matricula: string; nome: string; excecoes: ExcecaoComTrecho[] }[];
+  /** `escrito` is the name as the observação wrote it. */
+  estudantes: { matricula: string; nome: string; escrito: string; excecoes: ExcecaoComTrecho[] }[];
   /** Names that match no estudante, or more than one: never applied on their own. */
   naoResolvidos: { estudante: string; motivo: string; candidatos: string[]; excecoes: ExcecaoComTrecho[] }[];
-  /** Observações about the whole turma or a whole área: suggestions for the auxiliar. */
-  gerais: { trecho: string; excecoes: Excecao[] }[];
+  /**
+   * Observações about the whole turma or a whole área, possibly of one named
+   * estudante: suggestions the auxiliar applies or dismisses.
+   */
+  gerais: { trecho: string; estudante: { matricula: string; nome: string } | null; excecoes: Excecao[] }[];
   /** Exceções that pointed outside the chosen áreas or to no habilidade. */
   descartadas: { motivo: string; trecho: string }[];
 }
@@ -49,7 +50,7 @@ const respostaSchema = z.object({
     matricula: z.string().trim(),
     excecoes: z.array(excecaoSchema.extend({ trecho: z.string() })),
   })),
-  gerais: z.array(z.object({ trecho: z.string(), excecoes: z.array(excecaoSchema) })),
+  gerais: z.array(z.object({ trecho: z.string(), estudante: z.string().trim().default(''), excecoes: z.array(excecaoSchema) })),
 });
 
 const EXCECAO_JSON = {
@@ -81,7 +82,10 @@ const RESPONSE_SCHEMA = {
         required: ['estudante', 'matricula', 'excecoes'],
         properties: {
           estudante: { type: 'string', description: 'O nome como a observação o escreve.' },
-          matricula: { type: 'string', description: 'A matrícula, se a observação trouxer; senão string vazia.' },
+          matricula: {
+            type: 'string',
+            description: 'A matrícula só se ela estiver escrita na observação; nunca a copie da lista de estudantes. Senão string vazia.',
+          },
           excecoes: {
             type: 'array',
             items: {
@@ -98,12 +102,21 @@ const RESPONSE_SCHEMA = {
     },
     gerais: {
       type: 'array',
-      description: 'Observações sobre a turma inteira ou uma área inteira, sem nome de estudante.',
+      description:
+        'Observações sobre a turma inteira, ou sobre uma área inteira de um estudante ' +
+        '("João tem dificuldade em Matemática"), em vez de habilidades específicas.',
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['trecho', 'excecoes'],
-        properties: { trecho: { type: 'string' }, excecoes: { type: 'array', items: EXCECAO_JSON } },
+        required: ['trecho', 'estudante', 'excecoes'],
+        properties: {
+          trecho: { type: 'string' },
+          estudante: {
+            type: 'string',
+            description: 'O nome do estudante como a observação o escreve; string vazia quando é sobre a turma inteira.',
+          },
+          excecoes: { type: 'array', items: EXCECAO_JSON },
+        },
       },
     },
   },
@@ -142,8 +155,11 @@ function buildSystemPrompt({ turma, etapa, areas, estudantes }: InterpretarObser
     '',
     'Escreva o nome do estudante como a observação o escreve; quem casa o nome',
     'com a matrícula é o sistema. Nunca invente um estudante.',
-    'Observações sobre a turma inteira ou uma área inteira, sem nome, vão em',
-    '"gerais" — nunca as copie para cada estudante.',
+    'Observações sobre a turma inteira vão em "gerais" com estudante vazio —',
+    'nunca as copie para cada estudante. Uma dificuldade de um estudante numa',
+    'área inteira, sem dizer quais habilidades, também vai em "gerais", com o',
+    'nome dele e as habilidades da área que ela parece atingir: o auxiliar',
+    'decide se aplica.',
     'Responda só o JSON do schema.',
   ].join('\n');
 }
@@ -188,6 +204,30 @@ export async function interpretarObservacoes(input: InterpretarObservacoesInput)
     return true;
   };
 
+  /**
+   * The estudante a name designates. A matrícula from the agent only counts
+   * when the observação itself wrote it: copied from the turma's list, it
+   * would skip the check that a name designates exactly one estudante.
+   */
+  const textoDoEnvio = texto ?? '';
+  const resolver = (nome: string, matricula: string):
+    | { matricula: string; nome: string }
+    | { motivo: string; candidatos: string[] } => {
+    const escrita = /^\d+$/.test(matricula) && new RegExp(`(^|\\D)${matricula}(\\D|$)`).test(textoDoEnvio)
+      ? estudantes.find((e) => e.matricula === matricula)
+      : undefined;
+    if (escrita) return { matricula: escrita.matricula, nome: escrita.nome };
+    try {
+      const encontrada = resolverMatricula(nome, estudantes);
+      return { matricula: encontrada, nome: estudantes.find((e) => e.matricula === encontrada)!.nome };
+    } catch (error) {
+      const candidatos = error instanceof EstudanteAmbiguoError
+        ? estudantes.filter((e) => error.candidatos.includes(e.nome)).map((e) => e.matricula)
+        : [];
+      return { motivo: error instanceof Error ? error.message : String(error), candidatos };
+    }
+  };
+
   const resultado: ObservacoesInterpretadas = {
     resposta: parsed.data.resposta,
     estudantes: [],
@@ -201,28 +241,26 @@ export async function interpretarObservacoes(input: InterpretarObservacoesInput)
       .filter((excecao) => valida(excecao, excecao.trecho))
       .map(({ area, habilidade, conceito, trecho }) => ({ area, habilidade, conceito, trecho }));
 
-    try {
-      const matricula = resolverMatriculaDaNota({ estudante: lido.estudante, matricula: lido.matricula }, estudantes);
-      const nome = estudantes.find((e) => e.matricula === matricula)!.nome;
-      const existente = resultado.estudantes.find((e) => e.matricula === matricula);
+    const resolvido = resolver(lido.estudante, lido.matricula);
+    if ('matricula' in resolvido) {
+      const existente = resultado.estudantes.find((e) => e.matricula === resolvido.matricula);
       if (existente) existente.excecoes.push(...excecoes);
-      else resultado.estudantes.push({ matricula, nome, excecoes });
-    } catch (error) {
-      const candidatos = error instanceof EstudanteAmbiguoError
-        ? estudantes.filter((e) => error.candidatos.includes(e.nome)).map((e) => e.matricula)
-        : [];
-      resultado.naoResolvidos.push({
-        estudante: lido.estudante,
-        motivo: error instanceof Error ? error.message : String(error),
-        candidatos,
-        excecoes,
-      });
+      else resultado.estudantes.push({ ...resolvido, escrito: lido.estudante, excecoes });
+    } else {
+      resultado.naoResolvidos.push({ estudante: lido.estudante, ...resolvido, excecoes });
     }
   }
 
   for (const geral of parsed.data.gerais) {
     const excecoes = geral.excecoes.filter((excecao) => valida(excecao, geral.trecho));
-    if (excecoes.length > 0) resultado.gerais.push({ trecho: geral.trecho, excecoes });
+    if (excecoes.length === 0) continue;
+    if (!geral.estudante) {
+      resultado.gerais.push({ trecho: geral.trecho, estudante: null, excecoes });
+      continue;
+    }
+    const resolvido = resolver(geral.estudante, '');
+    if ('matricula' in resolvido) resultado.gerais.push({ trecho: geral.trecho, estudante: resolvido, excecoes });
+    else resultado.naoResolvidos.push({ estudante: geral.estudante, ...resolvido, excecoes: excecoes.map((e) => ({ ...e, trecho: geral.trecho })) });
   }
 
   return resultado;
