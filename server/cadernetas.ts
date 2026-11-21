@@ -1212,6 +1212,7 @@ cadernetas.post('/:id/etapas/:etapa/boletim/rascunhos', async (context) => {
 
   // Names come from the database: the client only says what the grid shows.
   const naTela = new Map(parsed.data.estudantes.map((estudante) => [estudante.matricula, estudante]));
+  const noPortal = new Set(boletim.notas.map((nota) => nota.matricula));
 
   try {
     const geradas = await gerarNotas({
@@ -1224,6 +1225,7 @@ cadernetas.post('/:id/etapas/:etapa/boletim/rascunhos', async (context) => {
         nome,
         notaFinal: naTela.get(matricula)?.notaFinal ?? null,
         classificacao: naTela.get(matricula)?.classificacao ?? null,
+        noPortal: noPortal.has(matricula),
       })),
       mensagens: parsed.data.mensagens,
       signal: context.req.raw.signal,

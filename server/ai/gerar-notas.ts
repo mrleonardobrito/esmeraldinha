@@ -23,6 +23,8 @@ export interface EstudanteNoChat {
   readonly nome: string;
   readonly notaFinal: number | null;
   readonly classificacao: Classificacao | null;
+  /** Whether the professor's own notas for this row are already on the portal. */
+  readonly noPortal: boolean;
 }
 
 export interface GerarNotasInput {
@@ -102,6 +104,13 @@ function numero(valor: number): string {
   return String(valor).replace('.', ',');
 }
 
+/** Every nota from `de` to `ate` in steps of 0,5, as the prompt lists them. */
+function faixa(de: number, ate: number): string {
+  const notas: string[] = [];
+  for (let nota = de; nota <= ate + 1e-9; nota += 0.5) notas.push(numero(nota));
+  return notas.join('; ');
+}
+
 function buildSystemPrompt(input: GerarNotasInput): string {
   const total = totalDaEtapa(input.avaliacoes);
   const acima = Math.ceil(0.8 * total * 2) / 2;
@@ -131,11 +140,12 @@ function buildSystemPrompt(input: GerarNotasInput): string {
     'Regras:',
     '- Notas finais sempre em passos de 0,5.',
     `- "Excelente", "ótima" ou "todos foram muito bem", sem mais detalhes: ${numero(total)} para todos.`,
-    `- "Acima da média" sem mais detalhes: varie entre ${numero(acima)} e ${numero(total)}, com notas diferentes entre os estudantes (não dê a mesma nota a todos).`,
-    '- "Na média" ou "abaixo da média" sem mais detalhes: varie dentro da faixa, com notas diferentes entre os estudantes.',
+    `- "Acima da média" sem mais detalhes: varie entre ${numero(acima)} e ${numero(total)}, com notas diferentes entre os estudantes — espalhe pela faixa (${faixa(acima, total)}); nunca a mesma nota para todos.`,
+    `- "Na média" ou "abaixo da média" sem mais detalhes: varie dentro da faixa, com notas diferentes entre os estudantes (ex.: ${faixa(Math.max(media - 1.5, 0), media - 0.5)} para abaixo da média).`,
     `- "Não alcançou a média", "não conseguiu média suficiente", "ficou sem média" ou "reprovou": Abaixo da média, menos de ${numero(media)}. Nunca Na média.`,
     `- Quando o auxiliar disser exatamente a nota, use-a. Sem faixa nem variação pedida, use o topo da classificação (${numero(total)}, ${numero(notaFinalDaClassificacao('Na média', total))} ou ${numero(notaFinalDaClassificacao('Abaixo da média', total))}).`,
     '- Quando o auxiliar descrever a turma inteira, liste TODOS os estudantes em "notas" com a nota que a descrição pede, mesmo quem já está na faixa — as notas atuais são só o ponto de partida da tela.',
+    '- Estudantes marcados "já lançada no portal" têm notas que o professor já lançou: deixe-os de fora, mesmo quando o auxiliar descrever a turma inteira, a menos que ele os cite pelo nome ou peça para mudar também as notas já lançadas.',
     '- Quando o pedido for sobre estudantes específicos ("agora dê 9 à Maria"), liste só esses. Quem você não listar fica como está.',
     '- Copie a matrícula exatamente da lista de estudantes. Nunca invente estudante.',
     '- Se o auxiliar só fizer uma pergunta, responda em "resposta" e devolva "notas" vazio.',
@@ -147,8 +157,8 @@ function buildSystemPrompt(input: GerarNotasInput): string {
 function descreveConversa(input: GerarNotasInput): string {
   const estudantes = input.estudantes
     .map(
-      ({ matricula, nome, notaFinal, classificacao }) =>
-        `- ${matricula} | ${nome} | nota final atual: ${notaFinal === null ? '—' : numero(notaFinal)} | ${classificacao ?? '—'}`,
+      ({ matricula, nome, notaFinal, classificacao, noPortal }) =>
+        `- ${matricula} | ${nome} | nota final atual: ${notaFinal === null ? '—' : numero(notaFinal)} | ${classificacao ?? '—'}${noPortal ? ' | já lançada no portal' : ''}`,
     )
     .join('\n');
 

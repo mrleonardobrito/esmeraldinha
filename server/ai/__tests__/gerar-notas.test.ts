@@ -11,9 +11,9 @@ const base: Omit<GerarNotasInput, 'complete'> = {
     (nome) => ({ nome, valor: 2.5 }),
   ),
   estudantes: [
-    { matricula: '1', nome: 'ANA LIMA', notaFinal: 10, classificacao: 'Acima da média' },
-    { matricula: '2', nome: 'BRUNO SOUZA', notaFinal: 10, classificacao: 'Acima da média' },
-    { matricula: '3', nome: 'BRUNO ALVES', notaFinal: null, classificacao: null },
+    { matricula: '1', nome: 'ANA LIMA', notaFinal: 10, classificacao: 'Acima da média', noPortal: false },
+    { matricula: '2', nome: 'BRUNO SOUZA', notaFinal: 8, classificacao: 'Acima da média', noPortal: true },
+    { matricula: '3', nome: 'BRUNO ALVES', notaFinal: null, classificacao: null, noPortal: false },
   ],
   mensagens: [{ papel: 'auxiliar', texto: 'A Ana não alcançou a média.' }],
 };
@@ -116,6 +116,10 @@ describe('gerarNotas', () => {
     const texto = pedido.content.map((parte) => parte.text).join('\n');
     expect(texto).toContain('- 1 | ANA LIMA | nota final atual: 10 | Acima da média');
     expect(texto).toContain('- 3 | BRUNO ALVES | nota final atual: — | —');
+    expect(texto).toContain('- 2 | BRUNO SOUZA | nota final atual: 8 | Acima da média | já lançada no portal');
+    expect(pedido.system).toContain(
+      'Estudantes marcados "já lançada no portal" têm notas que o professor já lançou',
+    );
     expect(texto).toContain('Auxiliar de ensino: A Ana não alcançou a média.');
   });
 });

@@ -64,7 +64,7 @@ async function freshApp(): Promise<AppAutenticado> {
             avaliacoes: ['OBSERVAÇÃO', 'TRABALHO INDIVIDUAL', 'TRABALHO EM GRUPO', 'AVALIAÇÃO/PROVA'].map(
               (nome) => ({ nome, valor: 2.5 }),
             ),
-            notas: [],
+            notas: [{ matricula: '13949', avaliacao: 'OBSERVAÇÃO', valor: 2 }],
             notasDoEstudante: [],
           },
         ],
@@ -148,7 +148,7 @@ describe('POST /api/cadernetas/:id/etapas/:etapa/boletim/rascunhos', () => {
       .mock.calls[0][0].content.map((parte) => ('text' in parte ? parte.text : ''))
       .join('\n');
     expect(texto).toContain('- 13946 | ADYLLA GABRIELLA SILVA SANTOS | nota final atual: 10 | Acima da média');
-    expect(texto).toContain('- 13949 | ANA JULIA DA SILVA SOARES | nota final atual: — | —');
+    expect(texto).toContain('- 13949 | ANA JULIA DA SILVA SOARES | nota final atual: — | — | já lançada no portal');
   });
 
   it('refuses a request without a conversation', async () => {
