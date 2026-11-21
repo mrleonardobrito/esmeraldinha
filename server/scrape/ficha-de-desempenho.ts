@@ -2,7 +2,7 @@ import { expect, type Page } from '@playwright/test';
 
 import type { AreaDeConhecimento, Conceito, EstruturaDaFicha } from '../../shared/ficha-de-desempenho';
 import type { Escrita, HabilidadeLida } from '../fichas/regras';
-import { FichaNaoSuportadaError } from './errors';
+import { EstudanteTrocadoError, FichaNaoSuportadaError } from './errors';
 import { ETAPA_MENU_NAME, filtroDeTurma, selecionarPeriodoLetivo } from './portal';
 import { AJAX_TIMEOUT_MS, readMenuOptions, selectMenuOption, waitForAjax } from './primefaces';
 
@@ -90,9 +90,8 @@ const CONCEITO_DA_OPCAO = /^(R|RD|NR) - /;
 
 /** Reads the open dialog: áreas, habilidades and the conceito of every etapa. */
 export async function lerDialogoDaFicha(page: Page): Promise<DialogoDaFicha> {
-  const matricula = (await page.locator(MATRICULA_DO_DIALOGO).first().inputValue()).trim();
-
   const lido = await page.evaluate((seletor) => {
+    const matricula = (document.querySelector<HTMLInputElement>('[id$="matriculaAluno-CP-UP"]')?.value ?? '').trim();
     const areas: { indice: number; titulo: string; habilidades: { indice: number; numero: string; texto: string }[] }[] = [];
     const lidas: { area: number; habilidade: number; etapa: number; opcao: string | null }[] = [];
     const opcoesEstranhas = new Set<string>();
@@ -126,7 +125,7 @@ export async function lerDialogoDaFicha(page: Page): Promise<DialogoDaFicha> {
       areas.push({ indice: area, titulo, habilidades });
     }
 
-    return { areas, lidas, opcoesEstranhas: [...opcoesEstranhas] };
+    return { matricula, areas, lidas, opcoesEstranhas: [...opcoesEstranhas] };
   }, SELECT);
 
   if (lido.opcoesEstranhas.length > 0) throw new FichaNaoSuportadaError(lido.opcoesEstranhas);
@@ -141,7 +140,7 @@ export async function lerDialogoDaFicha(page: Page): Promise<DialogoDaFicha> {
     porHabilidade.set(chave, atual);
   }
 
-  return { matricula, areas: lido.areas, lidas: [...porHabilidade.values()] };
+  return { matricula: lido.matricula, areas: lido.areas, lidas: [...porHabilidade.values()] };
 }
 
 /**
@@ -149,10 +148,18 @@ export async function lerDialogoDaFicha(page: Page): Promise<DialogoDaFicha> {
  * `onchange`: the portal's Salvar submits the whole form, so the values are
  * saved when the auxiliar de ensino saves. Never saves.
  */
-export async function escreverConceitos(page: Page, escritas: readonly Escrita[]): Promise<void> {
+export async function escreverConceitos(
+  page: Page,
+  escritas: readonly Escrita[],
+  matriculaEsperada?: string,
+): Promise<void> {
   if (escritas.length === 0) return;
 
-  const faltando = await page.evaluate((itens) => {
+  // The check and the writes run in one evaluate: the dialog cannot move to
+  // another estudante between them.
+  const resultado = await page.evaluate(({ itens, esperada }) => {
+    const aberta = (document.querySelector<HTMLInputElement>('[id$="matriculaAluno-CP-UP"]')?.value ?? '').trim();
+    if (esperada !== null && aberta !== esperada) return { aberta, ausentes: [] as string[] };
     const ausentes: string[] = [];
     for (const { area, habilidade, etapa, conceito } of itens) {
       const sufixo = `:${area}:dtlistConceitoFichaVo:${habilidade}:dtdatamodel:`;
@@ -168,11 +175,14 @@ export async function escreverConceitos(page: Page, escritas: readonly Escrita[]
       const label = document.getElementById(sel.id.replace(/_input$/, '_label'));
       if (label) label.textContent = opcao.text;
     }
-    return ausentes;
-  }, escritas);
+    return { aberta: null, ausentes };
+  }, { itens: escritas, esperada: matriculaEsperada ?? null });
 
-  if (faltando.length > 0) {
-    throw new Error(`Campos da ficha não encontrados: ${faltando.join(', ')}.`);
+  if (resultado.aberta !== null) {
+    throw new EstudanteTrocadoError(matriculaEsperada ?? '', resultado.aberta);
+  }
+  if (resultado.ausentes.length > 0) {
+    throw new Error(`Campos da ficha não encontrados: ${resultado.ausentes.join(', ')}.`);
   }
 }
 

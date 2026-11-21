@@ -1,6 +1,7 @@
 import type { Page } from 'playwright';
 
-import type { Excecao, IndiceDaEtapa } from '../../shared/ficha-de-desempenho';
+import type { AreaDeConhecimento, Excecao, IndiceDaEtapa } from '../../shared/ficha-de-desempenho';
+import { EstudanteTrocadoError, FichaAlteradaError } from '../scrape/errors';
 import {
   abrirEstudanteDaLista,
   abrirFichaDaTurma,
@@ -46,6 +47,22 @@ export interface PlanoDoPreenchimento {
   estudantes: readonly { matricula: string; nome: string; situacao: string | null }[];
   /** Exceções per matrícula; everyone else gets R. */
   excecoes: ReadonlyMap<string, readonly Excecao[]>;
+  /** The structure the exceções were chosen against; the live ficha must match it. */
+  estrutura: readonly AreaDeConhecimento[];
+}
+
+/** Do the chosen áreas still have the titles and habilidades they were read with? */
+function mesmaEstrutura(
+  lida: readonly AreaDeConhecimento[],
+  aberta: readonly AreaDeConhecimento[],
+  areas: readonly number[],
+): boolean {
+  return areas.every((indice) => {
+    const antes = lida.find((area) => area.indice === indice);
+    const agora = aberta.find((area) => area.indice === indice);
+    return antes !== undefined && agora !== undefined && antes.titulo === agora.titulo &&
+      antes.habilidades.length === agora.habilidades.length;
+  });
 }
 
 const EM_ANDAMENTO: readonly StatusDoPreenchimento[] = ['abrindo', 'preenchendo', 'aguardando-auxiliar'];
@@ -152,6 +169,7 @@ export async function acompanharPreenchimento(
         } else {
           emitir({ status: 'preenchendo', atual: { matricula, nome } });
           const dialogo = await lerDialogoDaFicha(page);
+          if (!mesmaEstrutura(plano.estrutura, dialogo.areas, plano.areas)) throw new FichaAlteradaError();
           if (dialogo.matricula !== matricula) {
             // The dialog moved while it was being read: start over on the new one.
             tratados.delete(matricula);
@@ -164,7 +182,15 @@ export async function acompanharPreenchimento(
             areas: plano.areas,
             excecoes: plano.excecoes.get(matricula) ?? [],
           });
-          await escreverConceitos(page, plan.escritas);
+          try {
+            await escreverConceitos(page, plan.escritas, matricula);
+          } catch (error) {
+            if (!(error instanceof EstudanteTrocadoError)) throw error;
+            // The auxiliar moved on before the writes: handle the new one.
+            tratados.delete(matricula);
+            atual = error.aberta || null;
+            continue;
+          }
           estado.preenchidos.push({
             matricula,
             nome,

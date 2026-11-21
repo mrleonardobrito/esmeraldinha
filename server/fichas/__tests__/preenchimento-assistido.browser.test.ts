@@ -29,8 +29,14 @@ const estudantes = [
   { matricula: '103', nome: 'CAIO', situacao: 'ATIVO' },
 ];
 
+const estruturaLida = areas.map((area, indice) => ({
+  indice,
+  titulo: area.titulo,
+  habilidades: area.habilidades.map((texto, h) => ({ indice: h, numero: `${h + 1}°`, texto })),
+}));
+
 function plano(excecoes: PlanoDoPreenchimento['excecoes'] = new Map()): PlanoDoPreenchimento {
-  return { turma, etapa: 1, nomeDaEtapa: 'I ETAPA', areas: [0], estudantes, excecoes };
+  return { turma, etapa: 1, nomeDaEtapa: 'I ETAPA', areas: [0], estudantes, excecoes, estrutura: estruturaLida };
 }
 
 async function portal(): Promise<Page> {
@@ -152,5 +158,19 @@ it('never clicks a Salvar button', async () => {
   await page.getByRole('button', { name: 'Fechar' }).click();
   await fim;
   expect(await cliques(page)).toEqual(['Fechar']);
+  await page.close();
+});
+
+it('stops without writing when the ficha changed since it was read', async () => {
+  const page = await portal();
+  const desatualizada = [{ indice: 0, titulo: 'OUTRA ÁREA', habilidades: [{ indice: 0, numero: '1°', texto: 'x' }] }];
+  const { fim } = executar(page, { ...plano(), estrutura: desatualizada });
+
+  const final = await fim;
+
+  expect(final.status).toBe('falhou');
+  expect(final.erro).toContain('Releia a ficha');
+  expect(final.preenchidos).toEqual([]);
+  expect(await page.locator('#dialogo select option:checked').evaluateAll((opcoes) => opcoes.filter((o) => (o as HTMLOptionElement).index > 0).length)).toBe(0);
   await page.close();
 });

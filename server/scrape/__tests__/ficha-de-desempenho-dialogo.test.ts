@@ -1,7 +1,7 @@
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
-import { FichaNaoSuportadaError } from '../errors';
+import { EstudanteTrocadoError, FichaNaoSuportadaError } from '../errors';
 import { escreverConceitos, lerDialogoDaFicha, matriculaDoDialogo } from '../ficha-de-desempenho';
 import { dialogoDaFicha } from './fixtures/ficha-de-desempenho';
 
@@ -95,6 +95,18 @@ it('matriculaDoDialogo is null when no dialog is open', async () => {
   const page = await pagina('<main>lista</main>');
   try {
     expect(await matriculaDoDialogo(page)).toBeNull();
+  } finally {
+    await page.close();
+  }
+});
+
+it('escreverConceitos refuses to write when another estudante is open', async () => {
+  const page = await pagina(dialogoDaFicha({ matricula: '10316', areas }));
+  try {
+    await expect(escreverConceitos(page, [{ area: 0, habilidade: 0, etapa: 1, conceito: 'R' }], '10315'))
+      .rejects.toBeInstanceOf(EstudanteTrocadoError);
+    const dialogo = await lerDialogoDaFicha(page);
+    expect(dialogo.lidas.every((l) => Object.values(l.conceitos).every((c) => c === null))).toBe(true);
   } finally {
     await page.close();
   }

@@ -212,6 +212,7 @@ fichaDeDesempenho.post('/:id/etapas/:etapa/ficha-de-desempenho/preenchimentos-as
     areas,
     estudantes: estudantes.map(({ matricula, nome, situacao }) => ({ matricula, nome, situacao })),
     excecoes: porMatricula,
+    estrutura: estrutura.areas,
   };
 
   try {
