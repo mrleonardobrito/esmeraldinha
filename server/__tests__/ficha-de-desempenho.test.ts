@@ -142,6 +142,50 @@ describe('ficha de desempenho routes', () => {
     expect(body.turma.map((e: { matricula: string }) => e.matricula)).toEqual(['10315', '10316']);
   });
 
+  it('starts the assisted run in the headed window and reports its state', async () => {
+    const { app, cadernetaId, professorId } = await freshApp();
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/estrutura/leituras`, { method: 'POST' }));
+    const { naSessaoHeaded } = await import('../sessoes-headed');
+    vi.mocked(naSessaoHeaded).mockImplementation(async (_id, _cred, trabalho) => trabalho({} as never));
+    const { acompanharPreenchimento } = await import('../fichas/preenchimento-assistido');
+    vi.mocked(acompanharPreenchimento).mockImplementation((_page, _plano, onEstado) => {
+      onEstado({ status: 'aguardando-auxiliar', etapa: 'I ETAPA', total: 1, atual: { matricula: '10315', nome: 'ANA' }, preenchidos: [], pulados: [], erro: null });
+      return new Promise(() => {});
+    });
+
+    const inicio = await app.fetch(request(
+      `/${cadernetaId}/etapas/I%20ETAPA/ficha-de-desempenho/preenchimentos-assistidos`,
+      json({ areas: [0], excecoes: [{ matricula: '10315', area: 0, habilidade: 0, conceito: 'RD' }] }),
+    ));
+
+    expect(inicio.status).toBe(202);
+    expect(naSessaoHeaded).toHaveBeenCalledWith(professorId, expect.objectContaining({ login: '111' }), expect.any(Function));
+    const plano = vi.mocked(acompanharPreenchimento).mock.calls[0][1];
+    expect(plano).toMatchObject({ turma, etapa: 1, nomeDaEtapa: 'I ETAPA', areas: [0] });
+    expect(plano.excecoes.get('10315')).toEqual([{ area: 0, habilidade: 0, conceito: 'RD' }]);
+
+    const estado = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos/atual`));
+    expect((await estado.json()).estado).toMatchObject({ status: 'aguardando-auxiliar', atual: { matricula: '10315' } });
+
+    const outro = await app.fetch(request(
+      `/${cadernetaId}/etapas/I%20ETAPA/ficha-de-desempenho/preenchimentos-assistidos`,
+      json({ areas: [0], excecoes: [] }),
+    ));
+    expect(outro.status).toBe(409);
+  });
+
+  it('refuses exceções for estudantes outside the turma', async () => {
+    const { app, cadernetaId } = await freshApp();
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/estrutura/leituras`, { method: 'POST' }));
+
+    const response = await app.fetch(request(
+      `/${cadernetaId}/etapas/I%20ETAPA/ficha-de-desempenho/preenchimentos-assistidos`,
+      json({ areas: [0], excecoes: [{ matricula: '99999', area: 0, habilidade: 0, conceito: 'RD' }] }),
+    ));
+
+    expect(response.status).toBe(422);
+  });
+
   it('rejects an etapa the ficha does not have', async () => {
     const { app, cadernetaId } = await freshApp();
     await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/estrutura/leituras`, { method: 'POST' }));

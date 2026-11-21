@@ -92,13 +92,13 @@ export async function lerDialogoDaFicha(page: Page): Promise<DialogoDaFicha> {
     const opcoesEstranhas = new Set<string>();
     const conceitoDa = /^(R|RD|NR) - /;
 
-    for (const tabela of document.querySelectorAll('[id$=":dtlistConceitoFichaVo"]')) {
+    for (const tabela of Array.from(document.querySelectorAll('[id$=":dtlistConceitoFichaVo"]'))) {
       const area = Number(/:(\d+):dtlistConceitoFichaVo$/.exec(tabela.id)?.[1]);
       const celula = tabela.parentElement;
       const titulo = (celula?.querySelector(':scope > div > span')?.textContent ?? '').replace(/\s+/g, ' ').trim();
       const habilidades: { indice: number; numero: string; texto: string }[] = [];
 
-      for (const linha of tabela.querySelectorAll(':scope tbody[id$=":dtlistConceitoFichaVo_data"] > tr')) {
+      for (const linha of Array.from(tabela.querySelectorAll(':scope tbody[id$=":dtlistConceitoFichaVo_data"] > tr'))) {
         const descricao = (linha.querySelector(':scope > td')?.textContent ?? '').replace(/\s+/g, ' ').trim();
         const select = linha.querySelector(seletor);
         const indice = Number(/dtlistConceitoFichaVo:(\d+):dtdatamodel/.exec(select?.id ?? '')?.[1]);
@@ -106,10 +106,10 @@ export async function lerDialogoDaFicha(page: Page): Promise<DialogoDaFicha> {
         const partes = /^(\d+\s*°)\s*(.*)$/.exec(descricao);
         habilidades.push({ indice, numero: (partes?.[1] ?? '').replace(/\s+/g, ''), texto: partes?.[2] ?? descricao });
 
-        for (const el of linha.querySelectorAll(seletor)) {
+        for (const el of Array.from(linha.querySelectorAll(seletor))) {
           const sel = el as HTMLSelectElement;
           const etapa = Number(/dtdatamodel:\d+:[^:]+:(\d+):/.exec(sel.id)?.[1]);
-          for (const opcao of [...sel.options].slice(1)) {
+          for (const opcao of Array.from(sel.options).slice(1)) {
             if (!conceitoDa.test(opcao.text.trim())) opcoesEstranhas.add(opcao.text.trim());
           }
           const escolhida = sel.selectedIndex > 0 ? sel.options[sel.selectedIndex].text.trim() : null;
@@ -150,10 +150,10 @@ export async function escreverConceitos(page: Page, escritas: readonly Escrita[]
     const ausentes: string[] = [];
     for (const { area, habilidade, etapa, conceito } of itens) {
       const sufixo = `:${area}:dtlistConceitoFichaVo:${habilidade}:dtdatamodel:`;
-      const sel = [...document.querySelectorAll<HTMLSelectElement>('[id$=":somRespostas_input"]')].find(
+      const sel = Array.from(document.querySelectorAll<HTMLSelectElement>('[id$=":somRespostas_input"]')).find(
         (el) => el.id.includes(sufixo) && new RegExp(`dtdatamodel:\\d+:[^:]+:${etapa}:`).test(el.id),
       );
-      const opcao = sel && [...sel.options].find((o) => o.text.trim().startsWith(`${conceito} - `));
+      const opcao = sel && Array.from(sel.options).find((o) => o.text.trim().startsWith(`${conceito} - `));
       if (!sel || !opcao) {
         ausentes.push(`${area}.${habilidade}.${etapa}`);
         continue;

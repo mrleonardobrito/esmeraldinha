@@ -64,3 +64,86 @@ export function dialogoDaFicha({
     <output id="onchanges">0</output>
   </div>`;
 }
+
+export interface EstudanteDoFixture {
+  matricula: string;
+  nome: string;
+  situacao: string;
+}
+
+/**
+ * The _Ficha Desempenho_ list with a dialog that behaves like the portal's:
+ * the Salvar buttons keep the dialog's values as saved (in `window.__salvos`)
+ * and move to the next or previous estudante; Fechar discards. Every button
+ * click is recorded in `window.__cliques`.
+ */
+export function portalDaFicha({
+  turma,
+  ficha,
+  estudantes,
+  areas,
+}: {
+  turma: string;
+  ficha: string;
+  estudantes: readonly EstudanteDoFixture[];
+  areas: readonly AreaDoFixture[];
+}): string {
+  const menu = (sufixo: string, opcao: string) => `<div id="f:${sufixo}" class="ui-selectonemenu">
+    <select id="f:${sufixo}_input"><option value=""></option><option value="1">${opcao}</option></select></div>`;
+  return `
+    <a href="#" onclick="return false">Etapa</a>
+    <a href="#" onclick="document.querySelector('#tela').hidden = false; return false">Ficha Desempenho</a>
+    <section id="tela" hidden>
+      ${menu('turma-SOM-CP-OBR', turma)}
+      ${menu('fichaDesempenho-SOM-CP-OBR', ficha)}
+      <table><tbody>${estudantes.map((e, i) => `<tr data-ri="${i}">
+        <td>${i + 1}</td><td>${e.matricula}</td>
+        <td>${e.nome}<button type="button" onclick="abrir('${e.matricula}')">Cadastrar</button>
+          Nome social: Situação: ${e.situacao}</td></tr>`).join('')}</tbody></table>
+    </section>
+    <div id="dialogo"></div>
+    <div id="botoes" hidden>
+      <button type="button" onclick="clicar('Salvar e anterior')">Salvar e anterior</button>
+      <button type="button" onclick="clicar('Salvar e sair')">Salvar e sair</button>
+      <button type="button" onclick="clicar('Salvar e próximo')">Salvar e próximo</button>
+      <button type="button" onclick="clicar('Fechar')">Fechar</button>
+    </div>
+    ${estudantes.map((e) => `<template id="t-${e.matricula}">${dialogoDaFicha({ matricula: e.matricula, areas })}</template>`).join('')}
+    <script>
+      const ordem = ${JSON.stringify(estudantes.map((e) => e.matricula))};
+      const salvos = new Map();
+      window.__salvos = {};
+      window.__cliques = [];
+      let atual = null;
+      function abrir(matricula) {
+        const container = document.querySelector('#dialogo');
+        container.replaceChildren(salvos.get(matricula) ?? document.querySelector('#t-' + matricula).content.cloneNode(true));
+        document.querySelector('#botoes').hidden = false;
+        atual = matricula;
+      }
+      function salvar() {
+        const valores = {};
+        for (const sel of document.querySelectorAll('#dialogo select')) {
+          if (sel.selectedIndex <= 0) continue;
+          const m = /:(\\d+):dtlistConceitoFichaVo:(\\d+):dtdatamodel:0:[^:]+:(\\d):/.exec(sel.id);
+          valores[m[1] + '.' + m[2] + '.' + m[3]] = sel.options[sel.selectedIndex].text.split(' - ')[0];
+        }
+        window.__salvos[atual] = valores;
+        salvos.set(atual, document.querySelector('#dialogo').firstElementChild);
+      }
+      function fechar() {
+        document.querySelector('#dialogo').replaceChildren();
+        document.querySelector('#botoes').hidden = true;
+        atual = null;
+      }
+      function clicar(botao) {
+        window.__cliques.push(botao);
+        if (botao === 'Fechar') return fechar();
+        salvar();
+        const i = ordem.indexOf(atual);
+        if (botao === 'Salvar e sair') return fechar();
+        const proxima = ordem[botao === 'Salvar e próximo' ? i + 1 : i - 1];
+        if (proxima) abrir(proxima); else fechar();
+      }
+    </script>`;
+}

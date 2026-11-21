@@ -1,14 +1,21 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { indiceDaEtapa } from '../../shared/ficha-de-desempenho';
+import { indiceDaEtapa, preenchimentoDaFichaSchema, type Excecao } from '../../shared/ficha-de-desempenho';
 import { ArquivoIlegivelError, EnvioInvalidoError, OpenRouterError, OpenRouterNotConfiguredError } from '../ai/errors';
 import type { ArquivoEnviado } from '../ai/interpretar-envio';
 import { interpretarObservacoes } from '../ai/interpretar-observacoes';
 import type { ContaEnv } from '../conta/autenticacao';
 import { createEncryptionPort } from '../encryption';
 import { env } from '../env';
+import {
+  acompanharPreenchimento,
+  estadoDoPreenchimento,
+  iniciarPreenchimento,
+  PreenchimentoEmAndamentoError,
+} from '../fichas/preenchimento-assistido';
 import { getEstruturaDaFicha, salvarEstruturaDaFicha } from '../fichas/store';
+import { naSessaoHeaded } from '../sessoes-headed';
 import { closeSession, openSession } from '../portal-sessions';
 import { getDb } from '../professores/db';
 import { getProfessorCredenciais } from '../professores/store';
@@ -151,4 +158,78 @@ fichaDeDesempenho.post('/:id/etapas/:etapa/ficha-de-desempenho/observacoes', asy
     console.error('Failed to interpret observações:', error);
     return context.json({ error: 'Não foi possível ler as observações. Tente novamente.' }, 502);
   }
+});
+
+const chaveDaExecucao = (caderneta: Caderneta) => `${caderneta.id}|${caderneta.turma}`;
+
+/**
+ * Starts the preenchimento assistido of one etapa in the professor's headed
+ * window. Answers right away: the run follows the auxiliar de ensino's
+ * Salvar e próximo for as long as they keep going, and its progress is read
+ * from the status route.
+ */
+fichaDeDesempenho.post('/:id/etapas/:etapa/ficha-de-desempenho/preenchimentos-assistidos', async (context) => {
+  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+  if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
+  const nomeDaEtapa = decodeURIComponent(context.req.param('etapa'));
+
+  let etapa;
+  try {
+    etapa = indiceDaEtapa(nomeDaEtapa);
+  } catch {
+    return context.json({ error: `A ficha de desempenho não tem a etapa "${nomeDaEtapa}".` }, 422);
+  }
+
+  const parsed = preenchimentoDaFichaSchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: 'Escolha as áreas de conhecimento a preencher.' }, 400);
+  const { areas, excecoes } = parsed.data;
+
+  const db = getDb();
+  const estrutura = getEstruturaDaFicha(db, caderneta.professorId, caderneta.turma);
+  if (!estrutura) return context.json({ error: 'Leia a ficha de desempenho no portal antes de preencher.' }, 422);
+  if (areas.some((area) => !estrutura.areas.some((candidata) => candidata.indice === area))) {
+    return context.json({ error: 'Uma das áreas escolhidas não existe nesta ficha. Releia a ficha no portal.' }, 422);
+  }
+
+  const estudantes = listEstudantes(db, caderneta.id, caderneta.turma);
+  const desconhecida = excecoes.find((excecao) => !estudantes.some((e) => e.matricula === excecao.matricula));
+  if (desconhecida) {
+    return context.json({ error: `A matrícula ${desconhecida.matricula} não é de um estudante desta turma.` }, 422);
+  }
+
+  const credenciais = await getProfessorCredenciais(db, createEncryptionPort(), caderneta.professorId);
+  if (!credenciais) return context.json({ error: 'Professor não encontrado.' }, 404);
+
+  const porMatricula = new Map<string, Excecao[]>();
+  for (const { matricula, ...excecao } of excecoes) {
+    porMatricula.set(matricula, [...(porMatricula.get(matricula) ?? []), excecao]);
+  }
+  const plano = {
+    periodoLetivo: periodoLetivoDaTurma(db, caderneta.professorId, caderneta.turma),
+    turma: caderneta.turma,
+    etapa,
+    nomeDaEtapa,
+    areas,
+    estudantes: estudantes.map(({ matricula, nome, situacao }) => ({ matricula, nome, situacao })),
+    excecoes: porMatricula,
+  };
+
+  try {
+    const inicial = iniciarPreenchimento(
+      chaveDaExecucao(caderneta),
+      { status: 'abrindo', etapa: nomeDaEtapa, total: 0, atual: null, preenchidos: [], pulados: [], erro: null },
+      (onEstado) => naSessaoHeaded(caderneta.professorId, credenciais, (page) =>
+        acompanharPreenchimento(page, plano, onEstado)),
+    );
+    return context.json({ estado: inicial }, 202);
+  } catch (error) {
+    if (error instanceof PreenchimentoEmAndamentoError) return context.json({ error: error.message }, 409);
+    throw error;
+  }
+});
+
+fichaDeDesempenho.get('/:id/ficha-de-desempenho/preenchimentos-assistidos/atual', (context) => {
+  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+  if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
+  return context.json({ estado: estadoDoPreenchimento(chaveDaExecucao(caderneta)) });
 });

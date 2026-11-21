@@ -1,0 +1,156 @@
+import { chromium, type Browser, type Page } from 'playwright';
+import { afterAll, beforeAll, expect, it } from 'vitest';
+
+import { portalDaFicha } from '../../scrape/__tests__/fixtures/ficha-de-desempenho';
+import {
+  acompanharPreenchimento,
+  type EstadoDoPreenchimento,
+  type PlanoDoPreenchimento,
+} from '../preenchimento-assistido';
+
+let browser: Browser;
+
+beforeAll(async () => {
+  browser = await chromium.launch();
+});
+
+afterAll(async () => {
+  await browser?.close();
+});
+
+const turma = 'CRECHE II - CRECHE II - VESPERTINO';
+const areas = [
+  { titulo: 'O EU, O OUTRO E NÓS (EO)', habilidades: ['Demonstra cuidado.', 'Comunica-se.'] },
+  { titulo: 'CORPO, GESTOS E MOVIMENTOS (CG)', habilidades: ['Explora o espaço.'] },
+];
+const estudantes = [
+  { matricula: '101', nome: 'ANA', situacao: 'ATIVO' },
+  { matricula: '102', nome: 'BRUNO', situacao: 'TRANSFERIDO' },
+  { matricula: '103', nome: 'CAIO', situacao: 'ATIVO' },
+];
+
+function plano(excecoes: PlanoDoPreenchimento['excecoes'] = new Map()): PlanoDoPreenchimento {
+  return { turma, etapa: 1, nomeDaEtapa: 'I ETAPA', areas: [0], estudantes, excecoes };
+}
+
+async function portal(): Promise<Page> {
+  const page = await browser.newPage();
+  page.setDefaultTimeout(3_000);
+  await page.setContent(portalDaFicha({ turma, ficha: 'FICHA - Todas disciplinas', estudantes, areas }));
+  return page;
+}
+
+/** Runs the assisted fill and lets the test act as the auxiliar between states. */
+function executar(page: Page, p: PlanoDoPreenchimento) {
+  const estados: EstadoDoPreenchimento[] = [];
+  const ouvintes: (() => void)[] = [];
+  const fim = acompanharPreenchimento(page, p, (estado) => {
+    estados.push(estado);
+    ouvintes.splice(0).forEach((ouvir) => ouvir());
+  }, { intervaloMs: 50, ociosoMs: 5_000 });
+
+  async function aguardandoEm(matricula: string): Promise<void> {
+    while (!estados.some((e) => e.status === 'aguardando-auxiliar' && e.atual?.matricula === matricula)) {
+      await new Promise<void>((resolve, reject) => {
+        ouvintes.push(resolve);
+        setTimeout(() => reject(new Error(`never waited on ${matricula}`)), 5_000);
+      });
+    }
+    estados.length = 0;
+  }
+
+  return { fim, aguardandoEm };
+}
+
+const salvos = (page: Page) => page.evaluate(() => (window as unknown as { __salvos: Record<string, Record<string, string>> }).__salvos);
+const cliques = (page: Page) => page.evaluate(() => (window as unknown as { __cliques: string[] }).__cliques);
+
+it('fills each estudante as the auxiliar clicks Salvar e próximo', async () => {
+  const page = await portal();
+  const { fim, aguardandoEm } = executar(page, plano(new Map([['103', [{ area: 0, habilidade: 1, conceito: 'NR' }]]])));
+
+  await aguardandoEm('101');
+  await page.getByRole('button', { name: 'Salvar e próximo' }).click();
+  await aguardandoEm('102');
+  await page.getByRole('button', { name: 'Salvar e próximo' }).click();
+  await aguardandoEm('103');
+  await page.getByRole('button', { name: 'Salvar e sair' }).click();
+
+  const final = await fim;
+  expect(final.status).toBe('concluido');
+  expect(await salvos(page)).toEqual({
+    101: { '0.0.1': 'R', '0.1.1': 'R' },
+    102: {},
+    103: { '0.0.1': 'R', '0.1.1': 'NR' },
+  });
+  expect(final.preenchidos.map((p) => p.matricula)).toEqual(['101', '103']);
+  await page.close();
+});
+
+it('skips a non-ATIVO estudante without writing', async () => {
+  const page = await portal();
+  const { fim, aguardandoEm } = executar(page, plano());
+
+  await aguardandoEm('101');
+  await page.getByRole('button', { name: 'Salvar e próximo' }).click();
+  await aguardandoEm('102');
+  await page.getByRole('button', { name: 'Salvar e sair' }).click();
+
+  const final = await fim;
+  expect((await salvos(page))[102]).toEqual({});
+  expect(final.pulados).toEqual([{ matricula: '102', nome: 'BRUNO', motivo: 'Situação TRANSFERIDO.' }]);
+  await page.close();
+});
+
+it('does not rewrite an estudante shown again', async () => {
+  const page = await portal();
+  const { fim, aguardandoEm } = executar(page, plano());
+
+  await aguardandoEm('101');
+  // The auxiliar lowers a conceito by hand, saves and comes back.
+  await page.locator('[id$=":0:dtlistConceitoFichaVo:0:dtdatamodel:0:j_idt322:1:j_idt327:somRespostas_input"]').selectOption({ label: 'RD - REALIZA COM DIFICULDADES' });
+  await page.getByRole('button', { name: 'Salvar e próximo' }).click();
+  await aguardandoEm('102');
+  await page.getByRole('button', { name: 'Salvar e anterior' }).click();
+  await aguardandoEm('101');
+  await page.getByRole('button', { name: 'Salvar e sair' }).click();
+
+  await fim;
+  expect((await salvos(page))[101]).toEqual({ '0.0.1': 'RD', '0.1.1': 'R' });
+  await page.close();
+});
+
+it('ends as interrompido when the auxiliar closes the dialog', async () => {
+  const page = await portal();
+  const { fim, aguardandoEm } = executar(page, plano());
+
+  await aguardandoEm('101');
+  await page.getByRole('button', { name: 'Fechar' }).click();
+
+  const final = await fim;
+  expect(final.status).toBe('interrompido');
+  expect(final.preenchidos).toHaveLength(1);
+  await page.close();
+});
+
+it('ends as interrompido when the window is closed', async () => {
+  const page = await portal();
+  const { fim, aguardandoEm } = executar(page, plano());
+
+  await aguardandoEm('101');
+  await page.close();
+
+  expect((await fim).status).toBe('interrompido');
+});
+
+it('never clicks a Salvar button', async () => {
+  const page = await portal();
+  const { fim, aguardandoEm } = executar(page, plano());
+
+  await aguardandoEm('101');
+  expect(await cliques(page)).toEqual([]);
+  await page.getByRole('button', { name: 'Fechar' }).click();
+  await fim;
+  expect(await cliques(page)).toEqual(['Fechar']);
+  await page.close();
+});
