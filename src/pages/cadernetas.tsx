@@ -166,7 +166,7 @@ export function Cadernetas() {
       .then(() => { if (!cancelled) recarregarCadernetas(); })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        toast.error(cause instanceof Error ? cause.message : "Could not read Grupo diário from the portal.");
+        toast.error(cause instanceof Error ? cause.message : "Não foi possível ler o grupo diário no portal.");
       });
     return () => { cancelled = true; };
   }, [session?.sessionId, recarregarCadernetas]);
@@ -491,7 +491,7 @@ export function Cadernetas() {
                 <div className="flex flex-col gap-0.5">
                   <CardTitle>Cadernetas</CardTitle>
                   <CardDescription>
-                    One row per caderneta, one column per etapa.
+                    Uma linha por caderneta, uma coluna por etapa.
                   </CardDescription>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

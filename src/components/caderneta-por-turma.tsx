@@ -22,7 +22,7 @@ export function CadernetaPorTurma({ caderneta, onClose, children }: {
     loadCaderneta(caderneta.id, turma)
       .then((scoped) => { if (active) setLoaded({ turma, caderneta: scoped }); })
       .catch((cause: unknown) => {
-        if (active) setError({ turma, message: cause instanceof Error ? cause.message : "Could not load turma." });
+        if (active) setError({ turma, message: cause instanceof Error ? cause.message : "Não foi possível carregar a turma." });
       });
     return () => { active = false; };
   }, [caderneta, turma, grouped]);
@@ -52,7 +52,7 @@ export function CadernetaPorTurma({ caderneta, onClose, children }: {
         {picker}
         {error?.turma === turma
           ? <p role="alert" className="text-sm text-destructive">{error.message}</p>
-          : <p role="status" className="text-sm text-muted-foreground">Loading turma…</p>}
+          : <p role="status" className="text-sm text-muted-foreground">Carregando a turma…</p>}
       </DialogContent>
     </Dialog>
   );

@@ -54,9 +54,10 @@ export function ExcluirCaderneta({
         <DialogHeader>
           <DialogTitle className="font-heading">Excluir caderneta</DialogTitle>
           <DialogDescription>
-            Remove the caderneta for <strong>{turmasDaCaderneta(caderneta).join(", ")}</strong> from
-            Esmeraldinha, including its saved aulas and estudantes. Information
-            saved in the portal stays there.
+            Remove da Esmeraldinha a caderneta de{" "}
+            <strong>{turmasDaCaderneta(caderneta).join(", ")}</strong>, com as
+            aulas e os estudantes guardados nela. O que já foi salvo no portal
+            continua lá.
           </DialogDescription>
         </DialogHeader>
 

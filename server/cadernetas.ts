@@ -153,7 +153,7 @@ cadernetas.onError((error, context) => {
     return context.json({ error: error.message }, 404);
   }
   console.error('Failed caderneta request:', error);
-  return context.json({ error: 'Unable to complete the caderneta request.' }, 500);
+  return context.json({ error: 'Não foi possível concluir a solicitação da caderneta.' }, 500);
 });
 
 function acessoAoProfessor(context: { get: (key: 'identidade') => ContaEnv['Variables']['identidade'] }, professorId: string) {
@@ -433,7 +433,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
     if (turmaDoEnvio) {
       if (cadernetaId) cadernetaDoPlano(cadernetaId, session.professorId, turmaDoEnvio);
       if (!turmasDoCatalogo(catalogo).includes(turmaDoEnvio)) {
-        return context.json({ error: 'The turma does not belong to this professor.' }, 422);
+        return context.json({ error: 'A turma não pertence a este professor.' }, 422);
       }
     }
 

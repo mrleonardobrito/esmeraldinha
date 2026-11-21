@@ -121,8 +121,8 @@ export function CadastrarCaderneta({
 
       toast.success(
         cadernetas.length === 1
-          ? `Caderneta ready: ${turmasDaCaderneta(cadernetas[0]).map(nomeCurtoDaTurma).join(", ")}.`
-          : `${cadernetas.length} cadernetas ready. Turmas de redução are combined automatically.`,
+          ? `Caderneta pronta: ${turmasDaCaderneta(cadernetas[0]).map(nomeCurtoDaTurma).join(", ")}.`
+          : `${cadernetas.length} cadernetas prontas. As turmas de redução são agrupadas automaticamente.`,
       );
 
       // As recusadas ficam à vista; fechar o sheet as esconderia.
@@ -152,9 +152,9 @@ export function CadastrarCaderneta({
         <SheetHeader>
           <SheetTitle className="font-heading">Nova caderneta</SheetTitle>
           <SheetDescription>
-            Select turmas. Turmas de redução are combined automatically in
-            one caderneta, with up to four turmas. Each turma where the professor
-            is regente has its own caderneta.
+            Selecione as turmas. As turmas de redução são agrupadas
+            automaticamente em uma caderneta, com até quatro turmas. Cada turma
+            em que o professor é regente tem a própria caderneta.
           </SheetDescription>
         </SheetHeader>
 
@@ -230,7 +230,7 @@ export function CadastrarCaderneta({
             )}
             {salvando
               ? "Cadastrando…"
-              : "Create cadernetas"}
+              : "Criar cadernetas"}
           </Button>
           <Button variant="outline" onClick={onClose} disabled={salvando}>
             {recusadas.length > 0 ? "Fechar" : "Cancelar"}
@@ -323,7 +323,7 @@ function Turmas({
             <span className="flex flex-col gap-1">
               <span>{nomeCurtoDaTurma(turma)}</span>
               <span className="text-xs text-muted-foreground">
-                Grupo diário: {gruposDiarios.get(turma) ?? "unavailable"}
+                Grupo diário: {gruposDiarios.get(turma) ?? "indisponível"}
               </span>
             </span>
           </label>
