@@ -44,25 +44,31 @@ export async function abrirFichaDaTurma(
   return ficha;
 }
 
+/** The second cell of every list row without its reflow column title; '' for other rows. */
+async function matriculasDaLinhas(page: Page): Promise<string[]> {
+  return page.locator('tr[data-ri]').evaluateAll((linhas) =>
+    linhas.map((linha) => {
+      const celula = linha.querySelectorAll(':scope > td')[1];
+      const clone = celula?.cloneNode(true) as HTMLElement | undefined;
+      clone?.querySelectorAll('.ui-column-title').forEach((titulo) => titulo.remove());
+      const texto = (clone?.textContent ?? '').replace(/\s+/g, '');
+      return /^\d+$/.test(texto) ? texto : '';
+    }),
+  );
+}
+
 /** The matrícula of each row of the list, in the portal's order. */
 export async function matriculasDaLista(page: Page): Promise<string[]> {
-  return page.locator('tr[data-ri]').evaluateAll((linhas) =>
-    linhas
-      .map((linha) => {
-        const celula = linha.querySelectorAll(':scope > td')[1];
-        const clone = celula?.cloneNode(true) as HTMLElement | undefined;
-        clone?.querySelectorAll('.ui-column-title').forEach((titulo) => titulo.remove());
-        return (clone?.textContent ?? '').replace(/\s+/g, '');
-      })
-      .filter((matricula) => /^\d+$/.test(matricula)),
-  );
+  return (await matriculasDaLinhas(page)).filter(Boolean);
 }
 
 /** Clicks the estudante's Cadastrar/Avaliar and waits until their dialog is ready. */
 export async function abrirEstudanteDaLista(page: Page, matricula: string): Promise<void> {
-  const linha = page
-    .locator('tr[data-ri]')
-    .filter({ has: page.locator('td', { hasText: new RegExp(`^\\s*${matricula}\\s*$`) }) });
+  // The matrícula cell also holds the reflow column title, so the row is
+  // found by the same reading as `matriculasDaLista`, not by the cell's text.
+  const indice = (await matriculasDaLinhas(page)).indexOf(matricula);
+  if (indice < 0) throw new Error(`A matrícula ${matricula} não está na lista da ficha.`);
+  const linha = page.locator('tr[data-ri]').nth(indice);
 
   await linha.locator('button').filter({ hasText: /Cadastrar|Avaliar/ }).first().click();
   await expect(page.locator(MATRICULA_DO_DIALOGO)).toHaveValue(matricula, {

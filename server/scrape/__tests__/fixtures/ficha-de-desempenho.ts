@@ -72,7 +72,8 @@ export interface EstudanteDoFixture {
 }
 
 /**
- * The _Ficha Desempenho_ list with a dialog that behaves like the portal's:
+ * The _Ficha Desempenho_ list (cells carry the reflow column title, as on the
+ * portal) with a dialog that behaves like the portal's:
  * the Salvar buttons keep the dialog's values as saved (in `window.__salvos`)
  * and move to the next or previous estudante; Fechar discards. Every button
  * click is recorded in `window.__cliques`.
@@ -97,7 +98,8 @@ export function portalDaFicha({
       ${menu('turma-SOM-CP-OBR', turma)}
       ${menu('fichaDesempenho-SOM-CP-OBR', ficha)}
       <table><tbody>${estudantes.map((e, i) => `<tr data-ri="${i}">
-        <td>${i + 1}</td><td>${e.matricula}</td>
+        <td><span class="ui-column-title">Ordem</span>${i + 1}</td>
+        <td><span class="ui-column-title">Matrícula</span>${e.matricula}</td>
         <td>${e.nome}<button type="button" onclick="abrir('${e.matricula}')">Cadastrar</button>
           Nome social: Situação: ${e.situacao}</td></tr>`).join('')}</tbody></table>
     </section>
