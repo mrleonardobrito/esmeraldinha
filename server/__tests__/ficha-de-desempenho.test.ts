@@ -138,8 +138,8 @@ describe('ficha de desempenho routes', () => {
     const atual = (await (await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`))).json()).previa;
     const previa = atual ? mudar(atual) : null;
     const corpo = previa
-      ? { versao: previa.atualizadaEm, estudantes: previa.estudantes.map((e: any) => ({ matricula: e.matricula, conceitos: e.conceitos })), gerais: previa.gerais, naoResolvidos: previa.naoResolvidos }
-      : { versao: 'nenhuma', estudantes: [], gerais: [], naoResolvidos: [] };
+      ? { versao: previa.atualizadaEm, areas: previa.areas, etapas: previa.etapas, estudantes: previa.estudantes.map((e: any) => ({ matricula: e.matricula, conceitos: e.conceitos })), gerais: previa.gerais, naoResolvidos: previa.naoResolvidos }
+      : { versao: 'nenhuma', areas: [0], etapas: [1], estudantes: [], gerais: [], naoResolvidos: [] };
     return app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos`, json(corpo)));
   }
 
@@ -197,6 +197,25 @@ describe('ficha de desempenho routes', () => {
     expect(plano.fichas.get('10315')).toEqual({ '0.0': ['RD', 'RD', 'R', 'R'] });
     const salva = (await (await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`))).json()).previa;
     expect(salva.estudantes[1].conceitos['0.0']).toEqual(['R', 'R', 'R', 'R']);
+  });
+
+  it('fills only the áreas and etapas checked on screen', async () => {
+    const { app, cadernetaId } = await comEstrutura();
+    await agenteDevolve(anaComDificuldade);
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia([1, 2, 3, 4], [0, 1]) }));
+    const acompanhar = await rodarSemPortal();
+
+    const inicio = await preencher(app, cadernetaId, (previa) => ({
+      ...previa,
+      areas: [1],
+      etapas: [1, 2],
+      estudantes: previa.estudantes.map((e: any) => ({ ...e, conceitos: { '1.0': ['RD', 'R', null, null] } })),
+    }));
+
+    expect(inicio.status).toBe(202);
+    const plano = vi.mocked(acompanhar).mock.calls[0][1];
+    expect(plano).toMatchObject({ areas: [1], etapas: [1, 2] });
+    expect(plano.fichas.get('10315')).toEqual({ '1.0': ['RD', 'R', null, null] });
   });
 
   it('refuses to fill with a matrícula outside the prévia', async () => {

@@ -19,6 +19,7 @@ export type {
   PreviaDaFicha,
 } from "@shared/ficha-de-desempenho";
 export {
+  ajustarPrevia,
   alterarConceito,
   aplicarNaFicha,
   chaveDaHabilidade,
@@ -88,6 +89,8 @@ export async function descartarPrevia(cadernetaId: string, turma?: string): Prom
 export async function iniciarPreenchimentoDaFicha(cadernetaId: string, previa: PreviaDaFicha, turma?: string): Promise<EstadoDoPreenchimento> {
   const body: PreviaEditada = {
     versao: previa.atualizadaEm,
+    areas: previa.areas,
+    etapas: previa.etapas,
     estudantes: previa.estudantes.map(({ matricula, conceitos }) => ({ matricula, conceitos })),
     gerais: previa.gerais,
     naoResolvidos: previa.naoResolvidos,
@@ -138,15 +141,4 @@ export function proximoConceito(conceito: Conceito): Conceito {
 /** How many unresolved names still carry exceções; only those block opening the portal. */
 export function pendenciasAntesDeAbrir(naoResolvidos: readonly { excecoes: readonly unknown[] }[]): number {
   return naoResolvidos.filter((item) => item.excecoes.length > 0).length;
-}
-
-/** Are the checked etapas and áreas the ones the prévia was generated with? */
-export function previaConfere(
-  previa: { etapas: readonly number[]; areas: readonly number[] },
-  etapas: readonly number[],
-  areas: readonly number[],
-): boolean {
-  const iguais = (a: readonly number[], b: readonly number[]) =>
-    a.length === b.length && [...a].sort((x, y) => x - y).every((valor, i) => valor === [...b].sort((x, y) => x - y)[i]);
-  return iguais(previa.etapas, etapas) && iguais(previa.areas, areas);
 }

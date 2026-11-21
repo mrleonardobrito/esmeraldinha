@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 import {
+  ajustarPrevia,
   ETAPAS_DA_FICHA,
   etapasSchema,
   fichaInicial,
@@ -11,7 +12,6 @@ import {
   type AreaDeConhecimento,
   type FichaPlanejada,
   type IndiceDaEtapa,
-  type PreviaDaFicha,
 } from '../../shared/ficha-de-desempenho';
 import { ArquivoIlegivelError, EnvioInvalidoError, OpenRouterError, OpenRouterNotConfiguredError } from '../ai/errors';
 import type { ArquivoEnviado } from '../ai/interpretar-envio';
@@ -213,29 +213,17 @@ fichaDeDesempenho.delete('/:id/ficha-de-desempenho/previas/atual', (context) => 
 });
 
 /**
- * One estudante's ficha as the screen left it: the prévia's habilidades only,
- * each row kept non-decreasing across etapas.
+ * Do the screen's rows use exactly the habilidades the ficha has now for the
+ * checked áreas? A renumbered área would move conceitos onto other habilidades.
  */
-function fichaDaTela(
-  gerada: FichaPlanejada,
-  editada: FichaPlanejada | undefined,
-  etapas: readonly IndiceDaEtapa[],
-): FichaPlanejada {
-  if (!editada) return gerada;
-  return Object.fromEntries(Object.keys(gerada).map((chave) => [chave, normalizarLinha(editada[chave] ?? gerada[chave], etapas)]));
-}
-
-/**
- * Does every área of the prévia still have exactly the habilidades it was
- * built with? A renumbered área would move conceitos onto other habilidades.
- */
-function mesmasHabilidades(previa: PreviaDaFicha, areas: readonly AreaDeConhecimento[]): boolean {
-  const chaves = new Set(Object.keys(previa.estudantes[0]?.conceitos ?? {}));
-  const esperadas = new Set(areas
-    .filter((area) => previa.areas.includes(area.indice))
+function mesmasHabilidades(conceitos: FichaPlanejada | undefined, areas: readonly number[], estrutura: readonly AreaDeConhecimento[]): boolean {
+  if (!areas.every((indice) => estrutura.some((area) => area.indice === indice))) return false;
+  if (!conceitos) return true;
+  const esperadas = new Set(estrutura
+    .filter((area) => areas.includes(area.indice))
     .flatMap((area) => area.habilidades.map((h) => chaveDaHabilidade(area.indice, h.indice))));
-  return previa.areas.every((indice) => areas.some((area) => area.indice === indice)) &&
-    chaves.size === esperadas.size && [...chaves].every((chave) => esperadas.has(chave));
+  const chaves = Object.keys(conceitos);
+  return chaves.length === esperadas.size && chaves.every((chave) => esperadas.has(chave));
 }
 
 const chaveDaExecucao = (caderneta: Caderneta) => `${caderneta.id}|${caderneta.turma}`;
@@ -268,25 +256,36 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/preenchimentos-assistidos', asy
     return context.json({ error: 'Há nomes nas observações que ainda não foram ligados a um estudante. Resolva ou ignore antes de preencher.' }, 422);
   }
   const estrutura = getEstruturaDaFicha(db, caderneta.professorId, caderneta.turma);
-  if (!estrutura || !mesmasHabilidades(previa, estrutura.areas)) {
+  if (!estrutura || !mesmasHabilidades(tela.data.estudantes[0]?.conceitos, tela.data.areas, estrutura.areas)) {
     return context.json({ error: 'A ficha mudou desde a prévia. Releia a ficha no portal e gere a prévia de novo.' }, 422);
   }
 
   const credenciais = await getProfessorCredenciais(db, createEncryptionPort(), caderneta.professorId);
   if (!credenciais) return context.json({ error: 'Professor não encontrado.' }, 404);
 
-  const rotulo = rotuloDasEtapas(previa.etapas);
+  // What gets filled is the prévia as the screen shows it: its áreas, its
+  // etapas, its edits — each row kept from decreasing.
+  const daTela = ajustarPrevia(
+    { ...previa, estudantes: previa.estudantes.map((e) => ({ ...e, conceitos: editados.get(e.matricula) ?? e.conceitos })) },
+    estrutura.areas,
+    tela.data.areas,
+    tela.data.etapas,
+  );
+  const rotulo = rotuloDasEtapas(daTela.etapas);
   const plano = {
     periodoLetivo: periodoLetivoDaTurma(db, caderneta.professorId, caderneta.turma),
     turma: caderneta.turma,
-    etapas: previa.etapas,
+    etapas: daTela.etapas,
     rotuloDasEtapas: rotulo,
-    areas: previa.areas,
+    areas: daTela.areas,
     // The situação is read now, not when the prévia was made: an estudante
     // transferred since then must not be filled.
     estudantes: listEstudantes(db, caderneta.id, caderneta.turma)
       .map(({ matricula, nome, situacao }) => ({ matricula, nome, situacao })),
-    fichas: new Map(previa.estudantes.map((e) => [e.matricula, fichaDaTela(e.conceitos, editados.get(e.matricula), previa.etapas)])),
+    fichas: new Map(daTela.estudantes.map((e) => [
+      e.matricula,
+      Object.fromEntries(Object.entries(e.conceitos).map(([chave, linha]) => [chave, normalizarLinha(linha, daTela.etapas)])),
+    ])),
     estrutura: estrutura.areas,
   };
 

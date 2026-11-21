@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { nomeDaArea, pendenciasAntesDeAbrir, previaConfere, proximoConceito } from "@/lib/fichas-de-desempenho";
+import { nomeDaArea, pendenciasAntesDeAbrir, proximoConceito } from "@/lib/fichas-de-desempenho";
 
 describe("nomeDaArea", () => {
   it("drops the série and the descritores prefix of fundamental áreas", () => {
@@ -27,18 +27,5 @@ describe("pendenciasAntesDeAbrir", () => {
   it("only an unresolved name with exceções blocks opening the portal", () => {
     expect(pendenciasAntesDeAbrir([{ excecoes: [] }])).toBe(0);
     expect(pendenciasAntesDeAbrir([{ excecoes: [] }, { excecoes: [{ area: 0, habilidade: 0, conceito: "RD" }] }])).toBe(1);
-  });
-});
-
-describe("previaConfere", () => {
-  const previa = { etapas: [1, 2, 3, 4] as (1 | 2 | 3 | 4)[], areas: [0, 3] };
-
-  it("is true when the checked etapas and áreas are the prévia's, in any order", () => {
-    expect(previaConfere(previa, [4, 3, 2, 1], [3, 0])).toBe(true);
-  });
-
-  it("is false when an etapa or área was checked or unchecked after the prévia", () => {
-    expect(previaConfere(previa, [1, 2], [0, 3])).toBe(false);
-    expect(previaConfere(previa, [1, 2, 3, 4], [0])).toBe(false);
   });
 });

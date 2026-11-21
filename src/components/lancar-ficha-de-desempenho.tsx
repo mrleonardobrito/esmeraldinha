@@ -40,7 +40,7 @@ import {
   loadPrevia,
   nomeDaArea,
   pendenciasAntesDeAbrir,
-  previaConfere,
+  ajustarPrevia,
   TODAS_AS_ETAPAS,
   type EstadoDoPreenchimento,
   type EstruturaDaFicha,
@@ -85,6 +85,8 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
   const [arquivos, setArquivos] = React.useState<File[]>([]);
   const [gerando, setGerando] = React.useState(false);
   const [previa, setPrevia] = React.useState<PreviaDaFicha | null>(null);
+  /** The áreas the observações were read for; others entered the prévia with R. */
+  const [areasGeradas, setAreasGeradas] = React.useState<number[]>([]);
   const [execucao, setExecucao] = React.useState<EstadoDoPreenchimento | null>(null);
   /** With a prévia, the modal shows only its table; the setup comes back on demand. */
   const [vendoPrevia, setVendoPrevia] = React.useState(false);
@@ -106,6 +108,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
         if (!vivo || !salva) return;
         setPrevia(salva);
         setVendoPrevia(true);
+        setAreasGeradas(salva.areas);
         setAreas(salva.areas);
         setEtapas(salva.etapas);
       })
@@ -124,6 +127,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
   }, [emAndamento, caderneta.id, turma]);
 
   const ficha = estrutura === "carregando" ? null : estrutura;
+  const areasNovas = ficha?.areas.filter((area) => areas.includes(area.indice) && !areasGeradas.includes(area.indice)) ?? [];
   const quantosAvisos = previa
     ? previa.gerais.length + previa.naoResolvidos.length + previa.descartadas.length + (previa.resposta ? 1 : 0)
     : 0;
@@ -133,6 +137,13 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
     const encontrada = ficha?.areas.find((a) => a.indice === area);
     const h = encontrada?.habilidades.find((candidata) => candidata.indice === habilidade);
     return `${encontrada ? nomeDaArea(encontrada.titulo) : `Área ${area}`} · ${h ? `${h.numero} ${h.texto}` : `habilidade ${habilidade}`}`;
+  }
+
+  /** Checking or unchecking an área or etapa changes the prévia at once. */
+  function marcar(novasAreas: number[], novasEtapas: IndiceDaEtapa[]) {
+    setAreas(novasAreas);
+    setEtapas(novasEtapas);
+    if (previa && ficha) setPrevia(ajustarPrevia(previa, ficha.areas, novasAreas, novasEtapas));
   }
 
   /** Edits live on screen only: they go to the portal with "Preencher no portal". */
@@ -165,6 +176,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
     try {
       const nova = await gerarPrevia(caderneta.id, { areas, etapas, texto, arquivos }, undefined, turma);
       setPrevia(nova);
+      setAreasGeradas(nova.areas);
       setVendoPrevia(true);
       setAvisosAbertos(pendenciasAntesDeAbrir(nova.naoResolvidos) > 0);
     } catch (error) {
@@ -324,8 +336,10 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
                       id={id}
                       checked={etapas.includes(etapa)}
                       disabled={emAndamento}
-                      onCheckedChange={(marcado) => setEtapas((atuais) =>
-                        marcado ? [...atuais, etapa].sort((a, b) => a - b) : atuais.filter((e) => e !== etapa))}
+                      onCheckedChange={(marcado) => marcar(
+                        areas,
+                        marcado ? [...etapas, etapa].sort((a, b) => a - b) : etapas.filter((e) => e !== etapa),
+                      )}
                     />
                     <Label htmlFor={id} className="font-normal">{ETAPAS_DA_FICHA[etapa - 1]}</Label>
                   </div>
@@ -368,8 +382,10 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
                         id={id}
                         checked={areas.includes(area.indice)}
                         disabled={emAndamento}
-                        onCheckedChange={(marcado) => setAreas((atuais) =>
-                          marcado ? [...atuais, area.indice].sort((a, b) => a - b) : atuais.filter((i) => i !== area.indice))}
+                        onCheckedChange={(marcado) => marcar(
+                          marcado ? [...areas, area.indice].sort((a, b) => a - b) : areas.filter((i) => i !== area.indice),
+                          etapas,
+                        )}
                       />
                       <Label htmlFor={id} className="flex-1 font-normal" title={area.titulo}>
                         {nomeDaArea(area.titulo)}
@@ -437,9 +453,10 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
             </section>
           )}
 
-          {previa && !previaConfere(previa, etapas, areas) && (
+          {previa && areasNovas.length > 0 && (
             <p className="rounded-xl bg-yellow-500/10 px-3 py-2 text-sm">
-              As etapas ou áreas marcadas não são as da prévia salva. Gere a prévia de novo para aplicá-las.
+              {areasNovas.map((area) => nomeDaArea(area.titulo)).join(", ")} entrou na prévia com R em tudo: as observações
+              só valem para essa área se você gerar a prévia de novo.
             </p>
           )}
 
@@ -467,8 +484,8 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
             <Button
               onClick={() => void preencher()}
               disabled={
-                emAndamento || gerando ||
-                !previaConfere(previa, etapas, areas) || pendenciasAntesDeAbrir(previa.naoResolvidos) > 0
+                emAndamento || gerando || areas.length === 0 || etapas.length === 0 ||
+                pendenciasAntesDeAbrir(previa.naoResolvidos) > 0
               }
             >
               {emAndamento ? <IconLoader data-icon="inline-start" className="animate-spin" /> : <IconExternalLink data-icon="inline-start" />}

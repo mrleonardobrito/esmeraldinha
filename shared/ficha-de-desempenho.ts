@@ -165,6 +165,47 @@ export function fichaInicial(
   return aplicarNaFicha(ficha, excecoes, etapas);
 }
 
+/**
+ * The prévia following the áreas and etapas checked on screen, without
+ * reading the observações again: an unchecked área or etapa leaves the
+ * prévia, a checked área comes in with R, and a checked etapa copies the
+ * nearest etapa before it (or after it, when it is the first) so no row
+ * decreases.
+ */
+export function ajustarPrevia(
+  previa: PreviaDaFicha,
+  estrutura: readonly AreaDeConhecimento[],
+  areas: readonly number[],
+  etapas: readonly IndiceDaEtapa[],
+): PreviaDaFicha {
+  const chosen = ordenadas(etapas);
+  const chaves = estrutura
+    .filter((area) => areas.includes(area.indice))
+    .flatMap((area) => area.habilidades.map((h) => chaveDaHabilidade(area.indice, h.indice)));
+
+  const ajustarLinha = (linha: LinhaDaFicha | undefined): LinhaDaFicha => {
+    const antiga = linha ?? TODAS_AS_ETAPAS.map(() => 'R' as Conceito);
+    return TODAS_AS_ETAPAS.map((etapa) => {
+      if (!chosen.includes(etapa)) return null;
+      const propria = antiga[etapa - 1];
+      if (propria) return propria;
+      const antes = [...TODAS_AS_ETAPAS].reverse().find((outra) => outra < etapa && antiga[outra - 1]);
+      const depois = TODAS_AS_ETAPAS.find((outra) => outra > etapa && antiga[outra - 1]);
+      return (antes ? antiga[antes - 1] : depois ? antiga[depois - 1] : 'R') ?? 'R';
+    });
+  };
+
+  return {
+    ...previa,
+    areas: estrutura.filter((area) => areas.includes(area.indice)).map((area) => area.indice),
+    etapas: chosen,
+    estudantes: previa.estudantes.map((estudante) => ({
+      ...estudante,
+      conceitos: Object.fromEntries(chaves.map((chave) => [chave, ajustarLinha(estudante.conceitos[chave])])),
+    })),
+  };
+}
+
 /** How many cells of a ficha are below R. */
 export function contarExcecoes(ficha: FichaPlanejada): number {
   return Object.values(ficha).flat().filter((c) => c === 'RD' || c === 'NR').length;
@@ -186,6 +227,9 @@ export const etapasSchema = z.array(etapaSchema).min(1);
 export const previaEditadaSchema = z.object({
   /** The `atualizadaEm` of the prévia these edits were made on. */
   versao: z.string().min(1),
+  /** The áreas and etapas checked on screen: what gets filled. */
+  areas: z.array(indice).min(1),
+  etapas: etapasSchema,
   estudantes: z.array(z.object({
     matricula: z.string().trim().min(1),
     conceitos: z.record(z.string().regex(/^\d+\.\d+$/), z.array(conceitoSchema.nullable()).length(4)),
