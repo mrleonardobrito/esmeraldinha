@@ -47,13 +47,26 @@ describe('classificações dos estudantes', () => {
       { matricula: '1', classificacao: 'Abaixo da média' },
       { matricula: '2', classificacao: 'Na média' },
     ]);
-    salvarClassificacoes(db, 'prof-1', 'T', [{ matricula: '1', classificacao: 'Acima da média' }]);
+    salvarClassificacoes(db, 'prof-1', 'T', [{ matricula: '1', classificacao: 'Na média' }]);
 
     expect(listClassificacoes(db, 'prof-1', 'T')).toEqual({
-      '1': 'Acima da média',
+      '1': 'Na média',
       '2': 'Na média',
     });
     expect(listClassificacoes(db, 'prof-1', 'U')).toEqual({});
+  });
+
+  it('keeps only the classificações that differ from the padrão, so the padrão still moves the rest', () => {
+    setClassificacaoPadrao(db, 'prof-1', 'T', 'Acima da média');
+    salvarClassificacoes(db, 'prof-1', 'T', [{ matricula: '1', classificacao: 'Abaixo da média' }]);
+
+    salvarClassificacoes(db, 'prof-1', 'T', [
+      { matricula: '1', classificacao: 'Acima da média' },
+      { matricula: '2', classificacao: 'Acima da média' },
+      { matricula: '3', classificacao: 'Na média' },
+    ]);
+
+    expect(listClassificacoes(db, 'prof-1', 'T')).toEqual({ '3': 'Na média' });
   });
 
   it('goes away with the professor', () => {

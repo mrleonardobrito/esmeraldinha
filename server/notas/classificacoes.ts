@@ -50,6 +50,11 @@ export function listClassificacoes(
   return classificacoes;
 }
 
+/**
+ * Remembers each estudante's classificação. Only the ones that differ from the
+ * turma's padrão are kept: an estudante who matches it goes back to following
+ * the padrão, so changing the padrão later still moves them.
+ */
 export function salvarClassificacoes(
   db: DatabaseSync,
   professorId: string,
@@ -62,10 +67,16 @@ export function salvarClassificacoes(
      ON CONFLICT (professor_id, turma, matricula) DO UPDATE SET classificacao = excluded.classificacao`,
   );
 
+  const remover = db.prepare(
+    'DELETE FROM classificacoes_dos_estudantes WHERE professor_id = ? AND turma = ? AND matricula = ?',
+  );
+  const padrao = getClassificacaoPadrao(db, professorId, turma);
+
   db.exec('BEGIN');
   try {
     for (const { matricula, classificacao } of itens) {
-      upsert.run(professorId, turma, matricula, classificacao);
+      if (classificacao === padrao) remover.run(professorId, turma, matricula);
+      else upsert.run(professorId, turma, matricula, classificacao);
     }
     db.exec('COMMIT');
   } catch (error) {

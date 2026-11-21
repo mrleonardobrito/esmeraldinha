@@ -247,7 +247,9 @@ scaled when an etapa's avaliações do not add up to 10. Choosing one generates
 the top of its band (10, 7 or 5), split across the avaliações in steps of
 0,5; editing the nota final or an avaliação moves the classificação to the
 band the sum falls in. Remembered per estudante of the turma, across every
-etapa and disciplina; the portal's notas win when they disagree.
+etapa and disciplina, when it differs from the classificação padrão; an
+estudante who matches the padrão keeps following it. The portal's notas win
+when they disagree.
 _Avoid_: conceito, nível, faixa
 
 **classificação padrão**:
