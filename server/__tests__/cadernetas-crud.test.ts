@@ -925,4 +925,85 @@ describe('cadernetas CRUD', () => {
 
     expect(response.status).toBe(404);
   });
+
+  describe('classificações do boletim', () => {
+    const boletim = (app: Awaited<ReturnType<typeof freshApp>>, id: string) =>
+      app.fetch(request(`/${id}/etapas/1%C2%AA%20Etapa/boletim`)).then((response) => response.json());
+
+    const padrao = (classificacao: string) => ({
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ classificacao }),
+    });
+
+    it('devolve o padrão inicial e nenhuma classificação numa caderneta nova', async () => {
+      const app = await freshApp();
+      const { id } = (await (await cadastrar(app)).json()) as { id: string };
+      await esperarSincronizacao(app, id);
+
+      await expect(boletim(app, id)).resolves.toMatchObject({
+        classificacaoPadrao: 'Acima da média',
+        classificacoes: {},
+      });
+    });
+
+    it('guarda a classificação padrão da turma e recusa uma que não existe', async () => {
+      const app = await freshApp();
+      const { id } = (await (await cadastrar(app)).json()) as { id: string };
+      await esperarSincronizacao(app, id);
+
+      const salvo = await app.fetch(request(`/${id}/boletim/classificacao-padrao`, padrao('Na média')));
+      expect(salvo.status).toBe(200);
+      await expect(salvo.json()).resolves.toEqual({ classificacao: 'Na média' });
+      await expect(boletim(app, id)).resolves.toMatchObject({ classificacaoPadrao: 'Na média' });
+
+      const recusado = await app.fetch(request(`/${id}/boletim/classificacao-padrao`, padrao('Ótimo')));
+      expect(recusado.status).toBe(400);
+      await expect(recusado.json()).resolves.toEqual({ error: 'Informe uma classificação válida.' });
+    });
+
+    it('guarda as classificações dos estudantes quando o preenchimento dá certo', async () => {
+      const app = await freshApp();
+      const { id } = (await (await cadastrar(app)).json()) as { id: string };
+      await esperarSincronizacao(app, id);
+
+      const response = await app.fetch(
+        request(
+          `/${id}/boletim/preenchimentos-assistidos`,
+          json({
+            etapa: '1ª Etapa',
+            notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 5 }],
+            classificacoes: [{ matricula: '2026001', classificacao: 'Abaixo da média' }],
+          }),
+        ),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(boletim(app, id)).resolves.toMatchObject({
+        classificacoes: { '2026001': 'Abaixo da média' },
+      });
+    });
+
+    it('não guarda as classificações quando o portal falha', async () => {
+      const app = await freshApp();
+      const { id } = (await (await cadastrar(app)).json()) as { id: string };
+      await esperarSincronizacao(app, id);
+      const { naSessaoHeaded } = await import('../sessoes-headed');
+      vi.mocked(naSessaoHeaded).mockRejectedValueOnce(new Error('portal fora do ar'));
+
+      const response = await app.fetch(
+        request(
+          `/${id}/boletim/preenchimentos-assistidos`,
+          json({
+            etapa: '1ª Etapa',
+            notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 5 }],
+            classificacoes: [{ matricula: '2026001', classificacao: 'Abaixo da média' }],
+          }),
+        ),
+      );
+
+      expect(response.status).toBe(502);
+      await expect(boletim(app, id)).resolves.toMatchObject({ classificacoes: {} });
+    });
+  });
 });

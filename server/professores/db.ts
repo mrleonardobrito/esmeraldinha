@@ -205,6 +205,24 @@ export const SCHEMA = `
     lida_em TEXT NOT NULL,
     PRIMARY KEY (professor_id, turma)
   );
+
+  -- Classificações are typed by the auxiliar, not scraped. They are keyed by
+  -- professor and turma rather than caderneta, so they survive turmas de
+  -- redução being regrouped into another caderneta.
+  CREATE TABLE IF NOT EXISTS classificacoes_padrao (
+    professor_id TEXT NOT NULL REFERENCES professores(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    classificacao TEXT NOT NULL,
+    PRIMARY KEY (professor_id, turma)
+  );
+
+  CREATE TABLE IF NOT EXISTS classificacoes_dos_estudantes (
+    professor_id TEXT NOT NULL REFERENCES professores(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    matricula TEXT NOT NULL,
+    classificacao TEXT NOT NULL,
+    PRIMARY KEY (professor_id, turma, matricula)
+  );
 `;
 
 /**
