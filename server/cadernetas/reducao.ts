@@ -11,6 +11,8 @@ const CACHE_TABLES = [
   'caderneta_avaliacoes',
   'caderneta_notas',
   'caderneta_notas_do_estudante',
+  // Keyed by turma too, so the merged turmas' prévias never collide.
+  'ficha_previas',
 ] as const;
 
 interface Group {
