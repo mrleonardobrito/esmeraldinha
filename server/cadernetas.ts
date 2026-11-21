@@ -58,6 +58,7 @@ import { periodoLetivoDaTurma, replaceTurmas } from './turmas/store';
 import { reconcileCadernetasDeReducao } from './cadernetas/reducao';
 import { sincronizarEmSegundoPlano } from './cadernetas/sincronizacao';
 import { preenchimentosDeConteudo } from './cadernetas/preenchimento-de-conteudos';
+import { fichaDeDesempenho } from './cadernetas/ficha-de-desempenho';
 import { env } from './env';
 import { createEncryptionPort } from './encryption';
 import { getDb } from './professores/db';
@@ -213,7 +214,7 @@ cadernetas.use('*', async (context, next) => {
   const match = context.req.path.match(/\/api\/cadernetas\/([^/]+)(\/.*)?$/);
   if (!match || ['sessoes', 'turmas'].includes(match[1])) return next();
   const turma = context.req.query('turma');
-  const scoped = /^\/(etapas|estudantes|conteudos|boletim)(\/|$)/.test(match[2] ?? '');
+  const scoped = /^\/(etapas|estudantes|conteudos|boletim|ficha-de-desempenho)(\/|$)/.test(match[2] ?? '');
   if (turma !== undefined || scoped) {
     const caderneta = getCaderneta(getDb(), decodeURIComponent(match[1]));
     if (turma !== undefined && !caderneta.turmas.includes(turma)) {
@@ -227,6 +228,7 @@ cadernetas.use('*', async (context, next) => {
 });
 
 cadernetas.route('/', preenchimentosDeConteudo);
+cadernetas.route('/', fichaDeDesempenho);
 
 cadernetas.post('/sessoes', async (context) => {
   const body = await context.req.json().catch(() => null);
