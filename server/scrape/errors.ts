@@ -38,3 +38,14 @@ export class OptionNotFoundError extends Error {
     this.name = 'OptionNotFoundError';
   }
 }
+
+/** The ficha offers answers other than R, RD and NR, which this version does not handle. */
+export class FichaNaoSuportadaError extends Error {
+  constructor(readonly opcoes: readonly string[]) {
+    super(
+      'Esta ficha de desempenho usa respostas que a Esmeraldinha ainda não preenche: ' +
+        `${opcoes.join(', ')}. Preencha-a direto no portal.`,
+    );
+    this.name = 'FichaNaoSuportadaError';
+  }
+}

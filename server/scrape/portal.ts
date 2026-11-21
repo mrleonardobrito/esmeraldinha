@@ -64,7 +64,7 @@ const AMBIENTE = {
 const DIALOGO_DE_AMBIENTE = '#dialogConfiguracoesAmbiente';
 
 // The portal includes the dropdown icon in the Etapa link's accessible name.
-const ETAPA_MENU_NAME = /^Etapa\b/;
+export const ETAPA_MENU_NAME = /^Etapa\b/;
 
 /**
  * A turma da EJA é multisseriada, e o portal a serve por outro componente:
@@ -73,7 +73,7 @@ const ETAPA_MENU_NAME = /^Etapa\b/;
  * diz qual usar é a página, depois que a etapa foi escolhida e a tela
  * carregou.
  */
-async function filtroDeTurma(page: Page): Promise<string> {
+export async function filtroDeTurma(page: Page): Promise<string> {
   const multi = page.locator(`[id$="${FILTER.turmaComMulti}"]`);
 
   return (await multi.count()) > 0 ? FILTER.turmaComMulti : FILTER.turma;
