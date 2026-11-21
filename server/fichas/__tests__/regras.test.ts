@@ -35,7 +35,7 @@ describe('planejarEstudante', () => {
 
     expect(plano.jaPreenchidos).toEqual([{ area: 0, habilidade: 0, etapa: 1, conceito: 'R' }]);
     expect(plano.escritas.map((e) => [e.etapa, e.conceito])).toEqual([[2, 'R'], [3, 'R'], [4, 'R']]);
-    expect(plano.mantidos).toEqual([{ area: 0, habilidade: 0, etapa: 2, planejado: 'RD', escrito: 'R', etapaDoPiso: 1 }]);
+    expect(plano.mantidos).toEqual([{ area: 0, habilidade: 0, etapa: 2, planejado: 'RD', escrito: 'R', etapaDeReferencia: 1 }]);
   });
 
   it('uses a portal conceito outside the run as floor', () => {
@@ -46,7 +46,21 @@ describe('planejarEstudante', () => {
     });
 
     expect(plano.escritas).toEqual([{ area: 0, habilidade: 0, etapa: 3, conceito: 'RD' }]);
-    expect(plano.mantidos[0]).toMatchObject({ etapa: 3, planejado: 'NR', escrito: 'RD', etapaDoPiso: 1 });
+    expect(plano.mantidos[0]).toMatchObject({ etapa: 3, planejado: 'NR', escrito: 'RD', etapaDeReferencia: 1 });
+  });
+
+  it('caps earlier etapas at a lower conceito a later etapa already has on the portal', () => {
+    const plano = planejarEstudante({
+      lidas: [lida(0, 0, { 3: 'RD' })],
+      etapas: [1, 2, 3, 4],
+      planejada: { '0.0': ['R', 'R', 'R', 'R'] },
+    });
+
+    expect(plano.escritas.map((e) => [e.etapa, e.conceito])).toEqual([[1, 'RD'], [2, 'RD'], [4, 'R']]);
+    expect(plano.mantidos).toEqual([
+      { area: 0, habilidade: 0, etapa: 1, planejado: 'R', escrito: 'RD', etapaDeReferencia: 3 },
+      { area: 0, habilidade: 0, etapa: 2, planejado: 'R', escrito: 'RD', etapaDeReferencia: 3 },
+    ]);
   });
 
   it('never writes etapas outside the run', () => {

@@ -453,11 +453,11 @@ function Andamento({ execucao, descrever }: {
       {execucao.erro && <p className="text-destructive">{execucao.erro}</p>}
       {mantidos.map((p) => (
         <div key={p.matricula}>
-          <span className="font-medium">{p.nome}</span>: conceito mantido por não poder diminuir
+          <span className="font-medium">{p.nome}</span>: conceito ajustado para não diminuir entre etapas
           <ul className="text-xs text-muted-foreground">
             {p.mantidos.map((m) => (
               <li key={`${m.area}.${m.habilidade}.${m.etapa}`}>
-                {descrever(m)} — {ETAPAS_DA_FICHA[m.etapa - 1]}: planejado {m.planejado}, mantido {m.escrito} da {ETAPAS_DA_FICHA[m.etapaDoPiso - 1]}
+                {descrever(m)} — {ETAPAS_DA_FICHA[m.etapa - 1]}: planejado {m.planejado}, escrito {m.escrito} por causa da {ETAPAS_DA_FICHA[m.etapaDeReferencia - 1]} no portal
               </li>
             ))}
           </ul>

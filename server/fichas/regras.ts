@@ -24,14 +24,18 @@ export interface Escrita {
 
 export interface PlanoDoEstudante {
   escritas: Escrita[];
-  /** Planned below an earlier etapa: the earlier conceito was written instead. */
+  /**
+   * Planned conceitos that would have made the ficha decrease between etapas:
+   * below an earlier etapa, or above a later one already on the portal. The
+   * conceito of `etapaDeReferencia` was written instead.
+   */
   mantidos: {
     area: number;
     habilidade: number;
     etapa: IndiceDaEtapa;
     planejado: Conceito;
     escrito: Conceito;
-    etapaDoPiso: 1 | 2 | 3;
+    etapaDeReferencia: IndiceDaEtapa;
   }[];
   /** Already filled on the portal in an etapa of the run, so left untouched. */
   jaPreenchidos: { area: number; habilidade: number; etapa: IndiceDaEtapa; conceito: Conceito }[];
@@ -79,9 +83,30 @@ export function planejarEstudante({
       }
       if (!naExecucao) continue;
 
-      const escrito: Conceito = piso && posicao(planejado) < posicao(piso.conceito) ? piso.conceito : planejado;
-      if (piso && escrito !== planejado) {
-        plano.mantidos.push({ area, habilidade, etapa, planejado, escrito, etapaDoPiso: piso.etapa });
+      // The ceiling is the lowest conceito a later etapa already has on the
+      // portal: writing above it would make the ficha decrease there.
+      let teto: { conceito: Conceito; etapa: IndiceDaEtapa } | null = null;
+      for (const depois of [2, 3, 4] as const) {
+        const valor = conceitos[depois];
+        if (depois > etapa && valor !== null && (teto === null || posicao(valor) < posicao(teto.conceito))) {
+          teto = { conceito: valor, etapa: depois };
+        }
+      }
+
+      let escrito: Conceito = planejado;
+      let referencia: IndiceDaEtapa | null = null;
+      if (piso && posicao(escrito) < posicao(piso.conceito)) {
+        escrito = piso.conceito;
+        referencia = piso.etapa;
+      }
+      // When the portal itself already decreases (an earlier etapa above a
+      // later one), the earlier etapa wins: the floor is not lowered.
+      if (teto && posicao(escrito) > posicao(teto.conceito) && (!piso || posicao(piso.conceito) <= posicao(teto.conceito))) {
+        escrito = teto.conceito;
+        referencia = teto.etapa;
+      }
+      if (referencia !== null && escrito !== planejado) {
+        plano.mantidos.push({ area, habilidade, etapa, planejado, escrito, etapaDeReferencia: referencia });
       }
       plano.escritas.push({ area, habilidade, etapa, conceito: escrito });
       piso = comPiso(piso, escrito, etapa);

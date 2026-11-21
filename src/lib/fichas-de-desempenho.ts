@@ -36,7 +36,7 @@ export interface EstadoDoPreenchimento {
     matricula: string;
     nome: string;
     escritas: number;
-    mantidos: { area: number; habilidade: number; etapa: number; planejado: string; escrito: string; etapaDoPiso: number }[];
+    mantidos: { area: number; habilidade: number; etapa: number; planejado: string; escrito: string; etapaDeReferencia: number }[];
     jaPreenchidos: number;
   }[];
   pulados: { matricula: string; nome: string; motivo: string }[];
