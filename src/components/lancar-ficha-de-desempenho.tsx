@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Caderneta } from "@/lib/cadernetas";
 import {
+  aplicarExcecoes,
   excecoesParaEnviar,
   iniciarPreenchimentoDaFicha,
   interpretarObservacoes,
@@ -32,6 +33,8 @@ import {
   loadEstadoDoPreenchimento,
   loadEstruturaDaFicha,
   nomeDaArea,
+  pendenciasAntesDeAbrir,
+  type AreaDeConhecimento,
   type EstadoDoPreenchimento,
   type EstruturaDaFicha,
   type Excecao,
@@ -117,6 +120,8 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
       const lida = await lerEstruturaDaFicha(caderneta.id, turma);
       setEstrutura(lida);
       setAreas((atuais) => atuais.filter((indice) => lida.areas.some((a) => a.indice === indice)));
+      // The review pointed at the old áreas and habilidades: read the observações again.
+      setLidas(null);
     } catch (error) {
       setErro(mensagemDe(error, "Não foi possível ler a ficha no portal."));
     } finally {
@@ -141,10 +146,7 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
   }
 
   function adicionar(matricula: string, excecoes: readonly (Excecao & { trecho?: string })[], trecho: string) {
-    setRevisao((atual) => ({
-      ...atual,
-      [matricula]: [...(atual[matricula] ?? []), ...excecoes.map((e) => ({ ...e, trecho: e.trecho ?? trecho }))],
-    }));
+    setRevisao((atual) => aplicarExcecoes(atual, matricula, excecoes, trecho));
   }
 
   async function abrirNoPortal() {
@@ -162,6 +164,10 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
 
   const comExcecao = Object.entries(revisao).filter(([, excecoes]) => excecoes.length > 0);
   const nomeDe = (matricula: string) => turmaDaCaderneta.find((e) => e.matricula === matricula)?.nome ?? matricula;
+  const escritoComo = (matricula: string) => {
+    const escrito = lidas?.estudantes.find((e) => e.matricula === matricula)?.escrito;
+    return escrito && escrito.toLocaleUpperCase("pt-BR") !== nomeDe(matricula) ? escrito : null;
+  };
 
   return (
     <Dialog open onOpenChange={(aberto) => !aberto && onClose()}>
@@ -297,6 +303,12 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
               {naoResolvidos.map((item, indice) => (
                 <div key={`${item.estudante}-${indice}`} className="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm">
                   <span>“{item.estudante}”: {item.motivo}</span>
+                  {item.excecoes.length > 0 && (
+                    <ul className="text-xs text-muted-foreground">
+                      {item.excecoes.map((e) => <li key={`${e.area}.${e.habilidade}`}>{e.conceito} · {descreverHabilidade(e)}</li>)}
+                    </ul>
+                  )}
+                  <div className="flex flex-wrap gap-2">
                   <select
                     className="h-9 rounded-md border bg-background px-3 text-foreground"
                     defaultValue=""
@@ -311,20 +323,25 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
                     {(item.candidatos.length > 0 ? turmaDaCaderneta.filter((e) => item.candidatos.includes(e.matricula)) : ativos)
                       .map((e) => <option key={e.matricula} value={e.matricula}>{e.nome}</option>)}
                   </select>
+                  <Button size="sm" variant="ghost" onClick={() => setNaoResolvidos((atuais) => atuais.filter((_, i) => i !== indice))}>
+                    Ignorar
+                  </Button>
+                  </div>
                 </div>
               ))}
 
               {gerais.map((geral, indice) => (
                 <div key={indice} className="flex flex-col gap-2 rounded-xl border px-3 py-2 text-sm">
-                  <span>Sobre a turma: “{geral.trecho}”</span>
+                  <span>{geral.estudante ? `Sobre ${geral.estudante.nome}` : "Sobre a turma"}: “{geral.trecho}”</span>
                   <ul className="text-xs text-muted-foreground">
                     {geral.excecoes.map((e) => <li key={`${e.area}.${e.habilidade}`}>{e.conceito} · {descreverHabilidade(e)}</li>)}
                   </ul>
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" onClick={() => {
-                      for (const estudante of ativos) adicionar(estudante.matricula, geral.excecoes, geral.trecho);
+                      const alvos = geral.estudante ? [geral.estudante.matricula] : ativos.map((e) => e.matricula);
+                      for (const matricula of alvos) adicionar(matricula, geral.excecoes, geral.trecho);
                       setGerais((atuais) => atuais.filter((_, i) => i !== indice));
-                    }}>Aplicar a todos</Button>
+                    }}>{geral.estudante ? `Aplicar a ${geral.estudante.nome}` : "Aplicar a todos"}</Button>
                     <Button size="sm" variant="ghost" onClick={() => setGerais((atuais) => atuais.filter((_, i) => i !== indice))}>
                       Descartar
                     </Button>
@@ -337,7 +354,10 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
               )}
               {comExcecao.map(([matricula, excecoes]) => (
                 <div key={matricula} className="flex flex-col gap-1 rounded-xl border px-3 py-2">
-                  <span className="text-sm font-medium">{nomeDe(matricula)}</span>
+                  <span className="text-sm font-medium">
+                    {nomeDe(matricula)}
+                    {escritoComo(matricula) && <span className="font-normal text-muted-foreground"> — escrito como “{escritoComo(matricula)}”</span>}
+                  </span>
                   <ul className="flex flex-col gap-1.5">
                     {excecoes.map((excecao, indice) => (
                       <li key={`${excecao.area}.${excecao.habilidade}.${indice}`} className="flex items-start gap-2 text-sm">
@@ -371,6 +391,13 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
                   </ul>
                 </div>
               ))}
+              {ficha && (
+                <NovaExcecao
+                  estudantes={ativos}
+                  areas={ficha.areas.filter((area) => areas.includes(area.indice))}
+                  onAdicionar={(matricula, excecao) => adicionar(matricula, [excecao], "Adicionada pelo auxiliar")}
+                />
+              )}
               <p className="text-sm text-muted-foreground">
                 {Math.max(ativos.length - comExcecao.length, 0)} estudante(s) ficam com R em todas as habilidades escolhidas.
               </p>
@@ -384,7 +411,7 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Fechar</Button>
-          <Button onClick={() => void abrirNoPortal()} disabled={!lidas || emAndamento || naoResolvidos.length > 0 || areas.length === 0}>
+          <Button onClick={() => void abrirNoPortal()} disabled={!lidas || emAndamento || pendenciasAntesDeAbrir(naoResolvidos) > 0 || areas.length === 0}>
             {emAndamento ? <IconLoader data-icon="inline-start" className="animate-spin" /> : <IconExternalLink data-icon="inline-start" />}
             {emAndamento ? "Preenchimento em andamento" : "Abrir no portal"}
           </Button>
@@ -432,5 +459,53 @@ function Andamento({ execucao, descrever }: {
         <p key={p.matricula} className="text-muted-foreground">{p.nome || p.matricula} não foi preenchido: {p.motivo}</p>
       ))}
     </section>
+  );
+}
+
+/** Lets the auxiliar add an exceção the agent missed. */
+function NovaExcecao({ estudantes, areas, onAdicionar }: {
+  estudantes: { matricula: string; nome: string }[];
+  areas: AreaDeConhecimento[];
+  onAdicionar: (matricula: string, excecao: Excecao) => void;
+}) {
+  const [matricula, setMatricula] = React.useState("");
+  const [area, setArea] = React.useState<number | null>(null);
+  const [habilidade, setHabilidade] = React.useState<number | null>(null);
+  const [conceito, setConceito] = React.useState<"RD" | "NR">("RD");
+  const escolhida = areas.find((a) => a.indice === area);
+  const campo = "h-9 rounded-md border bg-background px-2 text-sm text-foreground";
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed px-3 py-2">
+      <span className="text-sm font-medium">Adicionar exceção</span>
+      <select className={campo} value={matricula} aria-label="Estudante" onChange={(e) => setMatricula(e.target.value)}>
+        <option value="">Estudante</option>
+        {estudantes.map((e) => <option key={e.matricula} value={e.matricula}>{e.nome}</option>)}
+      </select>
+      <select className={campo} value={area ?? ""} aria-label="Área de conhecimento" onChange={(e) => { setArea(e.target.value === "" ? null : Number(e.target.value)); setHabilidade(null); }}>
+        <option value="">Área</option>
+        {areas.map((a) => <option key={a.indice} value={a.indice}>{nomeDaArea(a.titulo)}</option>)}
+      </select>
+      <select className={cn(campo, "max-w-64")} value={habilidade ?? ""} aria-label="Habilidade" disabled={!escolhida} onChange={(e) => setHabilidade(e.target.value === "" ? null : Number(e.target.value))}>
+        <option value="">Habilidade</option>
+        {escolhida?.habilidades.map((h) => <option key={h.indice} value={h.indice}>{h.numero} {h.texto}</option>)}
+      </select>
+      <select className={campo} value={conceito} aria-label="Conceito" onChange={(e) => setConceito(e.target.value as "RD" | "NR")}>
+        <option value="RD">RD</option>
+        <option value="NR">NR</option>
+      </select>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={!matricula || area === null || habilidade === null}
+        onClick={() => {
+          if (!matricula || area === null || habilidade === null) return;
+          onAdicionar(matricula, { area, habilidade, conceito });
+          setHabilidade(null);
+        }}
+      >
+        Adicionar
+      </Button>
+    </div>
   );
 }

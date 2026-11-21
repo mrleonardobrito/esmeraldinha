@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { excecoesParaEnviar, nomeDaArea } from "@/lib/fichas-de-desempenho";
+import { aplicarExcecoes, excecoesParaEnviar, nomeDaArea, pendenciasAntesDeAbrir } from "@/lib/fichas-de-desempenho";
 
 describe("nomeDaArea", () => {
   it("drops the série and the descritores prefix of fundamental áreas", () => {
@@ -26,5 +26,34 @@ describe("excecoesParaEnviar", () => {
       { matricula: "101", area: 1, habilidade: 0, conceito: "RD" },
       { matricula: "102", area: 3, habilidade: 0, conceito: "RD" },
     ]);
+  });
+});
+
+describe("aplicarExcecoes", () => {
+  it("adds exceções without replacing the ones the estudante already has", () => {
+    const revisao = { "101": [{ area: 0, habilidade: 0, conceito: "NR" as const, trecho: "específica" }] };
+
+    const depois = aplicarExcecoes(revisao, "101", [
+      { area: 0, habilidade: 0, conceito: "RD" },
+      { area: 0, habilidade: 1, conceito: "RD" },
+    ], "turma toda");
+
+    expect(depois["101"]).toEqual([
+      { area: 0, habilidade: 0, conceito: "NR", trecho: "específica" },
+      { area: 0, habilidade: 1, conceito: "RD", trecho: "turma toda" },
+    ]);
+    expect(revisao["101"]).toHaveLength(1);
+  });
+
+  it("creates the estudante's list when they had none", () => {
+    expect(aplicarExcecoes({}, "102", [{ area: 3, habilidade: 2, conceito: "NR" }], "manual")["102"])
+      .toEqual([{ area: 3, habilidade: 2, conceito: "NR", trecho: "manual" }]);
+  });
+});
+
+describe("pendenciasAntesDeAbrir", () => {
+  it("only an unresolved name with exceções blocks opening the portal", () => {
+    expect(pendenciasAntesDeAbrir([{ excecoes: [] }])).toBe(0);
+    expect(pendenciasAntesDeAbrir([{ excecoes: [] }, { excecoes: [{ area: 0, habilidade: 0, conceito: "RD" }] }])).toBe(1);
   });
 });

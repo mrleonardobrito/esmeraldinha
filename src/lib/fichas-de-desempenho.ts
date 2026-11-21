@@ -13,9 +13,9 @@ export type ExcecaoComTrecho = Excecao & { trecho: string };
 /** The agent's reading of the observações, checked against the turma. */
 export interface ObservacoesInterpretadas {
   resposta: string;
-  estudantes: { matricula: string; nome: string; excecoes: ExcecaoComTrecho[] }[];
+  estudantes: { matricula: string; nome: string; escrito: string; excecoes: ExcecaoComTrecho[] }[];
   naoResolvidos: { estudante: string; motivo: string; candidatos: string[]; excecoes: ExcecaoComTrecho[] }[];
-  gerais: { trecho: string; excecoes: Excecao[] }[];
+  gerais: { trecho: string; estudante: { matricula: string; nome: string } | null; excecoes: Excecao[] }[];
   descartadas: { motivo: string; trecho: string }[];
   turma: { matricula: string; nome: string; situacao: string | null }[];
 }
@@ -124,4 +124,28 @@ export function excecoesParaEnviar(
   }
   return [...porChave.values()].sort((a, b) =>
     a.matricula.localeCompare(b.matricula) || a.area - b.area || a.habilidade - b.habilidade);
+}
+
+/**
+ * Adds exceções to one estudante's review. A habilidade the estudante
+ * already has keeps its conceito: what was said about them specifically
+ * outweighs what was said about the whole turma.
+ */
+export function aplicarExcecoes(
+  revisao: Readonly<Record<string, ExcecaoComTrecho[]>>,
+  matricula: string,
+  novas: readonly (Excecao & { trecho?: string })[],
+  trecho: string,
+): Record<string, ExcecaoComTrecho[]> {
+  const atuais = [...(revisao[matricula] ?? [])];
+  for (const { area, habilidade, conceito, trecho: proprio } of novas) {
+    if (atuais.some((e) => e.area === area && e.habilidade === habilidade)) continue;
+    atuais.push({ area, habilidade, conceito, trecho: proprio ?? trecho });
+  }
+  return { ...revisao, [matricula]: atuais };
+}
+
+/** How many unresolved names still carry exceções; only those block opening the portal. */
+export function pendenciasAntesDeAbrir(naoResolvidos: readonly { excecoes: readonly unknown[] }[]): number {
+  return naoResolvidos.filter((item) => item.excecoes.length > 0).length;
 }
