@@ -3,6 +3,7 @@ import {
   IconAlertTriangle,
   IconArrowLeft,
   IconExternalLink,
+  IconEye,
   IconFileText,
   IconLoader,
   IconPaperclip,
@@ -531,20 +532,25 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
               Descartar prévia
             </Button>
           )}
-          {previa && !vendoPrevia && (
-            <Button variant="outline" onClick={() => setVendoPrevia(true)}>Ver prévia</Button>
-          )}
           <Button variant="outline" onClick={onClose}>Fechar</Button>
-          <Button
-            onClick={() => void preencher()}
-            disabled={
-              !previa || emAndamento || gerando || salvamento !== "salvo" ||
-              !previaConfere(previa, etapas, areas) || pendenciasAntesDeAbrir(previa.naoResolvidos) > 0
-            }
-          >
-            {emAndamento ? <IconLoader data-icon="inline-start" className="animate-spin" /> : <IconExternalLink data-icon="inline-start" />}
-            {emAndamento ? "Preenchimento em andamento" : "Preencher no portal"}
-          </Button>
+          {previa && !vendoPrevia ? (
+            // While setting up, the way forward is the prévia; filling happens from it.
+            <Button onClick={() => setVendoPrevia(true)} disabled={gerando}>
+              <IconEye data-icon="inline-start" />
+              Ver prévia
+            </Button>
+          ) : previa ? (
+            <Button
+              onClick={() => void preencher()}
+              disabled={
+                emAndamento || gerando || salvamento !== "salvo" ||
+                !previaConfere(previa, etapas, areas) || pendenciasAntesDeAbrir(previa.naoResolvidos) > 0
+              }
+            >
+              {emAndamento ? <IconLoader data-icon="inline-start" className="animate-spin" /> : <IconExternalLink data-icon="inline-start" />}
+              {emAndamento ? "Preenchimento em andamento" : "Preencher no portal"}
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>
