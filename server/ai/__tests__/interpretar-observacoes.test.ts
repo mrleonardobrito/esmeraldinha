@@ -29,7 +29,7 @@ function agente(resposta: unknown) {
   return vi.fn().mockResolvedValue(JSON.stringify(resposta));
 }
 
-const base = { turma: 'CRECHE II - CRECHE II - VESPERTINO', etapa: 'I ETAPA', areas, estudantes, texto: 'Ana ainda não dialoga.' };
+const base = { turma: 'CRECHE II - CRECHE II - VESPERTINO', etapas: [1, 2, 3, 4] as const, areas, estudantes, texto: 'Ana ainda não dialoga.' };
 
 describe('interpretarObservacoes', () => {
   it('resolves estudantes by name and keeps their exceções with trecho', async () => {
@@ -42,7 +42,7 @@ describe('interpretarObservacoes', () => {
     const resultado = await interpretarObservacoes({ ...base, complete });
 
     expect(resultado.estudantes).toEqual([
-      { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', escrito: 'Ana Ruthe', excecoes: [{ area: 3, habilidade: 0, conceito: 'NR', trecho: 'ainda não dialoga' }] },
+      { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', escrito: 'Ana Ruthe', excecoes: [{ area: 3, habilidade: 0, conceito: 'NR', trecho: 'ainda não dialoga', etapas: [1, 2, 3, 4] }] },
     ]);
     expect(resultado.naoResolvidos).toEqual([]);
     expect(resultado.resposta).toBe('ok');
@@ -83,7 +83,7 @@ describe('interpretarObservacoes', () => {
 
     const resultado = await interpretarObservacoes({ ...base, complete });
 
-    expect(resultado.estudantes[0].excecoes).toEqual([{ area: 0, habilidade: 1, conceito: 'RD', trecho: 'válida' }]);
+    expect(resultado.estudantes[0].excecoes).toEqual([{ area: 0, habilidade: 1, conceito: 'RD', trecho: 'válida', etapas: [1, 2, 3, 4] }]);
     expect(resultado.descartadas.map((item) => item.trecho)).toEqual(['área não escolhida', 'habilidade inexistente', 'turma toda']);
     expect(resultado.gerais).toEqual([]);
   });
@@ -97,7 +97,7 @@ describe('interpretarObservacoes', () => {
 
     const resultado = await interpretarObservacoes({ ...base, complete });
 
-    expect(resultado.gerais).toEqual([{ trecho: 'a turma ainda não dialoga', estudante: null, excecoes: [{ area: 3, habilidade: 0, conceito: 'RD' }] }]);
+    expect(resultado.gerais).toEqual([{ trecho: 'a turma ainda não dialoga', estudante: null, excecoes: [{ area: 3, habilidade: 0, conceito: 'RD', etapas: [1, 2, 3, 4] }] }]);
   });
 
   it('does not trust a matrícula the observação never wrote: an ambiguous name stays unresolved', async () => {
@@ -150,9 +150,50 @@ describe('interpretarObservacoes', () => {
     const resultado = await interpretarObservacoes({ ...base, complete });
 
     expect(resultado.gerais).toEqual([
-      { trecho: 'Ana tem dificuldade em EO', estudante: { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA' }, excecoes: [{ area: 0, habilidade: 0, conceito: 'RD' }] },
-      { trecho: 'a turma não escuta', estudante: null, excecoes: [{ area: 3, habilidade: 0, conceito: 'RD' }] },
+      { trecho: 'Ana tem dificuldade em EO', estudante: { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA' }, excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', etapas: [1, 2, 3, 4] }] },
+      { trecho: 'a turma não escuta', estudante: null, excecoes: [{ area: 3, habilidade: 0, conceito: 'RD', etapas: [1, 2, 3, 4] }] },
     ]);
+  });
+
+  it('an exceção without etapas applies to every chosen etapa', async () => {
+    const complete = agente({
+      resposta: '',
+      estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Ana', etapas: [] }] }],
+      gerais: [],
+    });
+
+    const resultado = await interpretarObservacoes({ ...base, etapas: [2, 3], complete });
+
+    expect(resultado.estudantes[0].excecoes[0].etapas).toEqual([2, 3]);
+  });
+
+  it('keeps only chosen etapas and discards an exceção left without any', async () => {
+    const complete = agente({
+      resposta: '',
+      estudantes: [{
+        estudante: 'Ana Ruthe',
+        matricula: '',
+        excecoes: [
+          { area: 0, habilidade: 0, conceito: 'RD', trecho: 'na I e na III', etapas: [1, 3] },
+          { area: 0, habilidade: 1, conceito: 'NR', trecho: 'só na IV', etapas: [4] },
+        ],
+      }],
+      gerais: [],
+    });
+
+    const resultado = await interpretarObservacoes({ ...base, etapas: [1, 2], complete });
+
+    expect(resultado.estudantes[0].excecoes).toEqual([{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'na I e na III', etapas: [1] }]);
+    expect(resultado.descartadas).toEqual([{ trecho: 'só na IV', motivo: 'A observação fala de uma etapa que não está sendo preenchida.' }]);
+  });
+
+  it('the prompt lists the etapas being filled', async () => {
+    const complete = agente({ resposta: '', estudantes: [], gerais: [] });
+
+    await interpretarObservacoes({ ...base, complete });
+
+    const { system } = complete.mock.calls[0][0] as { system: string };
+    expect(system).toContain('I ETAPA, II ETAPA, III ETAPA e IV ETAPA');
   });
 
   it('throws EnvioInvalidoError when there is no text and no file', async () => {

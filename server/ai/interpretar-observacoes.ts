@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { AreaDeConhecimento, Excecao } from '../../shared/ficha-de-desempenho';
+import { ETAPAS_DA_FICHA, type AreaDeConhecimento, type Excecao, type IndiceDaEtapa } from '../../shared/ficha-de-desempenho';
 import { EstudanteAmbiguoError, resolverMatricula } from '../notas/estudantes';
 import { EnvioInvalidoError } from './errors';
 import { buildContentParts, type ArquivoEnviado } from './interpretar-envio';
@@ -26,7 +26,8 @@ export interface ObservacoesInterpretadas {
 
 export interface InterpretarObservacoesInput {
   turma: string;
-  etapa: string;
+  /** The etapas being filled; an observação without etapa applies to all of them. */
+  etapas: readonly IndiceDaEtapa[];
   /** Only the áreas the auxiliar chose. */
   areas: readonly AreaDeConhecimento[];
   estudantes: readonly { matricula: string; nome: string }[];
@@ -41,6 +42,7 @@ const excecaoSchema = z.object({
   area: z.number().int(),
   habilidade: z.number().int(),
   conceito: z.enum(['RD', 'NR']),
+  etapas: z.array(z.number().int()).default([]),
 });
 
 const respostaSchema = z.object({
@@ -56,11 +58,18 @@ const respostaSchema = z.object({
 const EXCECAO_JSON = {
   type: 'object',
   additionalProperties: false,
-  required: ['area', 'habilidade', 'conceito'],
+  required: ['area', 'habilidade', 'conceito', 'etapas'],
   properties: {
     area: { type: 'integer', description: 'O número antes do ponto no código da habilidade.' },
     habilidade: { type: 'integer', description: 'O número depois do ponto no código da habilidade.' },
     conceito: { type: 'string', enum: ['RD', 'NR'] },
+    etapas: {
+      type: 'array',
+      items: { type: 'integer', enum: [1, 2, 3, 4] },
+      description:
+        'As etapas (1 a 4) em que o estudante teve esta dificuldade. Lista vazia quando ' +
+        'a observação não diz a etapa: aí ela vale para todas as etapas sendo preenchidas.',
+    },
   },
 } as const;
 
@@ -122,7 +131,12 @@ const RESPONSE_SCHEMA = {
   },
 } as const;
 
-function buildSystemPrompt({ turma, etapa, areas, estudantes }: InterpretarObservacoesInput): string {
+function listarEtapas(etapas: readonly IndiceDaEtapa[]): string {
+  const nomes = [...etapas].sort((a, b) => a - b).map((etapa) => ETAPAS_DA_FICHA[etapa - 1]);
+  return nomes.length <= 1 ? nomes.join('') : `${nomes.slice(0, -1).join(', ')} e ${nomes.at(-1)}`;
+}
+
+function buildSystemPrompt({ turma, etapas, areas, estudantes }: InterpretarObservacoesInput): string {
   const habilidades = areas
     .map((area) =>
       `Área ${area.indice} — ${area.titulo}\n` +
@@ -132,9 +146,16 @@ function buildSystemPrompt({ turma, etapa, areas, estudantes }: InterpretarObser
 
   return [
     'Você lê as observações que um professor mandou sobre o desempenho dos',
-    `estudantes da turma ${turma} na ${etapa}, para preencher a ficha de`,
-    'desempenho no portal do professor de Limoeiro de Anadia. Quem usa sua',
-    'resposta é o auxiliar de ensino, que confere tudo antes de ir ao portal.',
+    `estudantes da turma ${turma}, para preencher a ficha de desempenho no`,
+    `portal do professor de Limoeiro de Anadia nas etapas ${listarEtapas(etapas)}.`,
+    'Quem usa sua resposta é o auxiliar de ensino, que confere tudo antes de ir',
+    'ao portal.',
+    '',
+    'Cada exceção diz em quais etapas vale. Uma observação que não diz a etapa',
+    'vale para todas: devolva etapas vazio. Uma observação que diz a etapa ou a',
+    'evolução vale só para as etapas que descreve: "melhorou na III etapa" é a',
+    'dificuldade nas etapas antes da III, e R da III em diante. Um conceito',
+    'nunca piora de uma etapa para a seguinte.',
     '',
     'Cada habilidade recebe um conceito: R (realiza), RD (realiza com',
     'dificuldades) ou NR (não realiza). Um estudante que o professor não cita',
@@ -191,17 +212,33 @@ export async function interpretarObservacoes(input: InterpretarObservacoesInput)
   }
 
   const descartadas: ObservacoesInterpretadas['descartadas'] = [];
-  const valida = (excecao: Excecao, trecho: string): boolean => {
+  /** The exceção with its etapas narrowed to the run, or null (and why, in descartadas). */
+  const valida = (
+    excecao: Omit<Excecao, 'etapas'> & { etapas: number[] },
+    trecho: string,
+  ): Excecao | null => {
     const area = areas.find((candidata) => candidata.indice === excecao.area);
     if (!area) {
       descartadas.push({ trecho, motivo: `A área ${excecao.area} não está entre as escolhidas.` });
-      return false;
+      return null;
     }
     if (!area.habilidades.some((h) => h.indice === excecao.habilidade)) {
       descartadas.push({ trecho, motivo: `A área "${area.titulo}" não tem a habilidade ${excecao.habilidade}.` });
-      return false;
+      return null;
     }
-    return true;
+    const daExecucao = excecao.etapas.length === 0
+      ? [...input.etapas]
+      : input.etapas.filter((etapa) => excecao.etapas.includes(etapa));
+    if (daExecucao.length === 0) {
+      descartadas.push({ trecho, motivo: 'A observação fala de uma etapa que não está sendo preenchida.' });
+      return null;
+    }
+    return {
+      area: excecao.area,
+      habilidade: excecao.habilidade,
+      conceito: excecao.conceito,
+      etapas: [...daExecucao].sort((a, b) => a - b),
+    };
   };
 
   /**
@@ -237,9 +274,10 @@ export async function interpretarObservacoes(input: InterpretarObservacoesInput)
   };
 
   for (const lido of parsed.data.estudantes) {
-    const excecoes = lido.excecoes
-      .filter((excecao) => valida(excecao, excecao.trecho))
-      .map(({ area, habilidade, conceito, trecho }) => ({ area, habilidade, conceito, trecho }));
+    const excecoes = lido.excecoes.flatMap((excecao) => {
+      const validada = valida(excecao, excecao.trecho);
+      return validada ? [{ ...validada, trecho: excecao.trecho }] : [];
+    });
 
     const resolvido = resolver(lido.estudante, lido.matricula);
     if ('matricula' in resolvido) {
@@ -252,7 +290,7 @@ export async function interpretarObservacoes(input: InterpretarObservacoesInput)
   }
 
   for (const geral of parsed.data.gerais) {
-    const excecoes = geral.excecoes.filter((excecao) => valida(excecao, geral.trecho));
+    const excecoes = geral.excecoes.flatMap((excecao) => valida(excecao, geral.trecho) ?? []);
     if (excecoes.length === 0) continue;
     if (!geral.estudante) {
       resultado.gerais.push({ trecho: geral.trecho, estudante: null, excecoes });
