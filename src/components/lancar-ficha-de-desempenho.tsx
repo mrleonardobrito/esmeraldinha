@@ -1,6 +1,7 @@
 import * as React from "react";
 import {
   IconAlertTriangle,
+  IconArrowLeft,
   IconExternalLink,
   IconFileText,
   IconLoader,
@@ -88,6 +89,9 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
   /** Where the screen's edits stand against the saved prévia. */
   const [salvamento, setSalvamento] = React.useState<"salvo" | "pendente" | "salvando" | "erro">("salvo");
   const [execucao, setExecucao] = React.useState<EstadoDoPreenchimento | null>(null);
+  /** With a prévia, the modal shows only its table; the setup comes back on demand. */
+  const [vendoPrevia, setVendoPrevia] = React.useState(false);
+  const [avisosAbertos, setAvisosAbertos] = React.useState(false);
   const [erro, setErro] = React.useState<string | null>(null);
   const entrada = React.useRef<HTMLInputElement>(null);
   const timer = React.useRef<number | null>(null);
@@ -111,6 +115,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
         if (!vivo || !salva) return;
         versao.current = salva.atualizadaEm;
         setPrevia(salva);
+        setVendoPrevia(true);
         setAreas(salva.areas);
         setEtapas(salva.etapas);
       })
@@ -129,6 +134,9 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
   }, [emAndamento, caderneta.id, turma]);
 
   const ficha = estrutura === "carregando" ? null : estrutura;
+  const quantosAvisos = previa
+    ? previa.gerais.length + previa.naoResolvidos.length + previa.descartadas.length + (previa.resposta ? 1 : 0)
+    : 0;
   const ativos = previa?.estudantes.filter((e) => ativo(e.situacao)) ?? [];
 
   function descreverHabilidade({ area, habilidade }: { area: number; habilidade: number }): string {
@@ -221,6 +229,8 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
       const nova = await gerarPrevia(caderneta.id, { areas, etapas, texto, arquivos }, undefined, turma);
       versao.current = nova.atualizadaEm;
       setPrevia(nova);
+      setVendoPrevia(true);
+      setAvisosAbertos(pendenciasAntesDeAbrir(nova.naoResolvidos) > 0);
     } catch (error) {
       setErro(mensagemDe(error, "Não foi possível gerar a prévia."));
     } finally {
@@ -235,6 +245,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
       await descartarPrevia(caderneta.id, turma);
       versao.current = null;
       setPrevia(null);
+      setVendoPrevia(false);
     } catch (error) {
       setErro(mensagemDe(error, "Não foi possível descartar a prévia."));
     }
@@ -253,7 +264,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
 
   return (
     <Dialog open onOpenChange={(aberto) => !aberto && onClose()}>
-      <DialogContent className="flex max-h-[92vh] flex-col gap-4 sm:max-w-6xl">
+      <DialogContent className={cn("flex max-h-[92vh] flex-col gap-4 sm:max-w-6xl", previa && vendoPrevia && "h-[92vh]")}>
         <DialogHeader>
           <DialogTitle className="font-heading">Ficha de desempenho</DialogTitle>
           <DialogDescription>{caderneta.turma}</DialogDescription>
@@ -261,6 +272,121 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
 
         {picker}
 
+        {previa && ficha && vendoPrevia ? (
+          <div className="flex min-h-0 flex-1 flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-medium">Prévia</span>
+              <span className="text-muted-foreground">
+                {previa.etapas.map((e) => ETAPAS_DA_FICHA[e - 1].replace(" ETAPA", "")).join(", ")} ETAPA ·{" "}
+                {ficha.areas.filter((a) => previa.areas.includes(a.indice)).map((a) => nomeDaArea(a.titulo)).join(", ")} ·{" "}
+                {salvamento === "salvo" ? "salva" : salvamento === "erro" ? "não salva" : "salvando…"}
+              </span>
+              {quantosAvisos > 0 && (
+                <Button
+                  size="sm"
+                  variant={pendenciasAntesDeAbrir(previa.naoResolvidos) > 0 ? "destructive" : "outline"}
+                  className="ml-auto"
+                  aria-expanded={avisosAbertos}
+                  onClick={() => setAvisosAbertos((aberto) => !aberto)}
+                >
+                  <IconAlertTriangle data-icon="inline-start" />
+                  Avisos ({quantosAvisos})
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" className={cn(quantosAvisos === 0 && "ml-auto")} onClick={() => setVendoPrevia(false)} disabled={emAndamento}>
+                <IconArrowLeft data-icon="inline-start" />
+                Alterar observações
+              </Button>
+            </div>
+
+            {avisosAbertos && (
+              <div className="flex max-h-[35%] shrink-0 flex-col gap-2 overflow-y-auto">
+              {previa.resposta && <p className="text-sm text-muted-foreground">{previa.resposta}</p>}
+
+              {previa.descartadas.map((item, indice) => (
+                <p key={indice} className="flex gap-2 rounded-xl bg-yellow-500/10 px-3 py-2 text-sm">
+                  <IconAlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+                  <span>Não aplicado: “{item.trecho}”. {item.motivo}</span>
+                </p>
+              ))}
+
+              {previa.naoResolvidos.map((item, indice) => (
+                <div key={`${item.estudante}-${indice}`} className="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm">
+                  <span>Não sei quem é “{item.estudante}”.</span>
+                  {item.excecoes.length > 0 && (
+                    <ul className="text-xs text-muted-foreground">
+                      {item.excecoes.map((e) => <li key={`${e.area}.${e.habilidade}`}>{e.conceito} · {descreverHabilidade(e)}</li>)}
+                    </ul>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <select
+                      className="h-9 rounded-md border bg-background px-3 text-foreground"
+                      disabled={gerando || emAndamento}
+                      defaultValue=""
+                      aria-label={`Escolher o estudante para ${item.estudante}`}
+                      onChange={(event) => {
+                        if (!event.target.value) return;
+                        editar({
+                          ...previa,
+                          estudantes: aplicar([event.target.value], item.excecoes),
+                          naoResolvidos: previa.naoResolvidos.filter((_, i) => i !== indice),
+                        });
+                      }}
+                    >
+                      <option value="">Quem é?</option>
+                      {(item.candidatos.length > 0 ? ativos.filter((e) => item.candidatos.includes(e.matricula)) : ativos)
+                        .map((e) => <option key={e.matricula} value={e.matricula}>{e.nome}</option>)}
+                    </select>
+                    <Button size="sm" variant="ghost" disabled={gerando || emAndamento} onClick={() => editar({ ...previa, naoResolvidos: previa.naoResolvidos.filter((_, i) => i !== indice) })}>
+                      Ignorar
+                    </Button>
+                  </div>
+                </div>
+              ))}
+
+              {previa.gerais.map((geral, indice) => (
+                <div key={indice} className="flex flex-col gap-2 rounded-xl border px-3 py-2 text-sm">
+                  <span>{geral.estudante ? `Sobre ${geral.estudante.nome}` : "Sobre a turma"}: “{geral.trecho}”</span>
+                  <ul className="text-xs text-muted-foreground">
+                    {geral.excecoes.map((e) => <li key={`${e.area}.${e.habilidade}`}>{e.conceito} · {descreverHabilidade(e)}</li>)}
+                  </ul>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" disabled={gerando || emAndamento} onClick={() => editar({
+                      ...previa,
+                      estudantes: aplicar(geral.estudante ? [geral.estudante.matricula] : ativos.map((e) => e.matricula), geral.excecoes),
+                      gerais: previa.gerais.filter((_, i) => i !== indice),
+                    })}>
+                      {geral.estudante ? `Aplicar a ${geral.estudante.nome}` : "Aplicar a todos"}
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={gerando || emAndamento} onClick={() => editar({ ...previa, gerais: previa.gerais.filter((_, i) => i !== indice) })}>
+                      Descartar
+                    </Button>
+                  </div>
+                </div>
+              ))}
+
+              </div>
+            )}
+
+            {salvamento === "erro" && (
+              <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                As últimas mudanças não foram salvas, e o portal só recebe o que está salvo.
+                <Button size="sm" variant="outline" className="ml-auto" onClick={() => void enviar()}>Tentar de novo</Button>
+              </div>
+            )}
+
+            {execucao && <Andamento execucao={execucao} descrever={descreverHabilidade} />}
+            {erro && <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{erro}</p>}
+
+            <PreviaDaFichaView
+              className="min-h-0 flex-1"
+              previa={previa}
+              areas={ficha.areas}
+              disabled={emAndamento || gerando}
+              onChange={editar}
+            />
+          </div>
+        ) : (
         <div className="flex min-h-0 flex-col gap-5 overflow-y-auto pr-1">
           <section className="flex flex-col gap-2" aria-labelledby="etapas-titulo">
             <h3 id="etapas-titulo" className="text-sm font-medium">Etapas</h3>
@@ -386,97 +512,17 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
             </section>
           )}
 
-          {previa && ficha && (
-            <section className="flex flex-col gap-3" aria-labelledby="previa-titulo">
-              <div className="flex items-center gap-2">
-                <h3 id="previa-titulo" className="text-sm font-medium">Prévia</h3>
-                <span className="text-xs text-muted-foreground">
-                  {salvamento === "salvo" ? "Salva" : salvamento === "erro" ? "Não salva" : "Salvando…"} · clique numa célula para trocar o conceito
-                </span>
-              </div>
-              {previa.resposta && <p className="text-sm text-muted-foreground">{previa.resposta}</p>}
-
-              {previa.descartadas.map((item, indice) => (
-                <p key={indice} className="flex gap-2 rounded-xl bg-yellow-500/10 px-3 py-2 text-sm">
-                  <IconAlertTriangle className="size-4 shrink-0" aria-hidden="true" />
-                  <span>Não aplicado: “{item.trecho}”. {item.motivo}</span>
-                </p>
-              ))}
-
-              {previa.naoResolvidos.map((item, indice) => (
-                <div key={`${item.estudante}-${indice}`} className="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm">
-                  <span>Não sei quem é “{item.estudante}”.</span>
-                  {item.excecoes.length > 0 && (
-                    <ul className="text-xs text-muted-foreground">
-                      {item.excecoes.map((e) => <li key={`${e.area}.${e.habilidade}`}>{e.conceito} · {descreverHabilidade(e)}</li>)}
-                    </ul>
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    <select
-                      className="h-9 rounded-md border bg-background px-3 text-foreground"
-                      disabled={gerando || emAndamento}
-                      defaultValue=""
-                      aria-label={`Escolher o estudante para ${item.estudante}`}
-                      onChange={(event) => {
-                        if (!event.target.value) return;
-                        editar({
-                          ...previa,
-                          estudantes: aplicar([event.target.value], item.excecoes),
-                          naoResolvidos: previa.naoResolvidos.filter((_, i) => i !== indice),
-                        });
-                      }}
-                    >
-                      <option value="">Quem é?</option>
-                      {(item.candidatos.length > 0 ? ativos.filter((e) => item.candidatos.includes(e.matricula)) : ativos)
-                        .map((e) => <option key={e.matricula} value={e.matricula}>{e.nome}</option>)}
-                    </select>
-                    <Button size="sm" variant="ghost" disabled={gerando || emAndamento} onClick={() => editar({ ...previa, naoResolvidos: previa.naoResolvidos.filter((_, i) => i !== indice) })}>
-                      Ignorar
-                    </Button>
-                  </div>
-                </div>
-              ))}
-
-              {previa.gerais.map((geral, indice) => (
-                <div key={indice} className="flex flex-col gap-2 rounded-xl border px-3 py-2 text-sm">
-                  <span>{geral.estudante ? `Sobre ${geral.estudante.nome}` : "Sobre a turma"}: “{geral.trecho}”</span>
-                  <ul className="text-xs text-muted-foreground">
-                    {geral.excecoes.map((e) => <li key={`${e.area}.${e.habilidade}`}>{e.conceito} · {descreverHabilidade(e)}</li>)}
-                  </ul>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" disabled={gerando || emAndamento} onClick={() => editar({
-                      ...previa,
-                      estudantes: aplicar(geral.estudante ? [geral.estudante.matricula] : ativos.map((e) => e.matricula), geral.excecoes),
-                      gerais: previa.gerais.filter((_, i) => i !== indice),
-                    })}>
-                      {geral.estudante ? `Aplicar a ${geral.estudante.nome}` : "Aplicar a todos"}
-                    </Button>
-                    <Button size="sm" variant="ghost" disabled={gerando || emAndamento} onClick={() => editar({ ...previa, gerais: previa.gerais.filter((_, i) => i !== indice) })}>
-                      Descartar
-                    </Button>
-                  </div>
-                </div>
-              ))}
-
-              {salvamento === "erro" && (
-                <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  As últimas mudanças não foram salvas, e o portal só recebe o que está salvo.
-                  <Button size="sm" variant="outline" className="ml-auto" onClick={() => void enviar()}>Tentar de novo</Button>
-                </div>
-              )}
-              {!previaConfere(previa, etapas, areas) && (
-                <p className="rounded-xl bg-yellow-500/10 px-3 py-2 text-sm">
-                  As etapas ou áreas marcadas não são as desta prévia. Gere a prévia de novo para aplicá-las, ou volte a marcar as da prévia.
-                </p>
-              )}
-              <PreviaDaFichaView previa={previa} areas={ficha.areas} disabled={emAndamento || gerando} onChange={editar} />
-            </section>
+          {previa && !previaConfere(previa, etapas, areas) && (
+            <p className="rounded-xl bg-yellow-500/10 px-3 py-2 text-sm">
+              As etapas ou áreas marcadas não são as da prévia salva. Gere a prévia de novo para aplicá-las.
+            </p>
           )}
 
           {execucao && <Andamento execucao={execucao} descrever={descreverHabilidade} />}
 
           {erro && <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{erro}</p>}
         </div>
+        )}
 
         <DialogFooter>
           {previa && (
@@ -484,6 +530,9 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
               <IconTrash data-icon="inline-start" />
               Descartar prévia
             </Button>
+          )}
+          {previa && !vendoPrevia && (
+            <Button variant="outline" onClick={() => setVendoPrevia(true)}>Ver prévia</Button>
           )}
           <Button variant="outline" onClick={onClose}>Fechar</Button>
           <Button

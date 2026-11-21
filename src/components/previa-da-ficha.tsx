@@ -34,7 +34,9 @@ export function PreviaDaFichaView({
   areas,
   disabled,
   onChange,
+  className,
 }: {
+  className?: string;
   previa: PreviaDaFicha;
   /** The structure's áreas, for titles and habilidades. */
   areas: AreaDeConhecimento[];
@@ -43,9 +45,7 @@ export function PreviaDaFichaView({
 }) {
   const primeiro = previa.estudantes.find((e) => ativo(e.situacao)) ?? previa.estudantes[0];
   const [selecionada, setSelecionada] = React.useState(primeiro?.matricula ?? "");
-  const [fechadas, setFechadas] = React.useState<Set<number>>(
-    () => new Set(previa.areas.slice(1)),
-  );
+  const [fechadas, setFechadas] = React.useState<Set<number>>(() => new Set());
   const estudante = previa.estudantes.find((e) => e.matricula === selecionada) ?? primeiro;
   const areasDaPrevia = areas.filter((area) => previa.areas.includes(area.indice));
 
@@ -63,7 +63,7 @@ export function PreviaDaFichaView({
   }
 
   return (
-    <div className="flex min-h-[24rem] gap-3 rounded-xl border">
+    <div className={cn("flex min-h-[24rem] gap-3 rounded-xl border", className)}>
       <ul className="flex w-56 shrink-0 flex-col overflow-y-auto border-r p-1.5" aria-label="Estudantes da turma">
         {previa.estudantes.map((e) => {
           const excecoes = contarExcecoes(e.conceitos);
