@@ -1,6 +1,6 @@
 import type { Page } from 'playwright';
 
-import type { AreaDeConhecimento, Excecao, IndiceDaEtapa } from '../../shared/ficha-de-desempenho';
+import type { AreaDeConhecimento, FichaPlanejada, IndiceDaEtapa } from '../../shared/ficha-de-desempenho';
 import { EstudanteTrocadoError, FichaAlteradaError } from '../scrape/errors';
 import {
   abrirEstudanteDaLista,
@@ -41,13 +41,15 @@ export interface EstadoDoPreenchimento {
 export interface PlanoDoPreenchimento {
   periodoLetivo?: string;
   turma: string;
-  etapa: IndiceDaEtapa;
-  nomeDaEtapa: string;
+  /** The etapas of the run; usually all four. */
+  etapas: IndiceDaEtapa[];
+  /** How the etapas read on screen, e.g. "I a IV ETAPA". */
+  rotuloDasEtapas: string;
   areas: number[];
   estudantes: readonly { matricula: string; nome: string; situacao: string | null }[];
-  /** Exceções per matrícula; everyone else gets R. */
-  excecoes: ReadonlyMap<string, readonly Excecao[]>;
-  /** The structure the exceções were chosen against; the live ficha must match it. */
+  /** The reviewed prévia of each estudante: exactly what to write. */
+  fichas: ReadonlyMap<string, FichaPlanejada>;
+  /** The structure the prévia was built against; the live ficha must match it. */
   estrutura: readonly AreaDeConhecimento[];
 }
 
@@ -128,7 +130,7 @@ export async function acompanharPreenchimento(
   const ativos = plano.estudantes.filter(ativo);
   const estado: EstadoDoPreenchimento = {
     status: 'abrindo',
-    etapa: plano.nomeDaEtapa,
+    etapa: plano.rotuloDasEtapas,
     total: ativos.length,
     atual: null,
     preenchidos: [],
@@ -178,9 +180,8 @@ export async function acompanharPreenchimento(
           }
           const plan = planejarEstudante({
             lidas: dialogo.lidas,
-            etapa: plano.etapa,
-            areas: plano.areas,
-            excecoes: plano.excecoes.get(matricula) ?? [],
+            etapas: plano.etapas,
+            planejada: plano.fichas.get(matricula) ?? {},
           });
           try {
             await escreverConceitos(page, plan.escritas, matricula);
@@ -247,15 +248,23 @@ export function iniciarPreenchimento(
   if (atual && EM_ANDAMENTO.includes(atual.status)) throw new PreenchimentoEmAndamentoError();
 
   execucoes.set(chave, inicial);
+  const registrarFalha = (estado: EstadoDoPreenchimento) => {
+    if (estado.status === 'falhou') console.error(`Ficha de desempenho run failed (${chave}):`, estado.erro);
+  };
   trabalho((estado) => execucoes.set(chave, estado))
-    .then((final) => execucoes.set(chave, final))
+    .then((final) => {
+      execucoes.set(chave, final);
+      registrarFalha(final);
+    })
     .catch((error: unknown) => {
-      execucoes.set(chave, {
+      const falha: EstadoDoPreenchimento = {
         ...(execucoes.get(chave) ?? inicial),
         status: 'falhou',
         atual: null,
         erro: error instanceof Error ? error.message : String(error),
-      });
+      };
+      execucoes.set(chave, falha);
+      registrarFalha(falha);
     });
 
   return inicial;

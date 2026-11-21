@@ -110,91 +110,155 @@ describe('ficha de desempenho routes', () => {
     expect((await depois.json()).estrutura).toMatchObject(estrutura);
   });
 
-  it('refuses observações before the structure was read', async () => {
-    const { app, cadernetaId } = await freshApp();
-    const form = new FormData();
-    form.append('areas', JSON.stringify([0]));
-    form.append('texto', 'Ana não dialoga.');
+  async function comEstrutura() {
+    const ctx = await freshApp();
+    await ctx.app.fetch(request(`/${ctx.cadernetaId}/ficha-de-desempenho/estrutura/leituras`, { method: 'POST' }));
+    return ctx;
+  }
 
-    const response = await app.fetch(request(`/${cadernetaId}/etapas/I%20ETAPA/ficha-de-desempenho/observacoes`, { method: 'POST', body: form }));
+  function formDaPrevia(etapas: number[] = [1, 2, 3, 4], areas: number[] = [0]) {
+    const form = new FormData();
+    form.append('areas', JSON.stringify(areas));
+    form.append('etapas', JSON.stringify(etapas));
+    form.append('texto', 'Ana tem dificuldade em cuidar dos colegas, melhorou na III etapa.');
+    return form;
+  }
+
+  async function agenteDevolve(resposta: unknown) {
+    const { chatCompletion } = await import('../ai/openrouter');
+    vi.mocked(chatCompletion).mockResolvedValue(JSON.stringify(resposta));
+  }
+
+  const anaComDificuldade = {
+    resposta: 'ok',
+    estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Ana', etapas: [1, 2] }] }],
+    gerais: [],
+  };
+
+  it('refuses a prévia before the structure was read', async () => {
+    const { app, cadernetaId } = await freshApp();
+
+    const response = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
 
     expect(response.status).toBe(422);
   });
 
-  it('previews the agent’s exceções with the turma’s estudantes', async () => {
-    const { app, cadernetaId } = await freshApp();
-    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/estrutura/leituras`, { method: 'POST' }));
-    const { chatCompletion } = await import('../ai/openrouter');
-    vi.mocked(chatCompletion).mockResolvedValue(JSON.stringify({
-      resposta: 'ok',
-      estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Ana' }] }],
-      gerais: [],
-    }));
-    const form = new FormData();
-    form.append('areas', JSON.stringify([0]));
-    form.append('texto', 'Ana tem dificuldade em cuidar dos colegas.');
+  it('generates the prévia for the four etapas with the agent’s exceções on their etapas', async () => {
+    const { app, cadernetaId } = await comEstrutura();
+    await agenteDevolve(anaComDificuldade);
 
-    const response = await app.fetch(request(`/${cadernetaId}/etapas/I%20ETAPA/ficha-de-desempenho/observacoes`, { method: 'POST', body: form }));
+    const response = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
 
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.estudantes).toEqual([{ matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', escrito: 'Ana Ruthe', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Ana' }] }]);
-    expect(body.turma.map((e: { matricula: string }) => e.matricula)).toEqual(['10315', '10316']);
+    const { previa } = await response.json();
+    expect(previa.etapas).toEqual([1, 2, 3, 4]);
+    expect(previa.estudantes.map((e: { matricula: string }) => e.matricula)).toEqual(['10315', '10316']);
+    expect(previa.estudantes[0].conceitos).toEqual({ '0.0': ['RD', 'RD', 'R', 'R'] });
+    expect(previa.estudantes[0].trechos).toEqual(['Ana']);
+    expect(previa.estudantes[1].conceitos).toEqual({ '0.0': ['R', 'R', 'R', 'R'] });
   });
 
-  it('starts the assisted run in the headed window and reports its state', async () => {
-    const { app, cadernetaId, professorId } = await freshApp();
-    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/estrutura/leituras`, { method: 'POST' }));
+  it('keeps the edits of the prévia and re-normalizes a decreasing row', async () => {
+    const { app, cadernetaId } = await comEstrutura();
+    await agenteDevolve(anaComDificuldade);
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
+
+    const edicao = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`, json({
+      estudantes: [{ matricula: '10315', conceitos: { '0.0': ['R', 'NR', 'NR', 'R'] } }],
+      gerais: [],
+      naoResolvidos: [],
+    }, 'PUT')));
+    expect(edicao.status).toBe(200);
+
+    const atual = await (await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`))).json();
+    expect(atual.previa.estudantes[0].conceitos['0.0']).toEqual(['R', 'R', 'R', 'R']);
+    expect(atual.previa.estudantes[1].conceitos['0.0']).toEqual(['R', 'R', 'R', 'R']);
+  });
+
+  it('refuses an edit for a matrícula outside the prévia', async () => {
+    const { app, cadernetaId } = await comEstrutura();
+    await agenteDevolve(anaComDificuldade);
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
+
+    const edicao = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`, json({
+      estudantes: [{ matricula: '99999', conceitos: { '0.0': ['R', 'R', 'R', 'R'] } }],
+      gerais: [],
+      naoResolvidos: [],
+    }, 'PUT')));
+
+    expect(edicao.status).toBe(422);
+  });
+
+  it('discards the prévia', async () => {
+    const { app, cadernetaId } = await comEstrutura();
+    await agenteDevolve(anaComDificuldade);
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
+
+    const apagada = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`, { method: 'DELETE' }));
+    expect(apagada.status).toBe(204);
+    const atual = await (await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`))).json();
+    expect(atual.previa).toBeNull();
+  });
+
+  it('refuses to fill without a prévia', async () => {
+    const { app, cadernetaId } = await comEstrutura();
+
+    const response = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos`, { method: 'POST' }));
+
+    expect(response.status).toBe(422);
+  });
+
+  it('refuses to fill while unresolved names still carry exceções', async () => {
+    const { app, cadernetaId } = await comEstrutura();
+    await agenteDevolve({
+      resposta: '',
+      estudantes: [{ estudante: 'Carlos', matricula: '', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Carlos', etapas: [] }] }],
+      gerais: [],
+    });
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
+
+    const response = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos`, { method: 'POST' }));
+
+    expect(response.status).toBe(422);
+  });
+
+  it('refuses to fill a prévia whose áreas are gone from the ficha', async () => {
+    const { app, cadernetaId, professorId } = await comEstrutura();
+    await agenteDevolve(anaComDificuldade);
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
+    const { getDb } = await import('../professores/db');
+    const { salvarEstruturaDaFicha } = await import('../fichas/store');
+    salvarEstruturaDaFicha(getDb(), professorId, turma, { ...estrutura, areas: [estrutura.areas[1]] });
+
+    const response = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos`, { method: 'POST' }));
+
+    expect(response.status).toBe(422);
+  });
+
+  it('starts the assisted run from the saved prévia and reports its state', async () => {
+    const { app, cadernetaId, professorId } = await comEstrutura();
+    await agenteDevolve(anaComDificuldade);
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
     const { naSessaoHeaded } = await import('../sessoes-headed');
     vi.mocked(naSessaoHeaded).mockImplementation(async (_id, _cred, trabalho) => trabalho({} as never));
     const { acompanharPreenchimento } = await import('../fichas/preenchimento-assistido');
     vi.mocked(acompanharPreenchimento).mockImplementation((_page, _plano, onEstado) => {
-      onEstado({ status: 'aguardando-auxiliar', etapa: 'I ETAPA', total: 1, atual: { matricula: '10315', nome: 'ANA' }, preenchidos: [], pulados: [], erro: null });
+      onEstado({ status: 'aguardando-auxiliar', etapa: 'I a IV ETAPA', total: 1, atual: { matricula: '10315', nome: 'ANA' }, preenchidos: [], pulados: [], erro: null });
       return new Promise(() => {});
     });
 
-    const inicio = await app.fetch(request(
-      `/${cadernetaId}/etapas/I%20ETAPA/ficha-de-desempenho/preenchimentos-assistidos`,
-      json({ areas: [0], excecoes: [{ matricula: '10315', area: 0, habilidade: 0, conceito: 'RD' }] }),
-    ));
+    const inicio = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos`, { method: 'POST' }));
 
     expect(inicio.status).toBe(202);
     expect(naSessaoHeaded).toHaveBeenCalledWith(professorId, expect.objectContaining({ login: '111' }), expect.any(Function));
     const plano = vi.mocked(acompanharPreenchimento).mock.calls[0][1];
-    expect(plano).toMatchObject({ turma, etapa: 1, nomeDaEtapa: 'I ETAPA', areas: [0] });
-    expect(plano.excecoes.get('10315')).toEqual([{ area: 0, habilidade: 0, conceito: 'RD' }]);
+    expect(plano).toMatchObject({ turma, etapas: [1, 2, 3, 4], areas: [0] });
+    expect(plano.fichas.get('10315')).toEqual({ '0.0': ['RD', 'RD', 'R', 'R'] });
 
     const estado = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos/atual`));
     expect((await estado.json()).estado).toMatchObject({ status: 'aguardando-auxiliar', atual: { matricula: '10315' } });
 
-    const outro = await app.fetch(request(
-      `/${cadernetaId}/etapas/I%20ETAPA/ficha-de-desempenho/preenchimentos-assistidos`,
-      json({ areas: [0], excecoes: [] }),
-    ));
+    const outro = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos`, { method: 'POST' }));
     expect(outro.status).toBe(409);
-  });
-
-  it('refuses exceções for estudantes outside the turma', async () => {
-    const { app, cadernetaId } = await freshApp();
-    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/estrutura/leituras`, { method: 'POST' }));
-
-    const response = await app.fetch(request(
-      `/${cadernetaId}/etapas/I%20ETAPA/ficha-de-desempenho/preenchimentos-assistidos`,
-      json({ areas: [0], excecoes: [{ matricula: '99999', area: 0, habilidade: 0, conceito: 'RD' }] }),
-    ));
-
-    expect(response.status).toBe(422);
-  });
-
-  it('rejects an etapa the ficha does not have', async () => {
-    const { app, cadernetaId } = await freshApp();
-    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/estrutura/leituras`, { method: 'POST' }));
-    const form = new FormData();
-    form.append('areas', JSON.stringify([0]));
-    form.append('texto', 'x');
-
-    const response = await app.fetch(request(`/${cadernetaId}/etapas/1%C2%AA%20Etapa/ficha-de-desempenho/observacoes`, { method: 'POST', body: form }));
-
-    expect(response.status).toBe(422);
   });
 });

@@ -1,6 +1,7 @@
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
+import { fichaInicial, type Excecao, type IndiceDaEtapa } from '../../../shared/ficha-de-desempenho';
 import { portalDaFicha } from '../../scrape/__tests__/fixtures/ficha-de-desempenho';
 import {
   acompanharPreenchimento,
@@ -35,8 +36,16 @@ const estruturaLida = areas.map((area, indice) => ({
   habilidades: area.habilidades.map((texto, h) => ({ indice: h, numero: `${h + 1}°`, texto })),
 }));
 
-function plano(excecoes: PlanoDoPreenchimento['excecoes'] = new Map()): PlanoDoPreenchimento {
-  return { turma, etapa: 1, nomeDaEtapa: 'I ETAPA', areas: [0], estudantes, excecoes, estrutura: estruturaLida };
+/** R in the given etapas of área 0 for everyone, with per-matrícula overrides. */
+function plano(
+  excecoes: Map<string, Excecao[]> = new Map(),
+  etapas: IndiceDaEtapa[] = [1],
+): PlanoDoPreenchimento {
+  const fichas = new Map(estudantes.map((e) => [
+    e.matricula,
+    fichaInicial([estruturaLida[0]], etapas, excecoes.get(e.matricula) ?? []),
+  ]));
+  return { turma, etapas, rotuloDasEtapas: 'I ETAPA', areas: [0], estudantes, fichas, estrutura: estruturaLida };
 }
 
 async function portal(): Promise<Page> {
@@ -73,7 +82,7 @@ const cliques = (page: Page) => page.evaluate(() => (window as unknown as { __cl
 
 it('fills each estudante as the auxiliar clicks Salvar e próximo', async () => {
   const page = await portal();
-  const { fim, aguardandoEm } = executar(page, plano(new Map([['103', [{ area: 0, habilidade: 1, conceito: 'NR' }]]])));
+  const { fim, aguardandoEm } = executar(page, plano(new Map([['103', [{ area: 0, habilidade: 1, conceito: 'NR', etapas: [1] }]]])));
 
   await aguardandoEm('101');
   await page.getByRole('button', { name: 'Salvar e próximo' }).click();
@@ -172,5 +181,23 @@ it('stops without writing when the ficha changed since it was read', async () =>
   expect(final.erro).toContain('Releia a ficha');
   expect(final.preenchidos).toEqual([]);
   expect(await page.locator('#dialogo select option:checked').evaluateAll((opcoes) => opcoes.filter((o) => (o as HTMLOptionElement).index > 0).length)).toBe(0);
+  await page.close();
+});
+
+it('fills the four etapas of an estudante from the planned ficha', async () => {
+  const page = await portal();
+  const { fim, aguardandoEm } = executar(page, plano(
+    new Map([['101', [{ area: 0, habilidade: 0, conceito: 'RD', etapas: [1, 2] }]]]),
+    [1, 2, 3, 4],
+  ));
+
+  await aguardandoEm('101');
+  await page.getByRole('button', { name: 'Salvar e sair' }).click();
+
+  await fim;
+  expect((await salvos(page))[101]).toEqual({
+    '0.0.1': 'RD', '0.0.2': 'RD', '0.0.3': 'R', '0.0.4': 'R',
+    '0.1.1': 'R', '0.1.2': 'R', '0.1.3': 'R', '0.1.4': 'R',
+  });
   await page.close();
 });

@@ -1,7 +1,15 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-import { indiceDaEtapa, preenchimentoDaFichaSchema, type Excecao } from '../../shared/ficha-de-desempenho';
+import {
+  ETAPAS_DA_FICHA,
+  etapasSchema,
+  fichaInicial,
+  normalizarLinha,
+  previaEditadaSchema,
+  type FichaPlanejada,
+  type IndiceDaEtapa,
+} from '../../shared/ficha-de-desempenho';
 import { ArquivoIlegivelError, EnvioInvalidoError, OpenRouterError, OpenRouterNotConfiguredError } from '../ai/errors';
 import type { ArquivoEnviado } from '../ai/interpretar-envio';
 import { interpretarObservacoes } from '../ai/interpretar-observacoes';
@@ -14,7 +22,7 @@ import {
   iniciarPreenchimento,
   PreenchimentoEmAndamentoError,
 } from '../fichas/preenchimento-assistido';
-import { getEstruturaDaFicha, salvarEstruturaDaFicha } from '../fichas/store';
+import { apagarPrevia, getEstruturaDaFicha, getPrevia, salvarEstruturaDaFicha, salvarPrevia } from '../fichas/store';
 import { naSessaoHeaded } from '../sessoes-headed';
 import { closeSession, openSession } from '../portal-sessions';
 import { getDb } from '../professores/db';
@@ -85,20 +93,25 @@ function campoJson(valor: unknown): unknown {
   }
 }
 
+/** "I a IV ETAPA", "II e IV ETAPA", "I ETAPA": how a set of etapas reads on screen. */
+function rotuloDasEtapas(etapas: readonly IndiceDaEtapa[]): string {
+  const ordenadas = [...etapas].sort((a, b) => a - b);
+  const numeral = (etapa: IndiceDaEtapa) => ETAPAS_DA_FICHA[etapa - 1].replace(' ETAPA', '');
+  if (ordenadas.length === 1) return `${numeral(ordenadas[0])} ETAPA`;
+  const contiguas = ordenadas.every((etapa, i) => i === 0 || etapa === ordenadas[i - 1] + 1);
+  if (contiguas && ordenadas.length > 2) return `${numeral(ordenadas[0])} a ${numeral(ordenadas.at(-1)!)} ETAPA`;
+  return `${ordenadas.slice(0, -1).map(numeral).join(', ')} e ${numeral(ordenadas.at(-1)!)} ETAPA`;
+}
+
 /**
- * The agent's reading of the professor's observações for one etapa, checked
- * against the turma's estudantes. Touches neither the portal nor the database.
+ * Reads the professor's observações with the agent and builds the prévia:
+ * every estudante of the turma with R in every habilidade of the chosen áreas
+ * and etapas, lowered where the observações said so. Saved, so the auxiliar
+ * can review it over time; it replaces any earlier prévia.
  */
-fichaDeDesempenho.post('/:id/etapas/:etapa/ficha-de-desempenho/observacoes', async (context) => {
+fichaDeDesempenho.post('/:id/ficha-de-desempenho/previas', async (context) => {
   const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
   if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
-  const etapa = decodeURIComponent(context.req.param('etapa'));
-
-  try {
-    indiceDaEtapa(etapa);
-  } catch {
-    return context.json({ error: `A ficha de desempenho não tem a etapa "${etapa}".` }, 422);
-  }
 
   const estrutura = getEstruturaDaFicha(getDb(), caderneta.professorId, caderneta.turma);
   if (!estrutura) {
@@ -114,10 +127,13 @@ fichaDeDesempenho.post('/:id/etapas/:etapa/ficha-de-desempenho/observacoes', asy
 
   const areas = areasSchema.safeParse(campoJson(body.areas));
   if (!areas.success) return context.json({ error: 'Escolha ao menos uma área de conhecimento.' }, 400);
+  const etapas = etapasSchema.safeParse(campoJson(body.etapas));
+  if (!etapas.success) return context.json({ error: 'Escolha ao menos uma etapa.' }, 400);
   const escolhidas = estrutura.areas.filter((area) => areas.data.includes(area.indice));
   if (escolhidas.length !== areas.data.length) {
     return context.json({ error: 'Uma das áreas escolhidas não existe nesta ficha. Releia a ficha no portal.' }, 422);
   }
+  const etapasDaPrevia = [...new Set(etapas.data)].sort((a, b) => a - b);
 
   const uploads = [body.arquivos ?? []].flat().filter((entry): entry is File => entry instanceof File);
   const tooLarge = uploads.find((file) => file.size > env.maxUploadBytes);
@@ -137,18 +153,33 @@ fichaDeDesempenho.post('/:id/etapas/:etapa/ficha-de-desempenho/observacoes', asy
   }
 
   try {
-    const interpretadas = await interpretarObservacoes({
+    const lidas = await interpretarObservacoes({
       turma: caderneta.turma,
-      etapa,
+      etapas: etapasDaPrevia,
       areas: escolhidas,
       estudantes: turma.map(({ matricula, nome }) => ({ matricula, nome })),
       texto: typeof body.texto === 'string' ? body.texto : '',
       arquivos,
     });
-    return context.json({
-      ...interpretadas,
-      turma: turma.map(({ matricula, nome, situacao }) => ({ matricula, nome, situacao })),
+    const previa = salvarPrevia(getDb(), caderneta.id, caderneta.turma, {
+      areas: escolhidas.map((area) => area.indice),
+      etapas: etapasDaPrevia,
+      estudantes: turma.map(({ matricula, nome, situacao }) => {
+        const lido = lidas.estudantes.find((e) => e.matricula === matricula);
+        return {
+          matricula,
+          nome,
+          situacao,
+          trechos: [...new Set(lido?.excecoes.map((e) => e.trecho) ?? [])],
+          conceitos: fichaInicial(escolhidas, etapasDaPrevia, lido?.excecoes ?? []),
+        };
+      }),
+      gerais: lidas.gerais,
+      naoResolvidos: lidas.naoResolvidos,
+      descartadas: lidas.descartadas,
+      resposta: lidas.resposta,
     });
+    return context.json({ previa });
   } catch (error) {
     if (error instanceof OpenRouterNotConfiguredError) return context.json({ error: error.message }, 503);
     if (error instanceof EnvioInvalidoError || error instanceof ArquivoIlegivelError) {
@@ -160,65 +191,92 @@ fichaDeDesempenho.post('/:id/etapas/:etapa/ficha-de-desempenho/observacoes', asy
   }
 });
 
+fichaDeDesempenho.get('/:id/ficha-de-desempenho/previas/atual', (context) => {
+  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+  if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
+  return context.json({ previa: getPrevia(getDb(), caderneta.id, caderneta.turma) });
+});
+
+/** Saves the auxiliar's edits; every row is kept non-decreasing across etapas. */
+fichaDeDesempenho.put('/:id/ficha-de-desempenho/previas/atual', async (context) => {
+  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+  if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
+  const atual = getPrevia(getDb(), caderneta.id, caderneta.turma);
+  if (!atual) return context.json({ error: 'Não há prévia para esta turma.' }, 404);
+
+  const parsed = previaEditadaSchema.safeParse(await context.req.json().catch(() => null));
+  if (!parsed.success) return context.json({ error: 'Prévia malformada.' }, 400);
+
+  const editados = new Map(parsed.data.estudantes.map((e) => [e.matricula, e.conceitos]));
+  const fora = [...editados.keys()].find((matricula) => !atual.estudantes.some((e) => e.matricula === matricula));
+  if (fora) return context.json({ error: `A matrícula ${fora} não está na prévia.` }, 422);
+
+  const previa = salvarPrevia(getDb(), caderneta.id, caderneta.turma, {
+    ...atual,
+    estudantes: atual.estudantes.map((estudante) => {
+      const conceitos = editados.get(estudante.matricula);
+      if (!conceitos) return estudante;
+      const normalizados: FichaPlanejada = {};
+      for (const chave of Object.keys(estudante.conceitos)) {
+        normalizados[chave] = normalizarLinha(conceitos[chave] ?? estudante.conceitos[chave], atual.etapas);
+      }
+      return { ...estudante, conceitos: normalizados };
+    }),
+    gerais: parsed.data.gerais,
+    naoResolvidos: parsed.data.naoResolvidos,
+  });
+  return context.json({ previa });
+});
+
+fichaDeDesempenho.delete('/:id/ficha-de-desempenho/previas/atual', (context) => {
+  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
+  if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
+  apagarPrevia(getDb(), caderneta.id, caderneta.turma);
+  return context.body(null, 204);
+});
+
 const chaveDaExecucao = (caderneta: Caderneta) => `${caderneta.id}|${caderneta.turma}`;
 
 /**
- * Starts the preenchimento assistido of one etapa in the professor's headed
- * window. Answers right away: the run follows the auxiliar de ensino's
- * Salvar e próximo for as long as they keep going, and its progress is read
- * from the status route.
+ * Starts the preenchimento assistido from the saved prévia, in the
+ * professor's headed window. Answers right away: the run follows the
+ * auxiliar de ensino's Salvar e próximo for as long as they keep going, and
+ * its progress is read from the status route.
  */
-fichaDeDesempenho.post('/:id/etapas/:etapa/ficha-de-desempenho/preenchimentos-assistidos', async (context) => {
+fichaDeDesempenho.post('/:id/ficha-de-desempenho/preenchimentos-assistidos', async (context) => {
   const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
   if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
-  const nomeDaEtapa = decodeURIComponent(context.req.param('etapa'));
-
-  let etapa;
-  try {
-    etapa = indiceDaEtapa(nomeDaEtapa);
-  } catch {
-    return context.json({ error: `A ficha de desempenho não tem a etapa "${nomeDaEtapa}".` }, 422);
-  }
-
-  const parsed = preenchimentoDaFichaSchema.safeParse(await context.req.json().catch(() => null));
-  if (!parsed.success) return context.json({ error: 'Escolha as áreas de conhecimento a preencher.' }, 400);
-  const { areas, excecoes } = parsed.data;
 
   const db = getDb();
-  const estrutura = getEstruturaDaFicha(db, caderneta.professorId, caderneta.turma);
-  if (!estrutura) return context.json({ error: 'Leia a ficha de desempenho no portal antes de preencher.' }, 422);
-  if (areas.some((area) => !estrutura.areas.some((candidata) => candidata.indice === area))) {
-    return context.json({ error: 'Uma das áreas escolhidas não existe nesta ficha. Releia a ficha no portal.' }, 422);
+  const previa = getPrevia(db, caderneta.id, caderneta.turma);
+  if (!previa) return context.json({ error: 'Gere a prévia da ficha antes de preencher o portal.' }, 422);
+  if (previa.naoResolvidos.some((item) => item.excecoes.length > 0)) {
+    return context.json({ error: 'Há nomes nas observações que ainda não foram ligados a um estudante. Resolva ou ignore antes de preencher.' }, 422);
   }
-
-  const estudantes = listEstudantes(db, caderneta.id, caderneta.turma);
-  const desconhecida = excecoes.find((excecao) => !estudantes.some((e) => e.matricula === excecao.matricula));
-  if (desconhecida) {
-    return context.json({ error: `A matrícula ${desconhecida.matricula} não é de um estudante desta turma.` }, 422);
+  const estrutura = getEstruturaDaFicha(db, caderneta.professorId, caderneta.turma);
+  if (!estrutura || previa.areas.some((area) => !estrutura.areas.some((candidata) => candidata.indice === area))) {
+    return context.json({ error: 'A ficha mudou desde a prévia. Releia a ficha no portal e gere a prévia de novo.' }, 422);
   }
 
   const credenciais = await getProfessorCredenciais(db, createEncryptionPort(), caderneta.professorId);
   if (!credenciais) return context.json({ error: 'Professor não encontrado.' }, 404);
 
-  const porMatricula = new Map<string, Excecao[]>();
-  for (const { matricula, ...excecao } of excecoes) {
-    porMatricula.set(matricula, [...(porMatricula.get(matricula) ?? []), excecao]);
-  }
+  const rotulo = rotuloDasEtapas(previa.etapas);
   const plano = {
     periodoLetivo: periodoLetivoDaTurma(db, caderneta.professorId, caderneta.turma),
     turma: caderneta.turma,
-    etapa,
-    nomeDaEtapa,
-    areas,
-    estudantes: estudantes.map(({ matricula, nome, situacao }) => ({ matricula, nome, situacao })),
-    excecoes: porMatricula,
+    etapas: previa.etapas,
+    rotuloDasEtapas: rotulo,
+    areas: previa.areas,
+    estudantes: previa.estudantes.map(({ matricula, nome, situacao }) => ({ matricula, nome, situacao })),
+    fichas: new Map(previa.estudantes.map((e) => [e.matricula, e.conceitos])),
     estrutura: estrutura.areas,
   };
 
   try {
     const inicial = iniciarPreenchimento(
       chaveDaExecucao(caderneta),
-      { status: 'abrindo', etapa: nomeDaEtapa, total: 0, atual: null, preenchidos: [], pulados: [], erro: null },
+      { status: 'abrindo', etapa: rotulo, total: 0, atual: null, preenchidos: [], pulados: [], erro: null },
       (onEstado) => naSessaoHeaded(caderneta.professorId, credenciais, (page) =>
         acompanharPreenchimento(page, plano, onEstado)),
     );

@@ -60,12 +60,12 @@ export function planejarEstudante({
     const linha = planejada[chaveDaHabilidade(area, habilidade)];
     if (!linha) continue;
 
-    let piso: { conceito: Conceito; etapa: 1 | 2 | 3 } | null = null;
-    const subirPiso = (conceito: Conceito, etapa: IndiceDaEtapa) => {
-      if (etapa < 4 && (piso === null || posicao(conceito) >= posicao(piso.conceito))) {
-        piso = { conceito, etapa: etapa as 1 | 2 | 3 };
-      }
-    };
+    type Piso = { conceito: Conceito; etapa: 1 | 2 | 3 };
+    let piso: Piso | null = null;
+    const comPiso = (atual: Piso | null, conceito: Conceito, etapa: IndiceDaEtapa): Piso | null =>
+      etapa < 4 && (atual === null || posicao(conceito) >= posicao(atual.conceito))
+        ? { conceito, etapa: etapa as 1 | 2 | 3 }
+        : atual;
 
     for (const etapa of [1, 2, 3, 4] as const) {
       const noPortal = conceitos[etapa];
@@ -74,18 +74,17 @@ export function planejarEstudante({
 
       if (noPortal !== null) {
         if (naExecucao) plano.jaPreenchidos.push({ area, habilidade, etapa, conceito: noPortal });
-        subirPiso(noPortal, etapa);
+        piso = comPiso(piso, noPortal, etapa);
         continue;
       }
       if (!naExecucao) continue;
 
-      const atual: { conceito: Conceito; etapa: 1 | 2 | 3 } | null = piso;
-      const escrito = atual && posicao(planejado) < posicao(atual.conceito) ? atual.conceito : planejado;
-      if (atual && escrito !== planejado) {
-        plano.mantidos.push({ area, habilidade, etapa, planejado, escrito, etapaDoPiso: atual.etapa });
+      const escrito: Conceito = piso && posicao(planejado) < posicao(piso.conceito) ? piso.conceito : planejado;
+      if (piso && escrito !== planejado) {
+        plano.mantidos.push({ area, habilidade, etapa, planejado, escrito, etapaDoPiso: piso.etapa });
       }
       plano.escritas.push({ area, habilidade, etapa, conceito: escrito });
-      subirPiso(escrito, etapa);
+      piso = comPiso(piso, escrito, etapa);
     }
   }
 
