@@ -1,7 +1,8 @@
 import {
   CONCEITOS,
+  chaveDaHabilidade,
   type Conceito,
-  type Excecao,
+  type FichaPlanejada,
   type IndiceDaEtapa,
 } from '../../shared/ficha-de-desempenho';
 
@@ -27,63 +28,65 @@ export interface PlanoDoEstudante {
   mantidos: {
     area: number;
     habilidade: number;
+    etapa: IndiceDaEtapa;
     planejado: Conceito;
     escrito: Conceito;
     etapaDoPiso: 1 | 2 | 3;
   }[];
-  /** Already filled in the target etapa on the portal, so left untouched. */
-  jaPreenchidos: { area: number; habilidade: number; conceito: Conceito }[];
+  /** Already filled on the portal in an etapa of the run, so left untouched. */
+  jaPreenchidos: { area: number; habilidade: number; etapa: IndiceDaEtapa; conceito: Conceito }[];
 }
 
 const posicao = (conceito: Conceito) => CONCEITOS.indexOf(conceito);
 
 /**
- * What to write for one estudante in one etapa: R everywhere in the chosen
- * áreas, the exceções where the professor said otherwise, never below an
- * earlier etapa and never over a conceito the portal already has.
+ * What to write for one estudante: the planned ficha in every etapa of the
+ * run, walking the etapas in order. A conceito the portal already has is
+ * kept and, like every conceito written before it, is a floor: a later etapa
+ * is never written below the highest conceito of the etapas before it.
  */
 export function planejarEstudante({
   lidas,
-  etapa,
-  areas,
-  excecoes,
+  etapas,
+  planejada,
 }: {
   lidas: readonly HabilidadeLida[];
-  etapa: IndiceDaEtapa;
-  areas: readonly number[];
-  excecoes: readonly Excecao[];
+  etapas: readonly IndiceDaEtapa[];
+  planejada: FichaPlanejada;
 }): PlanoDoEstudante {
   const plano: PlanoDoEstudante = { escritas: [], mantidos: [], jaPreenchidos: [] };
 
   for (const { area, habilidade, conceitos } of lidas) {
-    if (!areas.includes(area)) continue;
+    const linha = planejada[chaveDaHabilidade(area, habilidade)];
+    if (!linha) continue;
 
-    const atual = conceitos[etapa];
-    if (atual !== null) {
-      plano.jaPreenchidos.push({ area, habilidade, conceito: atual });
-      continue;
-    }
-
-    const planejado: Conceito =
-      excecoes.find((excecao) => excecao.area === area && excecao.habilidade === habilidade)
-        ?.conceito ?? 'R';
-
-    // The floor is the highest conceito of any earlier etapa.
     let piso: { conceito: Conceito; etapa: 1 | 2 | 3 } | null = null;
-    for (let anterior = 1; anterior < etapa; anterior++) {
-      const conceito = conceitos[anterior as IndiceDaEtapa];
-      if (conceito !== null && (piso === null || posicao(conceito) >= posicao(piso.conceito))) {
-        piso = { conceito, etapa: anterior as 1 | 2 | 3 };
+    const subirPiso = (conceito: Conceito, etapa: IndiceDaEtapa) => {
+      if (etapa < 4 && (piso === null || posicao(conceito) >= posicao(piso.conceito))) {
+        piso = { conceito, etapa: etapa as 1 | 2 | 3 };
       }
-    }
+    };
 
-    if (piso && posicao(planejado) < posicao(piso.conceito)) {
-      plano.mantidos.push({ area, habilidade, planejado, escrito: piso.conceito, etapaDoPiso: piso.etapa });
-      plano.escritas.push({ area, habilidade, etapa, conceito: piso.conceito });
-      continue;
-    }
+    for (const etapa of [1, 2, 3, 4] as const) {
+      const noPortal = conceitos[etapa];
+      const planejado = linha[etapa - 1];
+      const naExecucao = etapas.includes(etapa) && planejado !== null && planejado !== undefined;
 
-    plano.escritas.push({ area, habilidade, etapa, conceito: planejado });
+      if (noPortal !== null) {
+        if (naExecucao) plano.jaPreenchidos.push({ area, habilidade, etapa, conceito: noPortal });
+        subirPiso(noPortal, etapa);
+        continue;
+      }
+      if (!naExecucao) continue;
+
+      const atual: { conceito: Conceito; etapa: 1 | 2 | 3 } | null = piso;
+      const escrito = atual && posicao(planejado) < posicao(atual.conceito) ? atual.conceito : planejado;
+      if (atual && escrito !== planejado) {
+        plano.mantidos.push({ area, habilidade, etapa, planejado, escrito, etapaDoPiso: atual.etapa });
+      }
+      plano.escritas.push({ area, habilidade, etapa, conceito: escrito });
+      subirPiso(escrito, etapa);
+    }
   }
 
   return plano;

@@ -9,87 +9,64 @@ function lida(area: number, habilidade: number, conceitos: Partial<HabilidadeLid
   return { area, habilidade, conceitos: { ...vazio, ...conceitos } };
 }
 
-const duasAreas = [lida(0, 0), lida(0, 1), lida(1, 0)];
-
 describe('planejarEstudante', () => {
-  it('writes R in every habilidade of the chosen áreas when there are no exceções', () => {
-    const plano = planejarEstudante({ lidas: duasAreas, etapa: 1, areas: [0], excecoes: [] });
-
-    expect(plano.escritas).toEqual([
-      { area: 0, habilidade: 0, etapa: 1, conceito: 'R' },
-      { area: 0, habilidade: 1, etapa: 1, conceito: 'R' },
-    ]);
-    expect(plano.mantidos).toEqual([]);
-    expect(plano.jaPreenchidos).toEqual([]);
-  });
-
-  it('applies RD and NR exceções', () => {
+  it('writes the planned row in every chosen etapa', () => {
     const plano = planejarEstudante({
-      lidas: duasAreas,
-      etapa: 2,
-      areas: [0, 1],
-      excecoes: [
-        { area: 0, habilidade: 1, conceito: 'RD' },
-        { area: 1, habilidade: 0, conceito: 'NR' },
-      ],
+      lidas: [lida(0, 0)],
+      etapas: [1, 2, 3, 4],
+      planejada: { '0.0': ['RD', 'RD', 'R', 'R'] },
     });
 
     expect(plano.escritas).toEqual([
-      { area: 0, habilidade: 0, etapa: 2, conceito: 'R' },
-      { area: 0, habilidade: 1, etapa: 2, conceito: 'RD' },
-      { area: 1, habilidade: 0, etapa: 2, conceito: 'NR' },
+      { area: 0, habilidade: 0, etapa: 1, conceito: 'RD' },
+      { area: 0, habilidade: 0, etapa: 2, conceito: 'RD' },
+      { area: 0, habilidade: 0, etapa: 3, conceito: 'R' },
+      { area: 0, habilidade: 0, etapa: 4, conceito: 'R' },
     ]);
+    expect(plano.mantidos).toEqual([]);
   });
 
-  it('never decreases: RD planned after R in I ETAPA writes R and reports mantido', () => {
+  it('keeps a portal conceito and raises later planned etapas to it', () => {
     const plano = planejarEstudante({
       lidas: [lida(0, 0, { 1: 'R' })],
-      etapa: 2,
-      areas: [0],
-      excecoes: [{ area: 0, habilidade: 0, conceito: 'RD' }],
+      etapas: [1, 2, 3, 4],
+      planejada: { '0.0': ['RD', 'RD', 'R', 'R'] },
+    });
+
+    expect(plano.jaPreenchidos).toEqual([{ area: 0, habilidade: 0, etapa: 1, conceito: 'R' }]);
+    expect(plano.escritas.map((e) => [e.etapa, e.conceito])).toEqual([[2, 'R'], [3, 'R'], [4, 'R']]);
+    expect(plano.mantidos).toEqual([{ area: 0, habilidade: 0, etapa: 2, planejado: 'RD', escrito: 'R', etapaDoPiso: 1 }]);
+  });
+
+  it('uses a portal conceito outside the run as floor', () => {
+    const plano = planejarEstudante({
+      lidas: [lida(0, 0, { 1: 'RD' })],
+      etapas: [3],
+      planejada: { '0.0': [null, null, 'NR', null] },
+    });
+
+    expect(plano.escritas).toEqual([{ area: 0, habilidade: 0, etapa: 3, conceito: 'RD' }]);
+    expect(plano.mantidos[0]).toMatchObject({ etapa: 3, planejado: 'NR', escrito: 'RD', etapaDoPiso: 1 });
+  });
+
+  it('never writes etapas outside the run', () => {
+    const plano = planejarEstudante({
+      lidas: [lida(0, 0)],
+      etapas: [2],
+      planejada: { '0.0': ['R', 'R', 'R', 'R'] },
     });
 
     expect(plano.escritas).toEqual([{ area: 0, habilidade: 0, etapa: 2, conceito: 'R' }]);
-    expect(plano.mantidos).toEqual([
-      { area: 0, habilidade: 0, planejado: 'RD', escrito: 'R', etapaDoPiso: 1 },
-    ]);
   });
 
-  it('uses the highest earlier conceito as floor, ignoring blanks', () => {
+  it('skips habilidades not in the planned ficha', () => {
     const plano = planejarEstudante({
-      lidas: [lida(0, 0, { 1: 'NR', 3: 'RD' })],
-      etapa: 4,
-      areas: [0],
-      excecoes: [{ area: 0, habilidade: 0, conceito: 'NR' }],
+      lidas: [lida(0, 0), lida(1, 0)],
+      etapas: [1],
+      planejada: { '0.0': ['R', null, null, null] },
     });
 
-    expect(plano.escritas).toEqual([{ area: 0, habilidade: 0, etapa: 4, conceito: 'RD' }]);
-    expect(plano.mantidos).toEqual([
-      { area: 0, habilidade: 0, planejado: 'NR', escrito: 'RD', etapaDoPiso: 3 },
-    ]);
-  });
-
-  it('never overwrites the target etapa', () => {
-    const plano = planejarEstudante({
-      lidas: [lida(0, 0, { 2: 'NR' })],
-      etapa: 2,
-      areas: [0],
-      excecoes: [],
-    });
-
-    expect(plano.escritas).toEqual([]);
-    expect(plano.jaPreenchidos).toEqual([{ area: 0, habilidade: 0, conceito: 'NR' }]);
-  });
-
-  it('ignores exceções outside the chosen áreas', () => {
-    const plano = planejarEstudante({
-      lidas: duasAreas,
-      etapa: 1,
-      areas: [0],
-      excecoes: [{ area: 1, habilidade: 0, conceito: 'NR' }],
-    });
-
-    expect(plano.escritas.some((escrita) => escrita.area === 1)).toBe(false);
+    expect(plano.escritas.every((e) => e.area === 0)).toBe(true);
   });
 });
 
