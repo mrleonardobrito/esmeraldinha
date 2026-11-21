@@ -45,6 +45,7 @@ async function abrir() {
   const page = await browser.newPage();
   const padroes: string[] = [];
   const preenchimentos: { classificacoes?: unknown; notas: unknown[] }[] = [];
+  const conversas: { mensagens: unknown[]; estudantes: unknown[]; disciplina?: string }[] = [];
 
   await page.route('http://notas.test/**', async (route) => {
     const request = route.request();
@@ -70,6 +71,14 @@ async function abrir() {
       padroes.push(request.postDataJSON().classificacao);
       return route.fulfill({ json: { classificacao: request.postDataJSON().classificacao } });
     }
+    if (url.pathname.endsWith('/boletim/rascunhos')) {
+      conversas.push(request.postDataJSON());
+      return route.fulfill({ json: {
+        resposta: 'Dei 5 à Carla.',
+        notas: [{ matricula: '3', notaFinal: 5 }],
+        falhas: [{ estudante: 'Zeca', motivo: 'Nenhum estudante da turma se chama "Zeca".' }],
+      } });
+    }
     if (url.pathname.endsWith('/preenchimentos-assistidos')) {
       preenchimentos.push(request.postDataJSON());
       return route.fulfill({ json: {} });
@@ -80,7 +89,7 @@ async function abrir() {
   await page.goto('http://notas.test/');
   await page.getByRole('textbox', { name: 'Nota final de ANA', exact: true }).waitFor();
 
-  return { page, padroes, preenchimentos };
+  return { page, padroes, preenchimentos, conversas };
 }
 
 async function linha(page: Page, nome: string) {
@@ -173,5 +182,33 @@ it('fills every row and sends the classificações along', async () => {
       { matricula: '3', classificacao: 'Acima da média' },
       { matricula: '4', classificacao: 'Acima da média' },
     ]);
+  } finally { await page.close(); }
+}, 15_000);
+
+it('applies the notas finais the chat de notas sends back', async () => {
+  const { page, conversas } = await abrir();
+  try {
+    await page.getByRole('button', { name: 'Chat de notas', exact: true }).click();
+    const mensagem = page.getByRole('textbox', { name: 'Mensagem para o agente', exact: true });
+    await mensagem.fill('A Carla não alcançou a média.');
+    await mensagem.press('Enter');
+
+    await page.getByText('Dei 5 à Carla.').waitFor();
+    await page.getByText(/Zeca: Nenhum estudante da turma/).waitFor();
+    expect(await linha(page, 'CARLA')).toEqual({
+      notas: ['1,5', '1,5', '1', '1'], final: '5', classificacao: 'Abaixo da média',
+    });
+    expect((await linha(page, 'DAVI')).final).toBe('10');
+
+    expect(conversas).toEqual([{
+      disciplina: 'MATEMÁTICA',
+      mensagens: [{ papel: 'auxiliar', texto: 'A Carla não alcançou a média.' }],
+      estudantes: [
+        { matricula: '1', notaFinal: 8, classificacao: 'Acima da média' },
+        { matricula: '2', notaFinal: 5, classificacao: 'Abaixo da média' },
+        { matricula: '3', notaFinal: 10, classificacao: 'Acima da média' },
+        { matricula: '4', notaFinal: 10, classificacao: 'Acima da média' },
+      ],
+    }]);
   } finally { await page.close(); }
 }, 15_000);

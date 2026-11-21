@@ -83,6 +83,15 @@ describe('gerarNotas', () => {
     };
     expect(pedido.system).toContain('Acima da média: de 8 a 10');
     expect(pedido.system).toContain('AVALIAÇÃO/PROVA (vale 2,5)');
+    // Seen with the real model: "não conseguiu média" landed on Na média, and
+    // "acima da média" gave everyone the same nota.
+    expect(pedido.system).toContain(
+      '"Não alcançou a média", "não conseguiu média suficiente", "ficou sem média" ou "reprovou": Abaixo da média, menos de 6',
+    );
+    expect(pedido.system).toContain('notas diferentes entre os estudantes');
+    expect(pedido.system).toContain(
+      'Quando o auxiliar descrever a turma inteira, liste TODOS os estudantes',
+    );
     const texto = pedido.content.map((parte) => parte.text).join('\n');
     expect(texto).toContain('- 1 | ANA LIMA | nota final atual: 10 | Acima da média');
     expect(texto).toContain('- 3 | BRUNO ALVES | nota final atual: — | —');

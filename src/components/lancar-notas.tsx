@@ -9,6 +9,7 @@ import {
 
 import { CLASSIFICACOES, isClassificacao, type Classificacao } from "@shared/classificacao-de-notas";
 
+import { ChatDeNotas } from "@/components/chat-de-notas";
 import { EnvioDeMaterial } from "@/components/envio-de-material";
 import { CadernetaPorTurma } from "@/components/caderneta-por-turma";
 import { Button } from "@/components/ui/button";
@@ -367,6 +368,34 @@ function LancarNotasDaTurma({
               onEditar={editar}
               onTentarDeNovo={recarregar}
             />
+
+            {pronto && !semAvaliacao && (
+              <ChatDeNotas
+                // A new disciplina starts a new conversation.
+                key={pronto.disciplina}
+                cadernetaId={caderneta.id}
+                etapa={etapa}
+                turma={caderneta.turma}
+                disciplina={pronto.disciplina}
+                estudantes={() =>
+                  pronto.estudantes.map(({ matricula }) => ({
+                    matricula,
+                    ...resumoDaLinha(valores, matricula, pronto.avaliacoes),
+                  }))
+                }
+                onNotas={(notas) =>
+                  editar(
+                    Object.assign(
+                      {},
+                      ...notas.map(({ matricula, notaFinal }) =>
+                        edicoesParaNotaFinal(matricula, pronto.avaliacoes, notaFinal),
+                      ),
+                    ),
+                  )
+                }
+                disabled={preenchendo}
+              />
+            )}
 
             {erro && (
               <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
