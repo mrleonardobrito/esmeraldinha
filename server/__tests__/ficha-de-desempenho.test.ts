@@ -153,7 +153,7 @@ describe('ficha de desempenho routes', () => {
 
   const anaComDificuldade = {
     resposta: 'ok',
-    estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Ana', etapas: [1, 2] }] }],
+    estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 0, habilidade: 1, conceito: 'RD', trecho: 'Ana', etapas: [1, 2] }] }],
     gerais: [],
   };
 
@@ -291,7 +291,7 @@ describe('ficha de desempenho routes', () => {
     const { app, cadernetaId } = await comEstrutura();
     await agenteDevolve({
       resposta: '',
-      estudantes: [{ estudante: 'Carlos', matricula: '', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Carlos', etapas: [] }] }],
+      estudantes: [{ estudante: 'Carlos', matricula: '', excecoes: [{ area: 0, habilidade: 1, conceito: 'RD', trecho: 'Carlos', etapas: [] }] }],
       gerais: [],
     });
     await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));

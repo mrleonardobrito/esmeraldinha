@@ -43,6 +43,9 @@ const excecaoSchema = z.object({
   habilidade: z.number().int(),
   conceito: z.enum(['RD', 'NR']),
   etapas: z.array(z.number().int()).default([]),
+  tipo: z.enum(['dificuldade', 'melhoria']).default('dificuldade'),
+  etapaDaMelhoria: z.number().int().default(0),
+  gradual: z.boolean().default(false),
 });
 
 const respostaSchema = z.object({
@@ -58,7 +61,7 @@ const respostaSchema = z.object({
 const EXCECAO_JSON = {
   type: 'object',
   additionalProperties: false,
-  required: ['area', 'habilidade', 'conceito', 'etapas'],
+  required: ['area', 'habilidade', 'tipo', 'conceito', 'etapas', 'etapaDaMelhoria', 'gradual'],
   properties: {
     area: {
       type: 'integer',
@@ -66,7 +69,20 @@ const EXCECAO_JSON = {
     },
     habilidade: {
       type: 'integer',
-      description: 'O número depois do ponto no código da habilidade; -1 para todas as habilidades da área.',
+      description: 'O número da habilidade como a ficha o mostra (o 13 de "13°"); -1 para todas as habilidades da área.',
+    },
+    tipo: {
+      type: 'string',
+      enum: ['dificuldade', 'melhoria'],
+      description: '"dificuldade" usa conceito e etapas; "melhoria" usa etapaDaMelhoria e gradual.',
+    },
+    etapaDaMelhoria: {
+      type: 'integer',
+      description: 'Só em melhoria: a etapa (1 a 4) a partir da qual o estudante passou a realizar (R). 0 em dificuldade.',
+    },
+    gradual: {
+      type: 'boolean',
+      description: 'Só em melhoria: true quando a melhora foi gradual (começou sem realizar e passou por dificuldade).',
     },
     conceito: { type: 'string', enum: ['RD', 'NR'] },
     etapas: {
@@ -78,6 +94,12 @@ const EXCECAO_JSON = {
     },
   },
 } as const;
+
+/** The habilidade's number as the ficha shows it ("13°" → 13). */
+function numeroDa(habilidade: { indice: number; numero: string }): number {
+  const numero = Number.parseInt(habilidade.numero, 10);
+  return Number.isNaN(numero) ? habilidade.indice + 1 : numero;
+}
 
 const RESPONSE_SCHEMA = {
   type: 'object',
@@ -146,7 +168,7 @@ function buildSystemPrompt({ turma, etapas, areas, estudantes }: InterpretarObse
   const habilidades = areas
     .map((area) =>
       `Área ${area.indice} — ${area.titulo}\n` +
-      area.habilidades.map((h) => `  ${area.indice}.${h.indice} ${h.numero} ${h.texto}`).join('\n'),
+      area.habilidades.map((h) => `  ${area.indice}.${numeroDa(h)} — ${h.texto}`).join('\n'),
     )
     .join('\n');
 
@@ -163,9 +185,14 @@ function buildSystemPrompt({ turma, etapas, areas, estudantes }: InterpretarObse
     'dificuldade nas etapas antes da III, e R da III em diante. Um conceito',
     'nunca piora de uma etapa para a seguinte.',
     '',
-    'Uma "melhoria gradual" (ou evolução gradual) ao longo do ano é:',
-    'NR na I ETAPA, RD na II e na III ETAPA e R na IV ETAPA.',
-    'Devolva duas exceções: NR com etapas [1] e RD com etapas [2, 3].',
+    'Quando a observação diz que o estudante melhorou, devolva tipo "melhoria"',
+    'com etapaDaMelhoria = a etapa a partir da qual ele realiza (R), e gradual',
+    'true se a melhora foi gradual. O sistema calcula os conceitos: gradual é NR',
+    'na I ETAPA, RD nas etapas seguintes e R a partir da etapa da melhoria;',
+    'sem ser gradual, RD antes da etapa da melhoria e R a partir dela. Ninguém',
+    'termina sem realizar uma habilidade em que melhorou. Exemplo: "melhoria',
+    'gradual até o final da IV etapa" é etapaDaMelhoria 4 e gradual true, ou',
+    'seja NR na I ETAPA, RD na II e na III ETAPA e R na IV ETAPA.',
     '',
     'Quando a observação fala de todas as habilidades de uma área, use',
     'habilidade -1 naquela área; de todas as habilidades de todas as áreas,',
@@ -179,7 +206,9 @@ function buildSystemPrompt({ turma, etapas, areas, estudantes }: InterpretarObse
     'foi bem: fica R em tudo, e você não o devolve. Devolva só as exceções —',
     'RD ou NR —, cada uma com o trecho da observação que a justifica.',
     '',
-    'Use só as habilidades abaixo, pelo código <área>.<habilidade>. Uma',
+    'Use só as habilidades abaixo, pelo código <área>.<número>, em que o número',
+    'é o que a ficha mostra: "a habilidade 13 de Arte" é o código <área de',
+    'Arte>.13. Uma',
     'dificuldade que não corresponde a nenhuma delas não vira exceção: diga',
     'isso na resposta. Escolha as habilidades a que a observação realmente se',
     'refere; não espalhe uma dificuldade por habilidades que ela não menciona.',
@@ -231,17 +260,24 @@ export async function interpretarObservacoes(input: InterpretarObservacoesInput)
    * points nowhere.
    */
   const valida = (
-    excecao: Omit<Excecao, 'etapas'> & { etapas: number[] },
+    excecao: z.infer<typeof excecaoSchema>,
     trecho: string,
   ): Excecao[] => {
-    const daExecucao = excecao.etapas.length === 0
-      ? [...input.etapas]
-      : input.etapas.filter((etapa) => excecao.etapas.includes(etapa));
-    if (daExecucao.length === 0) {
-      descartadas.push({ trecho, motivo: 'A observação fala de uma etapa que não está sendo preenchida.' });
-      return [];
+    // A melhoria is turned into conceitos here, not by the model: gradual is
+    // NR in I and RD up to the etapa it improved; otherwise RD before it.
+    const partes: { conceito: 'RD' | 'NR'; etapas: number[]; explicita: boolean }[] = [];
+    if (excecao.tipo === 'melhoria') {
+      const a = Math.min(Math.max(excecao.etapaDaMelhoria, 1), 5);
+      const antes = [1, 2, 3, 4].filter((etapa) => etapa < a);
+      if (excecao.gradual) {
+        if (antes.includes(1)) partes.push({ conceito: 'NR', etapas: [1], explicita: false });
+        if (antes.length > 1) partes.push({ conceito: 'RD', etapas: antes.slice(1), explicita: false });
+      } else if (antes.length > 0) {
+        partes.push({ conceito: 'RD', etapas: antes, explicita: false });
+      }
+    } else {
+      partes.push({ conceito: excecao.conceito, etapas: excecao.etapas, explicita: true });
     }
-    const etapas = [...daExecucao].sort((a, b) => a - b);
 
     const alvo = excecao.area === -1 ? areas : areas.filter((candidata) => candidata.indice === excecao.area);
     if (alvo.length === 0) {
@@ -249,13 +285,25 @@ export async function interpretarObservacoes(input: InterpretarObservacoesInput)
       return [];
     }
     const todas = excecao.area === -1 || excecao.habilidade === -1;
-    if (!todas && !alvo[0].habilidades.some((h) => h.indice === excecao.habilidade)) {
+    if (!todas && !alvo[0].habilidades.some((h) => numeroDa(h) === excecao.habilidade)) {
       descartadas.push({ trecho, motivo: `A área "${alvo[0].titulo}" não tem a habilidade ${excecao.habilidade}.` });
       return [];
     }
-    return alvo.flatMap((area) => area.habilidades
-      .filter((h) => todas || h.indice === excecao.habilidade)
-      .map((h) => ({ area: area.indice, habilidade: h.indice, conceito: excecao.conceito, etapas })));
+    const habilidades = alvo.flatMap((area) => area.habilidades
+      .filter((h) => todas || numeroDa(h) === excecao.habilidade)
+      .map((h) => ({ area: area.indice, habilidade: h.indice })));
+
+    return partes.flatMap(({ conceito, etapas: pedidas, explicita }) => {
+      const daExecucao = explicita && pedidas.length === 0
+        ? [...input.etapas]
+        : input.etapas.filter((etapa) => pedidas.includes(etapa));
+      if (daExecucao.length === 0) {
+        if (explicita) descartadas.push({ trecho, motivo: 'A observação fala de uma etapa que não está sendo preenchida.' });
+        return [];
+      }
+      const etapas = [...daExecucao].sort((x, y) => x - y);
+      return habilidades.map((h) => ({ ...h, conceito, etapas }));
+    });
   };
 
   /**

@@ -35,7 +35,7 @@ describe('interpretarObservacoes', () => {
   it('resolves estudantes by name and keeps their exceções with trecho', async () => {
     const complete = agente({
       resposta: 'ok',
-      estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 3, habilidade: 0, conceito: 'NR', trecho: 'ainda não dialoga' }] }],
+      estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 3, habilidade: 1, conceito: 'NR', trecho: 'ainda não dialoga' }] }],
       gerais: [],
     });
 
@@ -52,8 +52,8 @@ describe('interpretarObservacoes', () => {
     const complete = agente({
       resposta: '',
       estudantes: [
-        { estudante: 'Carlos', matricula: '', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Carlos' }] },
-        { estudante: 'João', matricula: '', excecoes: [{ area: 0, habilidade: 1, conceito: 'RD', trecho: 'João' }] },
+        { estudante: 'Carlos', matricula: '', excecoes: [{ area: 0, habilidade: 1, conceito: 'RD', trecho: 'Carlos' }] },
+        { estudante: 'João', matricula: '', excecoes: [{ area: 0, habilidade: 2, conceito: 'RD', trecho: 'João' }] },
       ],
       gerais: [],
     });
@@ -73,12 +73,12 @@ describe('interpretarObservacoes', () => {
         estudante: 'Ana Ruthe',
         matricula: '10315',
         excecoes: [
-          { area: 1, habilidade: 0, conceito: 'RD', trecho: 'área não escolhida' },
+          { area: 1, habilidade: 1, conceito: 'RD', trecho: 'área não escolhida' },
           { area: 0, habilidade: 9, conceito: 'RD', trecho: 'habilidade inexistente' },
-          { area: 0, habilidade: 1, conceito: 'RD', trecho: 'válida' },
+          { area: 0, habilidade: 2, conceito: 'RD', trecho: 'válida' },
         ],
       }],
-      gerais: [{ trecho: 'turma toda', excecoes: [{ area: 7, habilidade: 0, conceito: 'NR' }] }],
+      gerais: [{ trecho: 'turma toda', excecoes: [{ area: 7, habilidade: 1, conceito: 'NR' }] }],
     });
 
     const resultado = await interpretarObservacoes({ ...base, complete });
@@ -92,7 +92,7 @@ describe('interpretarObservacoes', () => {
     const complete = agente({
       resposta: '',
       estudantes: [],
-      gerais: [{ trecho: 'a turma ainda não dialoga', excecoes: [{ area: 3, habilidade: 0, conceito: 'RD' }] }],
+      gerais: [{ trecho: 'a turma ainda não dialoga', excecoes: [{ area: 3, habilidade: 1, conceito: 'RD' }] }],
     });
 
     const resultado = await interpretarObservacoes({ ...base, complete });
@@ -103,7 +103,7 @@ describe('interpretarObservacoes', () => {
   it('does not trust a matrícula the observação never wrote: an ambiguous name stays unresolved', async () => {
     const complete = agente({
       resposta: '',
-      estudantes: [{ estudante: 'João', matricula: '10316', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'João' }] }],
+      estudantes: [{ estudante: 'João', matricula: '10316', excecoes: [{ area: 0, habilidade: 1, conceito: 'RD', trecho: 'João' }] }],
       gerais: [],
     });
 
@@ -116,7 +116,7 @@ describe('interpretarObservacoes', () => {
   it('accepts a matrícula written in the observação', async () => {
     const complete = agente({
       resposta: '',
-      estudantes: [{ estudante: 'João', matricula: '10317', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'João' }] }],
+      estudantes: [{ estudante: 'João', matricula: '10317', excecoes: [{ area: 0, habilidade: 1, conceito: 'RD', trecho: 'João' }] }],
       gerais: [],
     });
 
@@ -142,8 +142,8 @@ describe('interpretarObservacoes', () => {
       resposta: '',
       estudantes: [],
       gerais: [
-        { trecho: 'Ana tem dificuldade em EO', estudante: 'Ana Ruthe', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD' }] },
-        { trecho: 'a turma não escuta', estudante: '', excecoes: [{ area: 3, habilidade: 0, conceito: 'RD' }] },
+        { trecho: 'Ana tem dificuldade em EO', estudante: 'Ana Ruthe', excecoes: [{ area: 0, habilidade: 1, conceito: 'RD' }] },
+        { trecho: 'a turma não escuta', estudante: '', excecoes: [{ area: 3, habilidade: 1, conceito: 'RD' }] },
       ],
     });
 
@@ -158,7 +158,7 @@ describe('interpretarObservacoes', () => {
   it('an exceção without etapas applies to every chosen etapa', async () => {
     const complete = agente({
       resposta: '',
-      estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 0, habilidade: 0, conceito: 'RD', trecho: 'Ana', etapas: [] }] }],
+      estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 0, habilidade: 1, conceito: 'RD', trecho: 'Ana', etapas: [] }] }],
       gerais: [],
     });
 
@@ -174,8 +174,8 @@ describe('interpretarObservacoes', () => {
         estudante: 'Ana Ruthe',
         matricula: '',
         excecoes: [
-          { area: 0, habilidade: 0, conceito: 'RD', trecho: 'na I e na III', etapas: [1, 3] },
-          { area: 0, habilidade: 1, conceito: 'NR', trecho: 'só na IV', etapas: [4] },
+          { area: 0, habilidade: 1, conceito: 'RD', trecho: 'na I e na III', etapas: [1, 3] },
+          { area: 0, habilidade: 2, conceito: 'NR', trecho: 'só na IV', etapas: [4] },
         ],
       }],
       gerais: [],
@@ -240,6 +240,35 @@ describe('interpretarObservacoes', () => {
     expect(system).toContain('NR na I ETAPA, RD na II e na III ETAPA e R na IV ETAPA');
   });
 
+  it('turns a melhoria into conceitos: gradual is NR, then RD, then R from the etapa it improved', async () => {
+    const complete = agente({
+      resposta: '',
+      estudantes: [
+        { estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 0, habilidade: 1, tipo: 'melhoria', conceito: 'RD', etapas: [], etapaDaMelhoria: 3, gradual: true, trecho: 'melhorou na III' }] },
+        { estudante: 'João Pedro', matricula: '', excecoes: [{ area: 0, habilidade: 2, tipo: 'melhoria', conceito: 'RD', etapas: [], etapaDaMelhoria: 4, gradual: true, trecho: 'melhorou na IV' }] },
+        { estudante: 'João Miguel', matricula: '', excecoes: [{ area: 0, habilidade: 1, tipo: 'melhoria', conceito: 'RD', etapas: [], etapaDaMelhoria: 3, gradual: false, trecho: 'melhorou na III' }] },
+      ],
+      gerais: [],
+    });
+
+    const resultado = await interpretarObservacoes({ ...base, complete });
+
+    const de = (matricula: string) => resultado.estudantes.find((e) => e.matricula === matricula)!.excecoes
+      .map((e) => `${e.area}.${e.habilidade}:${e.conceito}${e.etapas.join('')}`);
+    expect(de('10315')).toEqual(['0.0:NR1', '0.0:RD2']);
+    expect(de('10316')).toEqual(['0.1:NR1', '0.1:RD23']);
+    expect(de('10317')).toEqual(['0.0:RD12']);
+  });
+
+  it('reads the habilidade by the number the ficha shows, not its position', async () => {
+    const complete = agente({ resposta: '', estudantes: [], gerais: [] });
+
+    await interpretarObservacoes({ ...base, complete });
+
+    const { system } = complete.mock.calls[0][0] as { system: string };
+    expect(system).toContain('0.2 — Comunica-se com adultos.');
+  });
+
   it('throws EnvioInvalidoError when there is no text and no file', async () => {
     await expect(interpretarObservacoes({ ...base, texto: '  ', complete: agente({}) })).rejects.toBeInstanceOf(EnvioInvalidoError);
   });
@@ -250,7 +279,7 @@ describe('interpretarObservacoes', () => {
     await interpretarObservacoes({ ...base, complete });
 
     const { system } = complete.mock.calls[0][0] as { system: string };
-    expect(system).toContain('3.0 1° Dialoga com crianças.');
+    expect(system).toContain('3.1 — Dialoga com crianças.');
     expect(system).toContain('ANA RUTHE IZABELLY DA SILVA (10315)');
   });
 });
