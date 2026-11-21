@@ -33,6 +33,7 @@ import {
   type ResumoDoPainel,
 } from "@/lib/painel";
 import { nomeCurtoDaTurma } from "@/lib/turmas";
+import { turmasDaCaderneta } from "@/lib/cadernetas";
 import { cn } from "@/lib/utils";
 import { useConta } from "@/components/conta-provider";
 
@@ -419,7 +420,7 @@ function ParaRetomar({ cadernetas }: { cadernetas: CadernetaParaRetomar[] }) {
           >
             <span className="flex min-w-52 flex-col gap-0.5">
               <span className="font-heading font-medium">
-                {nomeCurtoDaTurma(item.caderneta.turma)}
+                {turmasDaCaderneta(item.caderneta).map(nomeCurtoDaTurma).join(" + ")}
               </span>
               <span className="text-sm text-muted-foreground">
                 {item.professor.nome}

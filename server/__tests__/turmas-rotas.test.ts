@@ -175,6 +175,32 @@ describe('rotas de turmas', () => {
   });
 
   describe('passo 2: buscar turmas', () => {
+    it('persists each professor-turma grupo diário and exposes it without another portal read', async () => {
+      const app = await freshApp();
+      const { getCatalogo } = await import('../portal-sessions');
+      vi.mocked(getCatalogo).mockResolvedValue({
+        etapas: [{
+          ...catalogo.etapas[0],
+          gruposDiariosPorTurma: [
+            { turma: catalogo.etapas[0].turmas[0], grupoDiario: 'REDUÇÃO MANHÃ' },
+            { turma: catalogo.etapas[0].turmas[1], grupoDiario: null },
+          ],
+        }],
+      });
+
+      const response = await app.fetch(request('/buscas', json({ professorId })));
+      expect(response.status).toBe(200);
+      const saved = await (await app.fetch(request(`/?professorId=${professorId}`))).json() as {
+        turmas: { nome: string; grupoDiario: string | null }[];
+      };
+
+      expect(saved.turmas.map(({ nome, grupoDiario }) => [nome, grupoDiario])).toEqual([
+        [catalogo.etapas[0].turmas[0], 'REDUÇÃO MANHÃ'],
+        [catalogo.etapas[0].turmas[1], null],
+      ]);
+      expect(vi.mocked(getCatalogo)).toHaveBeenCalledTimes(1);
+    });
+
     it('guarda as turmas do portal com o turno lido do nome', async () => {
       const app = await freshApp();
 

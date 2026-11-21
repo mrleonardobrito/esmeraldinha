@@ -1,23 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-
-import type {
-  AulaDoPortal,
-  AvaliacaoDoPortal,
-  NotaDoEstudante,
-  NotaDoPortal,
-} from '../scrape/types';
+import type { AulaDoPortal, AvaliacaoDoPortal, NotaDoEstudante, NotaDoPortal } from '../scrape/types';
 import { turnoDaTurma } from '../turmas/turno';
+import { isReducao } from '../../shared/turma';
+import { limparNomeDoEstudante } from '../scrape/nome-do-estudante';
 
 /** As cinco partes da caderneta, como definidas no CONTEXT.md. */
-export const PARTES = [
-  'conteudo',
-  'frequencia',
-  'ficha-desempenho',
-  'ficha-descritiva',
-  'boletim',
-] as const;
-
+export const PARTES = ['conteudo', 'frequencia', 'ficha-desempenho', 'ficha-descritiva', 'boletim'] as const;
 export type ParteDaCaderneta = (typeof PARTES)[number];
 
 /**
@@ -115,6 +104,7 @@ export interface Caderneta {
   id: string;
   professorId: string;
   turma: string;
+  turmas: string[];
   turno: string | null;
   etapas: EtapaDaCaderneta[];
   totalDeEstudantes: number;
@@ -140,21 +130,21 @@ export interface EtapaRaspada {
   nome: string;
   meses: string[];
   /** As aulas datadas da etapa, com o mês em que o portal as lista. */
-  aulas: (AulaDoPortal & { mes: string })[];
+  aulas: (AulaDoPortal & {
+    mes: string;
+  })[];
   /**
    * Um boletim por disciplina da turma. Vazio quando a etapa não tem avaliação
    * cadastrada — aí o portal não oferece nem disciplina nem tabela.
    */
   boletins?: readonly BoletimRaspado[];
 }
-
 export class CadernetaNotFoundError extends Error {
   constructor(id: string) {
     super(`Nenhuma caderneta encontrada com o id ${id}.`);
     this.name = 'CadernetaNotFoundError';
   }
 }
-
 export class TurmaJaCadastradaError extends Error {
   constructor(turma: string) {
     super(`Já existe uma caderneta cadastrada para a turma ${turma}.`);
@@ -162,9 +152,15 @@ export class TurmaJaCadastradaError extends Error {
   }
 }
 
-/** O portal não numera toda aula; no banco a ausência vira -1. */
+/** Invalid membership or composition of a caderneta. */
+export class CadernetaInvalidaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CadernetaInvalidaError';
+  }
+}
 const SEM_ORDEM = -1;
-
+const TABLES = ['caderneta_etapas', 'caderneta_aulas', 'caderneta_estudantes', 'caderneta_avaliacoes', 'caderneta_notas', 'caderneta_notas_do_estudante', 'caderneta_disciplinas'] as const;
 interface CadernetaRow {
   id: string;
   professor_id: string;
@@ -178,22 +174,42 @@ interface CadernetaRow {
   valor_a_receber: number | null;
 }
 
-interface EtapaRow {
-  nome: string;
-  meses: string;
-  total: number;
-  preenchidas: number;
+function transaction<T>(db: DatabaseSync, operation: () => T): T {
+  db.exec('BEGIN');
+  try {
+    const result = operation();
+    db.exec('COMMIT');
+    return result;
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 
-interface AulaRow {
-  etapa: string;
-  mes: string;
-  data: string;
-  ordem: number;
-  conteudo_preenchido: number;
-  codigo_cr: string | null;
-  desenvolvimento: string | null;
-  ferramentas: string | null;
+function turmasDaCaderneta(db: DatabaseSync, id: string): string[] {
+  const rows = db.prepare(
+    'SELECT turma FROM caderneta_turmas WHERE caderneta_id = ? ORDER BY posicao',
+  )
+    .all(id) as unknown as {
+      turma: string;
+    }[];
+  if (rows.length) return rows.map(row => row.turma);
+  const row = db.prepare('SELECT turma FROM cadernetas WHERE id = ?').get(id) as unknown as {
+    turma: string;
+  } | undefined;
+  return row ? [row.turma] : [];
+}
+
+function selectedTurma(
+  db: DatabaseSync,
+  id: string,
+  turma?: string,
+): string {
+  const turmas = turmasDaCaderneta(db, id);
+  if (turma !== undefined && !turmas.includes(turma)) {
+    throw new CadernetaInvalidaError('The turma does not belong to this caderneta.');
+  }
+  return turma ?? turmas[0] ?? '';
 }
 
 function statusDoConteudo(total: number, preenchidas: number): StatusDaParte {
@@ -201,300 +217,207 @@ function statusDoConteudo(total: number, preenchidas: number): StatusDaParte {
   return preenchidas >= total ? 'concluido' : 'parcial';
 }
 
-/**
- * O progresso de cada etapa. As aulas e as notas são contadas em consultas
- * separadas de propósito: um único JOIN entre as duas multiplicaria uma pela
- * outra, e a etapa apareceria com dez vezes mais aulas do que tem.
- */
-function readEtapas(db: DatabaseSync, cadernetaId: string): EtapaDaCaderneta[] {
-  const rows = db
-    .prepare(
-      `SELECT e.nome,
-              e.meses,
-              COUNT(a.data) AS total,
-              COALESCE(SUM(a.conteudo_preenchido), 0) AS preenchidas
-         FROM caderneta_etapas e
-         LEFT JOIN caderneta_aulas a
-           ON a.caderneta_id = e.caderneta_id AND a.etapa = e.nome
-        WHERE e.caderneta_id = ?
-        GROUP BY e.nome, e.meses, e.posicao
-        ORDER BY e.posicao ASC`,
+/** Compute each turma separately so estudantes and avaliações never cross-multiply. */
+function readEtapas(
+  db: DatabaseSync,
+  id: string,
+  turmas: readonly string[],
+): EtapaDaCaderneta[] {
+  const etapas = new Map<string, EtapaDaCaderneta>();
+  const statuses = new Map<string, { conteudo: StatusDaParte[]; boletim: StatusDaParte[]; }>();
+  for (const turma of turmas) {
+    const rows = db.prepare(
+      `SELECT e.nome, e.meses, COUNT(a.data) AS total,
+       COALESCE(SUM(a.conteudo_preenchido), 0) AS preenchidas
+       FROM caderneta_etapas e LEFT JOIN caderneta_aulas a
+       ON a.caderneta_id = e.caderneta_id AND a.turma = e.turma AND a.etapa = e.nome
+       WHERE e.caderneta_id = ? AND e.turma = ? GROUP BY e.nome, e.meses, e.posicao ORDER BY e.posicao`,
     )
-    .all(cadernetaId) as unknown as EtapaRow[];
-
-  const { estudantes } = db
-    .prepare(
-      `SELECT COUNT(*) AS estudantes FROM caderneta_estudantes
-        WHERE caderneta_id = ?
-          AND UPPER(TRIM(COALESCE(situacao, ''))) NOT IN ('TRANSFERIDO', 'TRANSFERIDA')`,
+      .all(id, turma) as unknown as {
+        nome: string;
+        meses: string;
+        total: number;
+        preenchidas: number;
+      }[];
+    const estudantes = db.prepare(
+      `SELECT COUNT(*) AS total FROM caderneta_estudantes
+       WHERE caderneta_id = ? AND turma = ?
+       AND UPPER(TRIM(COALESCE(situacao, ''))) NOT IN ('TRANSFERIDO', 'TRANSFERIDA')`,
     )
-    .get(cadernetaId) as unknown as { estudantes: number };
-
-  const avaliacoesPorEtapa = new Map<string, number>();
-  for (const row of db
-    .prepare(
+      .get(id, turma) as unknown as {
+        total: number;
+      };
+    const avaliacoes = new Map((db.prepare(
       `SELECT etapa, COUNT(*) AS total FROM caderneta_avaliacoes
-        WHERE caderneta_id = ? GROUP BY etapa`,
+       WHERE caderneta_id = ? AND turma = ? GROUP BY etapa`,
     )
-    .all(cadernetaId) as unknown as { etapa: string; total: number }[]) {
-    // Soma as avaliações de todas as disciplinas: o progresso da etapa é o do
-    // boletim inteiro, não o de uma disciplina só.
-    avaliacoesPorEtapa.set(row.etapa, Number(row.total));
-  }
-
-  const notasPorEtapa = new Map<string, number>();
-  for (const row of db
-    .prepare(
+      .all(id, turma) as unknown as {
+        etapa: string;
+        total: number;
+      }[]).map(row => [row.etapa, Number(row.total)]));
+    const notas = new Map((db.prepare(
       `SELECT n.etapa, COUNT(*) AS total FROM caderneta_notas n
-        JOIN caderneta_estudantes e
-          ON e.caderneta_id = n.caderneta_id AND e.matricula = n.matricula
-        WHERE n.caderneta_id = ?
-          AND UPPER(TRIM(COALESCE(e.situacao, ''))) NOT IN ('TRANSFERIDO', 'TRANSFERIDA')
-        GROUP BY n.etapa`,
+       JOIN caderneta_estudantes e ON e.caderneta_id = n.caderneta_id AND e.turma = n.turma AND e.matricula = n.matricula
+       WHERE n.caderneta_id = ? AND n.turma = ?
+       AND UPPER(TRIM(COALESCE(e.situacao, ''))) NOT IN ('TRANSFERIDO', 'TRANSFERIDA') GROUP BY n.etapa`,
     )
-    .all(cadernetaId) as unknown as { etapa: string; total: number }[]) {
-    notasPorEtapa.set(row.etapa, Number(row.total));
+      .all(id, turma) as unknown as {
+        etapa: string;
+        total: number;
+      }[]).map(row => [row.etapa, Number(row.total)]));
+    for (const row of rows) {
+      const entry = etapas.get(row.nome) ?? {
+        nome: row.nome,
+        meses: [],
+        totalDeAulas: 0,
+        aulasPreenchidas: 0,
+        conteudo: 'pendente',
+        totalDeNotas: 0,
+        notasLancadas: 0,
+        boletim: 'pendente'
+      };
+      entry.meses = [...new Set([...entry.meses, ...(JSON.parse(row.meses) as string[])])];
+      entry.totalDeAulas += Number(row.total);
+      entry.aulasPreenchidas += Number(row.preenchidas);
+      const totalDeNotas = Number(estudantes.total) * (avaliacoes.get(row.nome) ?? 0);
+      const notasLancadas = notas.get(row.nome) ?? 0;
+      entry.totalDeNotas += totalDeNotas;
+      entry.notasLancadas += notasLancadas;
+      const localStatuses = statuses.get(row.nome) ?? { conteudo: [], boletim: [] };
+      localStatuses.conteudo.push(statusDoConteudo(Number(row.total), Number(row.preenchidas)));
+      localStatuses.boletim.push(statusDoConteudo(totalDeNotas, notasLancadas));
+      statuses.set(row.nome, localStatuses);
+      etapas.set(row.nome, entry);
+    }
   }
-
-  return rows.map((row) => {
-    // Transferred estudantes do not contribute to required or completed entries.
-    const totalDeNotas = Number(estudantes) * (avaliacoesPorEtapa.get(row.nome) ?? 0);
-    const notasLancadas = notasPorEtapa.get(row.nome) ?? 0;
-
-    return {
-      nome: row.nome,
-      meses: JSON.parse(row.meses) as string[],
-      totalDeAulas: Number(row.total),
-      aulasPreenchidas: Number(row.preenchidas),
-      conteudo: statusDoConteudo(Number(row.total), Number(row.preenchidas)),
-      totalDeNotas,
-      notasLancadas,
-      boletim: statusDoConteudo(totalDeNotas, notasLancadas),
-    };
-  });
+  const combine = (parts: readonly StatusDaParte[]): StatusDaParte => {
+    if (parts.length === turmas.length && parts.every((part) => part === 'concluido')) {
+      return 'concluido';
+    }
+    return parts.some((part) => part !== 'pendente') ? 'parcial' : 'pendente';
+  };
+  for (const etapa of etapas.values()) {
+    const parts = statuses.get(etapa.nome)!;
+    etapa.conteudo = combine(parts.conteudo);
+    etapa.boletim = combine(parts.boletim);
+  }
+  return [...etapas.values()];
 }
 
-function toCaderneta(db: DatabaseSync, row: CadernetaRow): Caderneta {
-  const { total } = db
-    .prepare('SELECT COUNT(*) AS total FROM caderneta_estudantes WHERE caderneta_id = ?')
-    .get(row.id) as unknown as { total: number };
-
+function toCaderneta(
+  db: DatabaseSync,
+  row: CadernetaRow,
+  turma?: string,
+): Caderneta {
+  const turmas = turmasDaCaderneta(db, row.id);
+  const selected = selectedTurma(db, row.id, turma);
+  const scope = turma === undefined ? turmas : [selected];
+  const count = db.prepare(
+    'SELECT COUNT(*) AS total FROM caderneta_estudantes WHERE caderneta_id = ? AND turma = ?',
+  );
+  const turnos = new Set(scope.map(turnoDaTurma));
   return {
     id: row.id,
     professorId: row.professor_id,
-    turma: row.turma,
-    turno: row.turno,
-    etapas: readEtapas(db, row.id),
-    totalDeEstudantes: Number(total),
+    turma: selected,
+    turmas,
+    turno: turnos.size === 1 ? turnoDaTurma(scope[0] ?? row.turma) : null,
+    etapas: readEtapas(db, row.id, scope),
+    totalDeEstudantes: scope.reduce((sum, nome) => sum + Number((count.get(row.id, nome) as unknown as {
+      total: number;
+    }).total), 0),
     createdAt: row.created_at,
     syncedAt: row.synced_at,
     syncStatus: row.sync_status,
     syncError: row.sync_error,
     valorRecebido: row.valor_recebido,
-    valorAReceber: row.valor_a_receber,
+    valorAReceber: row.valor_a_receber
   };
-}
-
-/**
- * Grava as etapas e as aulas raspadas do portal, substituindo o que houver.
- * Uma raspagem é sempre a verdade inteira sobre a turma: uma aula que sumiu do
- * portal precisa sumir daqui também, então não há merge.
- */
-function replaceEtapas(
-  db: DatabaseSync,
-  cadernetaId: string,
-  etapas: readonly EtapaRaspada[],
-): void {
-  const insertEtapa = db.prepare(
-    'INSERT INTO caderneta_etapas (caderneta_id, nome, posicao, meses) VALUES (?, ?, ?, ?)',
-  );
-  const insertAula = db.prepare(
-    `INSERT INTO caderneta_aulas
-       (caderneta_id, etapa, mes, data, ordem, conteudo_preenchido,
-        codigo_cr, desenvolvimento, ferramentas)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
-
-  const insertAvaliacao = db.prepare(
-    `INSERT INTO caderneta_avaliacoes
-       (caderneta_id, etapa, disciplina, nome, tipo, data, valor, media, posicao)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
-  const insertNota = db.prepare(
-    `INSERT INTO caderneta_notas
-       (caderneta_id, etapa, disciplina, matricula, avaliacao, valor)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  );
-  const insertNotaDoEstudante = db.prepare(
-    `INSERT INTO caderneta_notas_do_estudante
-       (caderneta_id, etapa, disciplina, matricula, origem, calculada, parcial, personalizada)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
-  const insertDisciplina = db.prepare(
-    'INSERT OR IGNORE INTO caderneta_disciplinas (caderneta_id, nome, posicao) VALUES (?, ?, ?)',
-  );
-
-  db.prepare('DELETE FROM caderneta_etapas WHERE caderneta_id = ?').run(cadernetaId);
-  db.prepare('DELETE FROM caderneta_aulas WHERE caderneta_id = ?').run(cadernetaId);
-  db.prepare('DELETE FROM caderneta_avaliacoes WHERE caderneta_id = ?').run(cadernetaId);
-  db.prepare('DELETE FROM caderneta_notas WHERE caderneta_id = ?').run(cadernetaId);
-  db.prepare('DELETE FROM caderneta_notas_do_estudante WHERE caderneta_id = ?').run(
-    cadernetaId,
-  );
-  db.prepare('DELETE FROM caderneta_disciplinas WHERE caderneta_id = ?').run(cadernetaId);
-
-  // As disciplinas são da turma, mas o portal as oferece por etapa: a união do
-  // que apareceu em cada uma é o conjunto da caderneta.
-  const disciplinas: string[] = [];
-
-  etapas.forEach((etapa, posicao) => {
-    insertEtapa.run(cadernetaId, etapa.nome, posicao, JSON.stringify(etapa.meses));
-
-    for (const boletim of etapa.boletins ?? []) {
-      if (!disciplinas.includes(boletim.disciplina)) {
-        insertDisciplina.run(cadernetaId, boletim.disciplina, disciplinas.length);
-        disciplinas.push(boletim.disciplina);
-      }
-
-      boletim.avaliacoes.forEach((avaliacao, ordem) => {
-        insertAvaliacao.run(
-          cadernetaId,
-          etapa.nome,
-          boletim.disciplina,
-          avaliacao.nome,
-          avaliacao.tipo ?? null,
-          avaliacao.data ?? null,
-          avaliacao.valor ?? null,
-          avaliacao.media ?? null,
-          ordem,
-        );
-      });
-
-      for (const nota of boletim.notas) {
-        insertNota.run(
-          cadernetaId,
-          etapa.nome,
-          boletim.disciplina,
-          nota.matricula,
-          nota.avaliacao,
-          nota.valor,
-        );
-      }
-
-      for (const nota of boletim.notasDoEstudante) {
-        // Uma linha só com as desabilitadas não diz nada que o portal não
-        // recalcule; guardar as quatro mesmo assim mantém a leitura fiel à tela.
-        insertNotaDoEstudante.run(
-          cadernetaId,
-          etapa.nome,
-          boletim.disciplina,
-          nota.matricula,
-          nota.origem ?? null,
-          nota.calculada ?? null,
-          nota.parcial ?? null,
-          nota.personalizada ?? null,
-        );
-      }
-    }
-
-    for (const aula of etapa.aulas) {
-      insertAula.run(
-        cadernetaId,
-        etapa.nome,
-        aula.mes,
-        aula.data,
-        aula.ordem ?? SEM_ORDEM,
-        aula.preenchida ? 1 : 0,
-        aula.codigoCR ?? null,
-        aula.desenvolvimento ?? null,
-        aula.ferramentas ?? null,
-      );
-    }
-  });
 }
 
 export interface CadernetaInput {
   professorId: string;
-  turma: string;
+  turma?: string;
+  turmas?: readonly string[];
 }
 
-/**
- * Cadastra uma caderneta vazia, pronta para ser preenchida pela raspagem. O
- * turno não é pedido a ninguém: o portal já o escreve no nome da turma.
- * Ela nasce `pendente` de propósito: ler o portal leva minutos, e o auxiliar
- * de ensino não deve ficar olhando para uma tela travada por causa disso.
- *
- * @throws {TurmaJaCadastradaError} quando o professor já tem caderneta
- * daquela turma.
- */
+/** Create one caderneta, grouping turmas only when explicitly requested. */
 export function createCaderneta(db: DatabaseSync, input: CadernetaInput): Caderneta {
-  const existing = db
-    .prepare('SELECT id FROM cadernetas WHERE professor_id = ? AND turma = ?')
-    .get(input.professorId, input.turma);
-
-  if (existing) {
-    throw new TurmaJaCadastradaError(input.turma);
+  const turmas = input.turmas ? [...input.turmas] : input.turma ? [input.turma] : [];
+  if (!turmas.length || turmas.length > 4 || new Set(turmas).size !== turmas.length || turmas.some(turma => !turma.trim())) {
+    throw new CadernetaInvalidaError('A caderneta must contain one to four distinct turmas.');
   }
-
+  if (turmas.length > 1) {
+    const lookup = db.prepare('SELECT grupo_diario FROM turmas WHERE professor_id = ? AND nome = ?');
+    for (const turma of turmas) {
+      const row = lookup.get(input.professorId, turma) as unknown as {
+        grupo_diario: string | null;
+      } | undefined;
+      if (!row || !isReducao(row.grupo_diario)) {
+        throw new CadernetaInvalidaError('Only turmas de redução of the same professor may share a caderneta.');
+      }
+    }
+  }
   const id = randomUUID();
-
-  db.prepare(
-    `INSERT INTO cadernetas (id, professor_id, turma, turno, created_at, sync_status)
-     VALUES (?, ?, ?, ?, ?, 'pendente')`,
-  ).run(
-    id,
-    input.professorId,
-    input.turma,
-    turnoDaTurma(input.turma),
-    new Date().toISOString(),
-  );
-
+  transaction(db, () => {
+    for (const turma of turmas) {
+      if (db.prepare(
+        `SELECT 1 FROM caderneta_turmas WHERE professor_id = ? AND turma = ?
+         UNION ALL SELECT 1 FROM cadernetas WHERE professor_id = ? AND turma = ?`,
+      )
+        .get(input.professorId, turma, input.professorId, turma)) {
+        throw new TurmaJaCadastradaError(turma);
+      }
+    }
+    db.prepare(
+      `INSERT INTO cadernetas (id, professor_id, turma, turno, created_at, sync_status)
+       VALUES (?, ?, ?, ?, ?, 'pendente')`,
+    )
+      .run(id, input.professorId, turmas[0], turnoDaTurma(turmas[0]), new Date().toISOString());
+    const insert = db.prepare(
+      'INSERT INTO caderneta_turmas (caderneta_id, professor_id, turma, posicao) VALUES (?, ?, ?, ?)',
+    );
+    turmas.forEach((turma, posicao) => insert.run(id, input.professorId, turma, posicao));
+  });
   return getCaderneta(db, id);
 }
 
-/** As cadernetas de um professor, na ordem em que foram cadastradas. */
 export function listCadernetas(db: DatabaseSync, professorId: string): Caderneta[] {
-  const rows = db
-    .prepare(
-      `SELECT id, professor_id, turma, turno, created_at, synced_at, sync_status, sync_error, valor_recebido, valor_a_receber
-         FROM cadernetas WHERE professor_id = ? ORDER BY created_at ASC`,
-    )
-    .all(professorId) as unknown as CadernetaRow[];
-
-  return rows.map((row) => toCaderneta(db, row));
+  return (db.prepare('SELECT * FROM cadernetas WHERE professor_id = ? ORDER BY created_at').all(professorId) as unknown as CadernetaRow[]).map(row => toCaderneta(db, row));
 }
 
-/** @throws {CadernetaNotFoundError} quando `id` não é de nenhuma caderneta. */
-export function getCaderneta(db: DatabaseSync, id: string): Caderneta {
-  const row = db
-    .prepare(
-      `SELECT id, professor_id, turma, turno, created_at, synced_at, sync_status, sync_error, valor_recebido, valor_a_receber
-         FROM cadernetas WHERE id = ?`,
-    )
-    .get(id) as unknown as CadernetaRow | undefined;
-
+export function getCaderneta(
+  db: DatabaseSync,
+  id: string,
+  turma?: string,
+): Caderneta {
+  const row = db.prepare('SELECT * FROM cadernetas WHERE id = ?').get(id) as unknown as CadernetaRow | undefined;
   if (!row) throw new CadernetaNotFoundError(id);
-
-  return toCaderneta(db, row);
+  return toCaderneta(db, row, turma);
 }
 
-/** As aulas de uma etapa, na ordem em que o portal as lista. */
 export function listAulasDaEtapa(
   db: DatabaseSync,
-  cadernetaId: string,
+  id: string,
   etapa: string,
+  turma?: string,
 ): AulaDaCaderneta[] {
-  const rows = db
-    .prepare(
-      `SELECT etapa, mes, data, ordem, conteudo_preenchido,
-              codigo_cr, desenvolvimento, ferramentas
-         FROM caderneta_aulas
-        WHERE caderneta_id = ? AND etapa = ?
-        ORDER BY substr(data, 7, 4), substr(data, 4, 2), substr(data, 1, 2), ordem`,
-    )
-    .all(cadernetaId, etapa) as unknown as AulaRow[];
-
-  return rows.map((row) => ({
+  const rows = db.prepare(
+    `SELECT etapa, mes, data, ordem, conteudo_preenchido, codigo_cr, desenvolvimento, ferramentas
+     FROM caderneta_aulas WHERE caderneta_id = ? AND turma = ? AND etapa = ?
+     ORDER BY substr(data, 7, 4), substr(data, 4, 2), substr(data, 1, 2), ordem`,
+  )
+    .all(id, selectedTurma(db, id, turma), etapa) as unknown as {
+      etapa: string;
+      mes: string;
+      data: string;
+      ordem: number;
+      conteudo_preenchido: number;
+      codigo_cr: string | null;
+      desenvolvimento: string | null;
+      ferramentas: string | null;
+    }[];
+  return rows.map(row => ({
     etapa: row.etapa,
     mes: row.mes,
     data: row.data,
@@ -502,76 +425,201 @@ export function listAulasDaEtapa(
     conteudoPreenchido: row.conteudo_preenchido === 1,
     codigoCR: row.codigo_cr,
     desenvolvimento: row.desenvolvimento,
-    ferramentas: row.ferramentas,
+    ferramentas: row.ferramentas
   }));
 }
 
-/** O resultado inteiro de uma raspagem: o que o portal sabe sobre a turma. */
 export interface RaspagemDaTurma {
   etapas: readonly EtapaRaspada[];
   estudantes: readonly EstudanteDaCaderneta[];
 }
 
-/** Update only conteúdo from a fresh portal read, preserving the rest of the caderneta. */
+function replaceRaspagem(
+  db: DatabaseSync,
+  id: string,
+  turma: string,
+  raspagem: RaspagemDaTurma,
+): void {
+  for (const table of TABLES) db.prepare(`DELETE FROM ${table} WHERE caderneta_id = ? AND turma = ?`).run(id, turma);
+  const insertEtapa = db.prepare(
+    'INSERT INTO caderneta_etapas (caderneta_id, turma, nome, posicao, meses) VALUES (?, ?, ?, ?, ?)',
+  );
+  const insertAula = db.prepare(
+    `INSERT INTO caderneta_aulas
+     (caderneta_id, turma, etapa, mes, data, ordem, conteudo_preenchido, codigo_cr, desenvolvimento, ferramentas)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const insertDisciplina = db.prepare(
+    'INSERT OR IGNORE INTO caderneta_disciplinas (caderneta_id, turma, nome, posicao) VALUES (?, ?, ?, ?)',
+  );
+  const insertAvaliacao = db.prepare(
+    `INSERT INTO caderneta_avaliacoes
+     (caderneta_id, turma, etapa, disciplina, nome, tipo, data, valor, media, posicao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const insertNota = db.prepare(
+    `INSERT INTO caderneta_notas
+     (caderneta_id, turma, etapa, disciplina, matricula, avaliacao, valor) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const insertNotaDoEstudante = db.prepare(
+    `INSERT INTO caderneta_notas_do_estudante
+     (caderneta_id, turma, etapa, disciplina, matricula, origem, calculada, parcial, personalizada) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const disciplinas: string[] = [];
+  raspagem.etapas.forEach((etapa, posicao) => {
+    insertEtapa.run(id, turma, etapa.nome, posicao, JSON.stringify(etapa.meses));
+    for (const aula of etapa.aulas) insertAula.run(
+      id,
+      turma,
+      etapa.nome,
+      aula.mes,
+      aula.data,
+      aula.ordem ?? SEM_ORDEM,
+      aula.preenchida ? 1 : 0,
+      aula.codigoCR ?? null,
+      aula.desenvolvimento ?? null,
+      aula.ferramentas ?? null,
+    );
+    for (const boletim of etapa.boletins ?? []) {
+      if (!disciplinas.includes(boletim.disciplina)) {
+        insertDisciplina.run(id, turma, boletim.disciplina, disciplinas.length);
+        disciplinas.push(boletim.disciplina);
+      }
+      boletim.avaliacoes.forEach((avaliacao, posicao) => insertAvaliacao.run(
+        id,
+        turma,
+        etapa.nome,
+        boletim.disciplina,
+        avaliacao.nome,
+        avaliacao.tipo ?? null,
+        avaliacao.data ?? null,
+        avaliacao.valor ?? null,
+        avaliacao.media ?? null,
+        posicao,
+      ));
+      for (const nota of boletim.notas) insertNota.run(
+        id,
+        turma,
+        etapa.nome,
+        boletim.disciplina,
+        nota.matricula,
+        nota.avaliacao,
+        nota.valor,
+      );
+      for (const nota of boletim.notasDoEstudante) insertNotaDoEstudante.run(
+        id,
+        turma,
+        etapa.nome,
+        boletim.disciplina,
+        nota.matricula,
+        nota.origem ?? null,
+        nota.calculada ?? null,
+        nota.parcial ?? null,
+        nota.personalizada ?? null,
+      );
+    }
+  });
+  const insertEstudante = db.prepare(
+    `INSERT INTO caderneta_estudantes
+     (caderneta_id, turma, matricula, nome, situacao, data_matricula, ordem) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  raspagem.estudantes.forEach((estudante, ordem) => insertEstudante.run(
+    id,
+    turma,
+    estudante.matricula,
+    estudante.nome,
+    estudante.situacao ?? null,
+    estudante.dataMatricula ?? null,
+    ordem,
+  ));
+}
+
+/** Commit all turmas together after every portal read succeeds. */
+export function syncCadernetaTurmas(
+  db: DatabaseSync,
+  id: string,
+  raspagens: readonly {
+    turma: string;
+    raspagem: RaspagemDaTurma;
+  }[],
+): Caderneta {
+  const caderneta = getCaderneta(db, id);
+  if (raspagens.length !== caderneta.turmas.length || new Set(raspagens.map(entry => entry.turma)).size !== raspagens.length || raspagens.some(entry => !caderneta.turmas.includes(entry.turma))) {
+    throw new CadernetaInvalidaError('Synchronization must include every turma of the caderneta.');
+  }
+  transaction(db, () => {
+    for (const {
+      turma,
+      raspagem
+    } of raspagens) replaceRaspagem(db, id, turma, raspagem);
+    db.prepare(
+      "UPDATE cadernetas SET synced_at = ?, sync_status = 'sincronizada', sync_error = NULL WHERE id = ?",
+    )
+      .run(new Date().toISOString(), id);
+  });
+  return getCaderneta(db, id);
+}
+
+export function syncCaderneta(
+  db: DatabaseSync,
+  id: string,
+  raspagem: RaspagemDaTurma,
+  turma?: string,
+): Caderneta {
+  const caderneta = getCaderneta(db, id);
+  const selected = selectedTurma(db, id, turma);
+  transaction(db, () => {
+    replaceRaspagem(db, id, selected, raspagem);
+    // A single-turma refresh cannot establish success for the entire group.
+    if (caderneta.turmas.length === 1) {
+      db.prepare(
+        "UPDATE cadernetas SET synced_at = ?, sync_status = 'sincronizada', sync_error = NULL WHERE id = ?",
+      )
+        .run(new Date().toISOString(), id);
+    }
+  });
+  return getCaderneta(db, id);
+}
+
 export function atualizarConteudosDoMes(
   db: DatabaseSync,
-  cadernetaId: string,
+  id: string,
   etapa: string,
   mes: string,
   aulas: readonly AulaDoPortal[],
+  turma?: string,
 ): void {
-  const update = db.prepare(`UPDATE caderneta_aulas
-    SET conteudo_preenchido = ?, codigo_cr = ?, desenvolvimento = ?, ferramentas = ?
-    WHERE caderneta_id = ? AND etapa = ? AND mes = ? AND data = ? AND ordem = ?`);
-  const existentes = listAulasDaEtapa(db, cadernetaId, etapa).filter((aula) => aula.mes === mes);
-  db.exec('BEGIN');
-  try {
-    for (const existente of existentes) {
-      const aula = aulas.find((candidate) => candidate.data === existente.data &&
-        (candidate.ordem ?? null) === existente.ordem);
-      update.run(aula?.preenchida ? 1 : 0, aula?.codigoCR ?? null,
-        aula?.desenvolvimento ?? null, aula?.ferramentas ?? null,
-        cadernetaId, etapa, mes, existente.data, existente.ordem ?? SEM_ORDEM);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
-
-function replaceEstudantes(
-  db: DatabaseSync,
-  cadernetaId: string,
-  estudantes: readonly EstudanteDaCaderneta[],
-): void {
-  const insert = db.prepare(
-    `INSERT INTO caderneta_estudantes (caderneta_id, matricula, nome, situacao, data_matricula, ordem)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+  const selected = selectedTurma(db, id, turma);
+  const existentes = listAulasDaEtapa(db, id, etapa, selected).filter(aula => aula.mes === mes);
+  const update = db.prepare(
+    `UPDATE caderneta_aulas SET conteudo_preenchido = ?, codigo_cr = ?, desenvolvimento = ?, ferramentas = ?
+     WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND mes = ? AND data = ? AND ordem = ?`,
   );
-
-  db.prepare('DELETE FROM caderneta_estudantes WHERE caderneta_id = ?').run(cadernetaId);
-
-  estudantes.forEach((estudante, ordem) => {
-    insert.run(
-      cadernetaId,
-      estudante.matricula,
-      estudante.nome,
-      estudante.situacao ?? null,
-      estudante.dataMatricula ?? null,
-      ordem,
-    );
+  transaction(db, () => {
+    for (const existente of existentes) {
+      const aula = aulas.find(candidate => candidate.data === existente.data && (candidate.ordem ?? null) === existente.ordem);
+      update.run(
+        aula?.preenchida ? 1 : 0,
+        aula?.codigoCR ?? null,
+        aula?.desenvolvimento ?? null,
+        aula?.ferramentas ?? null,
+        id,
+        selected,
+        etapa,
+        mes,
+        existente.data,
+        existente.ordem ?? SEM_ORDEM,
+      );
+    }
   });
 }
 
-/** Marca que a raspagem começou, para a tela poder mostrar o progresso. */
 export function marcarSincronizando(db: DatabaseSync, id: string): void {
   db.prepare(
     "UPDATE cadernetas SET sync_status = 'sincronizando', sync_error = NULL WHERE id = ?",
-  ).run(id);
+  )
+    .run(id);
 }
 
-/** Registra a falha sem apagar o que a caderneta já tinha. */
 export function marcarFalhaNaSincronizacao(
   db: DatabaseSync,
   id: string,
@@ -579,150 +627,77 @@ export function marcarFalhaNaSincronizacao(
 ): void {
   db.prepare(
     "UPDATE cadernetas SET sync_status = 'falhou', sync_error = ? WHERE id = ?",
-  ).run(motivo, id);
+  )
+    .run(motivo, id);
 }
 
-/** Os estudantes da turma, na ordem em que o portal os lista. */
 export function listEstudantes(
   db: DatabaseSync,
-  cadernetaId: string,
+  id: string,
+  turma?: string,
 ): EstudanteDaCaderneta[] {
-  const rows = db
-    .prepare(
-      `SELECT matricula, nome, situacao, data_matricula FROM caderneta_estudantes
-        WHERE caderneta_id = ? ORDER BY ordem ASC`,
-    )
-    .all(cadernetaId) as unknown as {
-    matricula: string;
-    nome: string;
-    situacao: string | null;
-    data_matricula: string | null;
-  }[];
-
-  return rows.map((row) => ({
+  const rows = db.prepare(
+    `SELECT matricula, nome, situacao, data_matricula FROM caderneta_estudantes
+     WHERE caderneta_id = ? AND turma = ? ORDER BY ordem`,
+  )
+    .all(id, selectedTurma(db, id, turma)) as unknown as {
+      matricula: string;
+      nome: string;
+      situacao: string | null;
+      data_matricula: string | null;
+    }[];
+  return rows.map(row => ({
     matricula: row.matricula,
     nome: limparNomeDoEstudante(row.nome),
     situacao: row.situacao,
-    dataMatricula: row.data_matricula,
+    dataMatricula: row.data_matricula
   }));
 }
 
-/**
- * Substitui etapas, aulas e estudantes pelo que a raspagem trouxe e carimba a
- * sincronização. Uma raspagem é sempre a verdade inteira sobre a turma, então
- * não há merge: quem sumiu do portal some daqui.
- *
- * @throws {CadernetaNotFoundError} quando `id` não é de nenhuma caderneta.
- */
-export function syncCaderneta(
-  db: DatabaseSync,
-  id: string,
-  raspagem: RaspagemDaTurma,
-): Caderneta {
-  getCaderneta(db, id);
-
-  db.exec('BEGIN');
-  try {
-    replaceEtapas(db, id, raspagem.etapas);
-    replaceEstudantes(db, id, raspagem.estudantes);
-    db.prepare(
-      "UPDATE cadernetas SET synced_at = ?, sync_status = 'sincronizada', sync_error = NULL WHERE id = ?",
-    ).run(new Date().toISOString(), id);
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-
-  return getCaderneta(db, id);
-}
-
-/** Uma aula que um envio acabou de gravar no portal. */
 export interface AulaGravada {
   etapa: string;
   data: string;
   ordem?: number | null;
 }
 
-/**
- * Marca como preenchidas as aulas que um envio gravou, para a grade refletir
- * o envio sem esperar uma sincronização. Uma aula que o envio menciona mas que
- * a caderneta não tem é ignorada: quem manda sobre quais aulas existem é a
- * raspagem, não o envio.
- *
- * Quando a aula gravada não traz ordem, todas as aulas daquela data são
- * marcadas — é o mesmo casamento por data que `postAulaContent` faz.
- */
 export function marcarConteudoPreenchido(
   db: DatabaseSync,
-  cadernetaId: string,
+  id: string,
   aulas: readonly AulaGravada[],
+  turma?: string,
 ): number {
+  const selected = selectedTurma(db, id, turma);
   const comOrdem = db.prepare(
-    `UPDATE caderneta_aulas SET conteudo_preenchido = 1
-      WHERE caderneta_id = ? AND etapa = ? AND data = ? AND ordem = ?`,
+    'UPDATE caderneta_aulas SET conteudo_preenchido = 1 WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND data = ? AND ordem = ?',
   );
   const semOrdem = db.prepare(
-    `UPDATE caderneta_aulas SET conteudo_preenchido = 1
-      WHERE caderneta_id = ? AND etapa = ? AND data = ?`,
+    'UPDATE caderneta_aulas SET conteudo_preenchido = 1 WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND data = ?',
   );
-
-  let changed = 0;
-
-  db.exec('BEGIN');
-  try {
-    for (const aula of aulas) {
-      const result =
-        aula.ordem === undefined || aula.ordem === null
-          ? semOrdem.run(cadernetaId, aula.etapa, aula.data)
-          : comOrdem.run(cadernetaId, aula.etapa, aula.data, aula.ordem);
-
-      changed += Number(result.changes);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-
-  return changed;
+  return transaction(db, () => aulas.reduce((total, aula) => total + Number((aula.ordem === undefined || aula.ordem === null ? semOrdem.run(id, selected, aula.etapa, aula.data) : comOrdem.run(id, selected, aula.etapa, aula.data, aula.ordem)).changes), 0));
 }
 
-/** @throws {CadernetaNotFoundError} quando `id` não é de nenhuma caderneta. */
 export function deleteCaderneta(db: DatabaseSync, id: string): void {
-  const result = db.prepare('DELETE FROM cadernetas WHERE id = ?').run(id);
-
-  if (Number(result.changes) === 0) {
-    throw new CadernetaNotFoundError(id);
-  }
-
-  db.prepare('DELETE FROM caderneta_etapas WHERE caderneta_id = ?').run(id);
-  db.prepare('DELETE FROM caderneta_aulas WHERE caderneta_id = ?').run(id);
-  db.prepare('DELETE FROM caderneta_avaliacoes WHERE caderneta_id = ?').run(id);
-  db.prepare('DELETE FROM caderneta_notas WHERE caderneta_id = ?').run(id);
-  db.prepare('DELETE FROM caderneta_notas_do_estudante WHERE caderneta_id = ?').run(id);
-  db.prepare('DELETE FROM caderneta_disciplinas WHERE caderneta_id = ?').run(id);
+  getCaderneta(db, id);
+  transaction(db, () => {
+    for (const table of TABLES) db.prepare(`DELETE FROM ${table} WHERE caderneta_id = ?`).run(id);
+    db.prepare('DELETE FROM caderneta_turmas WHERE caderneta_id = ?').run(id);
+    db.prepare('DELETE FROM cadernetas WHERE id = ?').run(id);
+  });
 }
 
-/** As disciplinas da caderneta, na ordem em que o portal as lista. */
 export function listDisciplinasDaCaderneta(
   db: DatabaseSync,
-  cadernetaId: string,
+  id: string,
+  turma?: string,
 ): string[] {
-  const rows = db
-    .prepare(
-      `SELECT nome FROM caderneta_disciplinas
-        WHERE caderneta_id = ? ORDER BY posicao ASC`,
-    )
-    .all(cadernetaId) as unknown as { nome: string }[];
-
-  return rows.map((row) => row.nome);
+  return (db.prepare(
+    'SELECT nome FROM caderneta_disciplinas WHERE caderneta_id = ? AND turma = ? ORDER BY posicao',
+  )
+    .all(id, selectedTurma(db, id, turma)) as unknown as {
+      nome: string;
+    }[]).map(row => row.nome);
 }
 
-/**
- * Uma avaliação como o banco a guarda, com a turma da caderneta junto: é a
- * turma, e não a etapa, que decide quais avaliações existem.
- */
 export interface AvaliacaoDaTurma {
   readonly turma: string;
   readonly etapa: string;
@@ -733,173 +708,96 @@ export interface AvaliacaoDaTurma {
   readonly media?: number;
 }
 
-/**
- * Todas as avaliações que as cadernetas do professor trouxeram do portal, na
- * ordem em que o portal as lista. É o que o agente lê para escolher a coluna
- * do boletim sem precisar de uma nova volta ao portal a cada envio: a
- * raspagem da caderneta já passou turma por turma, que é a granularidade em
- * que o portal cadastra a avaliação.
- */
-export function listAvaliacoesDoProfessor(
-  db: DatabaseSync,
-  professorId: string,
-): AvaliacaoDaTurma[] {
-  const rows = db
-    .prepare(
-      `SELECT c.turma AS turma, a.etapa AS etapa, a.disciplina AS disciplina,
-              a.nome AS nome, a.tipo AS tipo, a.valor AS valor, a.media AS media
-         FROM caderneta_avaliacoes a
-         JOIN cadernetas c ON c.id = a.caderneta_id
-         LEFT JOIN caderneta_disciplinas d
-           ON d.caderneta_id = a.caderneta_id AND d.nome = a.disciplina
-        WHERE c.professor_id = ?
-        ORDER BY c.turma ASC, a.etapa ASC, d.posicao ASC, a.posicao ASC`,
-    )
+export function listAvaliacoesDoProfessor(db: DatabaseSync, professorId: string): AvaliacaoDaTurma[] {
+  const rows = db.prepare(
+    `SELECT a.turma, a.etapa, a.disciplina, a.nome, a.tipo, a.valor, a.media
+     FROM caderneta_avaliacoes a JOIN cadernetas c ON c.id = a.caderneta_id
+     LEFT JOIN caderneta_disciplinas d ON d.caderneta_id = a.caderneta_id AND d.turma = a.turma AND d.nome = a.disciplina
+     WHERE c.professor_id = ? ORDER BY a.turma, a.etapa, d.posicao, a.posicao`,
+  )
     .all(professorId) as unknown as {
-    turma: string;
-    etapa: string;
-    disciplina: string;
-    nome: string;
-    tipo: string | null;
-    valor: number | null;
-    media: number | null;
-  }[];
-
-  return rows.map((row) => ({
+      turma: string;
+      etapa: string;
+      disciplina: string;
+      nome: string;
+      tipo: string | null;
+      valor: number | null;
+      media: number | null;
+    }[];
+  return rows.map(row => ({
     turma: row.turma,
     etapa: row.etapa,
     disciplina: row.disciplina,
     nome: row.nome,
-    ...(row.tipo === null ? {} : { tipo: row.tipo }),
-    ...(row.valor === null ? {} : { valor: Number(row.valor) }),
-    ...(row.media === null ? {} : { media: Number(row.media) }),
+    ...(row.tipo === null ? {} : {
+      tipo: row.tipo
+    }),
+    ...(row.valor === null ? {} : {
+      valor: Number(row.valor)
+    }),
+    ...(row.media === null ? {} : {
+      media: Number(row.media)
+    })
   }));
 }
 
-/**
- * As disciplinas da caderneta que já têm alguma nota lançada nesta etapa —
- * numa avaliação ou na parcial/personalizada da linha do estudante. É o que
- * separa, na tela, quem ainda falta lançar de quem já foi começado.
- */
-function listDisciplinasLancadas(
-  db: DatabaseSync,
-  cadernetaId: string,
-  etapa: string,
-): string[] {
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT disciplina FROM (
-         SELECT disciplina FROM caderneta_notas
-          WHERE caderneta_id = ? AND etapa = ?
-         UNION
-         SELECT disciplina FROM caderneta_notas_do_estudante
-          WHERE caderneta_id = ? AND etapa = ?
-            AND (parcial IS NOT NULL OR personalizada IS NOT NULL)
-       )`,
-    )
-    .all(cadernetaId, etapa, cadernetaId, etapa) as unknown as { disciplina: string }[];
-
-  return rows.map((row) => row.disciplina);
-}
-
-/**
- * O boletim de uma etapa numa disciplina: os estudantes, as colunas, as notas
- * já lançadas e as notas por estudante que não são de nenhuma avaliação.
- *
- * Sem `disciplina`, usa a primeira da caderneta — é o caso comum de quem tem
- * uma só e não quer escolher nada.
- */
 export function getBoletimDaEtapa(
   db: DatabaseSync,
-  cadernetaId: string,
+  id: string,
   etapa: string,
   disciplina?: string,
+  turma?: string,
 ): BoletimDaEtapa {
-  const disciplinas = listDisciplinasDaCaderneta(db, cadernetaId);
+  const selected = selectedTurma(db, id, turma);
+  const disciplinas = listDisciplinasDaCaderneta(db, id, selected);
   const escolhida = disciplina ?? disciplinas[0];
-  const disciplinasLancadas = listDisciplinasLancadas(db, cadernetaId, etapa);
-
-  // Sem nenhuma disciplina não há avaliação cadastrada, e o boletim é vazio:
-  // é o que faz a tela pedir o cadastro em vez de mostrar uma grade sem colunas.
+  const disciplinasLancadas = (db.prepare(
+    `SELECT DISTINCT disciplina FROM (
+     SELECT disciplina FROM caderneta_notas WHERE caderneta_id = ? AND turma = ? AND etapa = ?
+     UNION SELECT disciplina FROM caderneta_notas_do_estudante WHERE caderneta_id = ? AND turma = ? AND etapa = ?
+     AND (parcial IS NOT NULL OR personalizada IS NOT NULL))`,
+  )
+    .all(id, selected, etapa, id, selected, etapa) as unknown as {
+      disciplina: string;
+    }[]).map(row => row.disciplina);
+  const base = {
+    etapa,
+    disciplina: escolhida ?? null,
+    disciplinas,
+    disciplinasLancadas,
+    estudantes: listEstudantes(db, id, selected)
+  };
   if (escolhida === undefined) {
     return {
-      etapa,
-      disciplina: null,
-      disciplinas,
-      disciplinasLancadas,
-      estudantes: listEstudantes(db, cadernetaId),
+      ...base,
       avaliacoes: [],
       notas: [],
       notasDoEstudante: [],
     };
   }
-
-  const avaliacoes = db
-    .prepare(
-      `SELECT nome, tipo, data, valor, media FROM caderneta_avaliacoes
-        WHERE caderneta_id = ? AND etapa = ? AND disciplina = ?
-        ORDER BY posicao ASC`,
-    )
-    .all(cadernetaId, etapa, escolhida) as unknown as {
-    nome: string;
-    tipo: string | null;
-    data: string | null;
-    valor: number | null;
-    media: number | null;
-  }[];
-
-  const notas = db
-    .prepare(
-      `SELECT matricula, avaliacao, valor FROM caderneta_notas
-        WHERE caderneta_id = ? AND etapa = ? AND disciplina = ?`,
-    )
-    .all(cadernetaId, etapa, escolhida) as unknown as NotaDaCaderneta[];
-
-  const notasDoEstudante = db
-    .prepare(
-      `SELECT matricula, origem, calculada, parcial, personalizada
-         FROM caderneta_notas_do_estudante
-        WHERE caderneta_id = ? AND etapa = ? AND disciplina = ?`,
-    )
-    .all(cadernetaId, etapa, escolhida) as unknown as {
-    matricula: string;
-    origem: number | null;
-    calculada: number | null;
-    parcial: number | null;
-    personalizada: number | null;
-  }[];
-
-  const numero = (valor: number | null) => (valor === null ? null : Number(valor));
-
+  const avaliacoes = db.prepare(
+    `SELECT nome, tipo, data, valor, media FROM caderneta_avaliacoes
+     WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND disciplina = ? ORDER BY posicao`,
+  )
+    .all(id, selected, etapa, escolhida) as unknown as AvaliacaoDaCaderneta[];
+  const notas = db.prepare(
+    `SELECT matricula, avaliacao, valor FROM caderneta_notas
+     WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND disciplina = ?`,
+  )
+    .all(id, selected, etapa, escolhida) as unknown as NotaDaCaderneta[];
+  const notasDoEstudante = db.prepare(
+    `SELECT matricula, origem, calculada, parcial, personalizada FROM caderneta_notas_do_estudante
+     WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND disciplina = ?`,
+  )
+    .all(id, selected, etapa, escolhida) as unknown as NotaDoEstudanteDaCaderneta[];
   return {
-    etapa,
-    disciplina: escolhida,
-    disciplinas,
-    disciplinasLancadas,
-    estudantes: listEstudantes(db, cadernetaId),
-    avaliacoes: avaliacoes.map((avaliacao) => ({
-      nome: avaliacao.nome,
-      tipo: avaliacao.tipo,
-      data: avaliacao.data,
-      valor: numero(avaliacao.valor),
-      media: numero(avaliacao.media),
-    })),
-    notas: notas.map((nota) => ({
-      matricula: nota.matricula,
-      avaliacao: nota.avaliacao,
-      valor: Number(nota.valor),
-    })),
-    notasDoEstudante: notasDoEstudante.map((nota) => ({
-      matricula: nota.matricula,
-      origem: numero(nota.origem),
-      calculada: numero(nota.calculada),
-      parcial: numero(nota.parcial),
-      personalizada: numero(nota.personalizada),
-    })),
+    ...base,
+    avaliacoes,
+    notas,
+    notasDoEstudante
   };
 }
 
-/** Uma nota que um envio acabou de gravar no portal. */
 export interface NotaGravada {
   etapa: string;
   disciplina: string;
@@ -908,7 +806,6 @@ export interface NotaGravada {
   valor: number;
 }
 
-/** Uma nota da linha do estudante que acabou de ser gravada. */
 export interface NotaDoEstudanteGravada {
   etapa: string;
   disciplina: string;
@@ -917,62 +814,37 @@ export interface NotaDoEstudanteGravada {
   personalizada?: number | null;
 }
 
-/**
- * Grava as notas que um envio lançou, para a grade refletir o envio sem
- * esperar uma sincronização. Uma nota de uma avaliação que a caderneta não
- * conhece é ignorada: quem manda sobre quais avaliações existem é a raspagem,
- * como acontece com as aulas.
- */
 export function marcarNotasLancadas(
   db: DatabaseSync,
-  cadernetaId: string,
+  id: string,
   notas: readonly NotaGravada[],
   notasDoEstudante: readonly NotaDoEstudanteGravada[] = [],
+  turma?: string,
 ): number {
+  const selected = selectedTurma(db, id, turma);
   const conhece = db.prepare(
-    `SELECT 1 FROM caderneta_avaliacoes
-      WHERE caderneta_id = ? AND etapa = ? AND disciplina = ? AND nome = ?`,
+    'SELECT 1 FROM caderneta_avaliacoes WHERE caderneta_id = ? AND turma = ? AND etapa = ? AND disciplina = ? AND nome = ?',
   );
   const upsert = db.prepare(
-    `INSERT INTO caderneta_notas
-       (caderneta_id, etapa, disciplina, matricula, avaliacao, valor)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (caderneta_id, etapa, disciplina, matricula, avaliacao)
-     DO UPDATE SET valor = excluded.valor`,
+    `INSERT INTO caderneta_notas (caderneta_id, turma, etapa, disciplina, matricula, avaliacao, valor)
+     VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (caderneta_id, turma, etapa, disciplina, matricula, avaliacao) DO UPDATE SET valor = excluded.valor`,
   );
-  // As desabilitadas ficam de fora: quem as preenche é o portal, e
-  // sobrescrevê-las com o que a tela achava é apagar o cálculo dele.
   const upsertDoEstudante = db.prepare(
-    `INSERT INTO caderneta_notas_do_estudante
-       (caderneta_id, etapa, disciplina, matricula, parcial, personalizada)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (caderneta_id, etapa, disciplina, matricula)
-     DO UPDATE SET
-       parcial = COALESCE(excluded.parcial, parcial),
-       personalizada = COALESCE(excluded.personalizada, personalizada)`,
+    `INSERT INTO caderneta_notas_do_estudante (caderneta_id, turma, etapa, disciplina, matricula, parcial, personalizada)
+     VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (caderneta_id, turma, etapa, disciplina, matricula)
+     DO UPDATE SET parcial = COALESCE(excluded.parcial, parcial), personalizada = COALESCE(excluded.personalizada, personalizada)`,
   );
-
-  let gravadas = 0;
-
-  db.exec('BEGIN');
-  try {
+  return transaction(db, () => {
+    let gravadas = 0;
     for (const nota of notas) {
-      if (!conhece.get(cadernetaId, nota.etapa, nota.disciplina, nota.avaliacao)) continue;
-
-      upsert.run(
-        cadernetaId,
-        nota.etapa,
-        nota.disciplina,
-        nota.matricula,
-        nota.avaliacao,
-        nota.valor,
-      );
+      if (!conhece.get(id, selected, nota.etapa, nota.disciplina, nota.avaliacao)) continue;
+      upsert.run(id, selected, nota.etapa, nota.disciplina, nota.matricula, nota.avaliacao, nota.valor);
       gravadas += 1;
     }
-
     for (const nota of notasDoEstudante) {
       upsertDoEstudante.run(
-        cadernetaId,
+        id,
+        selected,
         nota.etapa,
         nota.disciplina,
         nota.matricula,
@@ -981,13 +853,6 @@ export function marcarNotasLancadas(
       );
       gravadas += 1;
     }
-
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-
-  return gravadas;
+    return gravadas;
+  });
 }
-import { limparNomeDoEstudante } from '../scrape/nome-do-estudante';

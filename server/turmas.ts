@@ -7,6 +7,7 @@ import { getProfessorCredenciais } from './professores/store';
 import { closeSession, getCatalogo, openSession, retomarSessao } from './portal-sessions';
 import { LoginError } from './scrape/errors';
 import { buscarEstudantes, turmasComPeriodo } from './turmas/busca';
+import { reconcileCadernetasDeReducao } from './cadernetas/reducao';
 import {
   TurmaNotFoundError,
   getTurma,
@@ -114,6 +115,7 @@ turmas.post('/buscas', async (context) => {
     }
 
     const encontradas = replaceTurmas(getDb(), professorId, turmasComPeriodo(catalogo));
+    reconcileCadernetasDeReducao(getDb(), professorId);
 
     // Os estudantes vêm na mesma sessão: ela já está aberta, e uma turma sem
     // eles não serve para as fichas nem para o boletim. A falha de uma turma

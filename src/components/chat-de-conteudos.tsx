@@ -221,6 +221,7 @@ export function ChatDeConteudos({
           arquivos,
         },
         controller.signal,
+        caderneta.turma,
       );
 
       // O primeiro rascunho que mudou é o que o auxiliar quer ver.
@@ -308,7 +309,7 @@ export function ChatDeConteudos({
           mes: aula.mes,
           ...semDecoracao(rascunhos[chaveDaAula(aula)]),
         })),
-      });
+      }, caderneta.turma);
       setPreenchimento({ fila, fase: "reviewing", erro: null });
     } catch (error) {
       setPreenchimento({ fila, fase: "failed", erro: error instanceof Error ? error.message : "Não foi possível preencher as aulas." });
@@ -328,7 +329,7 @@ export function ChatDeConteudos({
       const resultado = await verificarConteudosNoPortal(caderneta.id, {
         etapa,
         aulas: fila.map(({ mes, data, ordem }) => ({ mes, data, ordem })),
-      });
+      }, caderneta.turma);
       const salvas = new Set(resultado.aulas.filter((aula) => aula.preenchida).map(chaveDaAula));
       setRascunhos((atuais) => Object.fromEntries(Object.entries(atuais).filter(([chave]) => !salvas.has(chave))));
       onGravou();
@@ -887,7 +888,7 @@ function SeletorDeReferencias({
     Promise.all(
       caderneta.etapas
         .filter((outra) => outra.nome !== etapa)
-        .map((outra) => loadAulasDaEtapa(caderneta.id, outra.nome).catch(() => [])),
+        .map((outra) => loadAulasDaEtapa(caderneta.id, outra.nome, caderneta.turma).catch(() => [])),
     )
       .then((listas) => setOutrasEtapas(listas.flat()))
       .finally(() => setCarregando(false));

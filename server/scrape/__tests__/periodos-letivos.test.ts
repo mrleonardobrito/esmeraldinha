@@ -20,8 +20,9 @@ vi.mock('../primefaces', () => ({
   AJAX_TIMEOUT_MS: 20_000,
 }));
 
-function createPortal(periodosLetivos: string[], available: string[]) {
+function createPortal(periodosLetivos: string[], available: string[], gruposDiarios?: Record<string, string[]>) {
   let current = periodosLetivos[0];
+  let turma: string | undefined;
   const visited: string[] = [];
   const opened: string[] = [];
   const page = {
@@ -48,8 +49,8 @@ function createPortal(periodosLetivos: string[], available: string[]) {
   vi.mocked(readMenuOptions).mockImplementation(async (_scope, suffix) => {
     if (suffix.includes('periodoLetivo')) return periodosLetivos;
     if (suffix.includes('etapaPeriodo')) return ['1ª Etapa'];
-    if (suffix.includes('turma')) return [`Turma ${current}`];
-    if (suffix.includes('grupoDiario')) return ['Regular'];
+    if (suffix.includes('turma')) return gruposDiarios ? Object.keys(gruposDiarios) : [`Turma ${current}`];
+    if (suffix.includes('grupoDiario')) return gruposDiarios?.[turma ?? ''] ?? ['Regular'];
     if (suffix.includes('mes')) return ['MARÇO'];
     throw new Error(`Unexpected menu: ${suffix}`);
   });
@@ -58,6 +59,7 @@ function createPortal(periodosLetivos: string[], available: string[]) {
       current = label;
       visited.push(label);
     }
+    if (suffix.includes('turma') && label) turma = label;
     return 'updated';
   });
 
@@ -81,7 +83,30 @@ describe('searching all períodos letivos', () => {
       periodoLetivo,
       turmas: [`Turma ${periodoLetivo}`],
       meses: ['MARÇO'],
+      gruposDiariosPorTurma: [{ turma: `Turma ${periodoLetivo}`, grupoDiario: 'Regular' }],
     })));
+  });
+
+  it('reads the grupo diário of every turma and does not infer ambiguous relationships', async () => {
+    const { page } = createPortal(['2026'], ['2026'], {
+      'Turma A': ['Regular'],
+      'Turma B': ['REDUÇÃO TARDE'],
+      'Turma C': [],
+      'Turma D': ['Regular', 'REDUÇÃO MANHÃ'],
+    });
+
+    const catalogo = await listConteudoOptions(page);
+
+    expect(catalogo.etapas[0].gruposDiariosPorTurma).toEqual([
+      { turma: 'Turma A', grupoDiario: 'Regular' },
+      { turma: 'Turma B', grupoDiario: 'REDUÇÃO TARDE' },
+      { turma: 'Turma C', grupoDiario: null },
+      { turma: 'Turma D', grupoDiario: null },
+    ]);
+    expect(catalogo.etapas[0].meses).toEqual(['MARÇO']);
+    expect(vi.mocked(selectMenuOption).mock.calls
+      .filter(([, , suffix]) => suffix.includes('turma'))
+      .map(([, , , label]) => label)).toEqual(['Turma A', 'Turma B', 'Turma C', 'Turma D']);
   });
 
   it('returns an empty catalogo when no período letivo offers Etapa', async () => {

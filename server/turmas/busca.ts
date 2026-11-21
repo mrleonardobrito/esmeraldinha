@@ -8,6 +8,7 @@ import type { EstudanteDaTurma } from './store';
 export interface TurmaDoCatalogo {
   readonly nome: string;
   readonly periodoLetivo: string;
+  readonly grupoDiario: string | null;
 }
 
 /**
@@ -25,7 +26,14 @@ export function turmasComPeriodo(catalogo: ConteudoCatalogo): TurmaDoCatalogo[] 
 
   for (const etapa of catalogo.etapas) {
     for (const nome of etapa.turmas) {
-      if (!porNome.has(nome)) porNome.set(nome, { nome, periodoLetivo: etapa.periodoLetivo });
+      const grupoDiario = etapa.gruposDiariosPorTurma
+        ?.find((entry) => entry.turma === nome)?.grupoDiario ?? null;
+      const existing = porNome.get(nome);
+      if (!existing) {
+        porNome.set(nome, { nome, periodoLetivo: etapa.periodoLetivo, grupoDiario });
+      } else if (existing.grupoDiario === null && grupoDiario !== null) {
+        porNome.set(nome, { ...existing, grupoDiario });
+      }
     }
   }
 

@@ -57,14 +57,40 @@ _Avoid_: session, login
 ### Estrutura
 
 **caderneta**:
-The record a professor must keep for one turma across the school year. Composed of the five partes below, and finished only once every aula of every etapa is filled in.
+The record a professor must keep across the school year. It covers one turma
+where the professor is regente, or one to four turmas de redução for that
+professor. Turmas de redução are grouped automatically, including existing
+cadernetas; grouping is not an optional cadastro setting. Composed of the five
+partes below, and finished only once the
+required information is filled in for every aula and estudante of every
+included turma across all four etapas.
 _Avoid_: diário, registro, notebook
 
 **turma**:
 A class group. Discovered on the portal during the cadastro do professor, never
 typed: the portal is what knows which turmas a professor works in. Owns its
-estudantes, and a caderneta belongs to exactly one turma.
+estudantes and aulas, which remain associated with that turma when several
+turmas de redução share a caderneta. Whether the professor is regente or the
+turma is a turma de redução is specific to that professor's relationship with
+the turma, as identified by the grupo diário.
 _Avoid_: class, grupo
+
+**regente**:
+The professor's relationship with a turma when the portal's grupo diário
+identifies them as responsible for it as regente. A caderneta for this
+relationship covers one turma. This designation applies to the relationship
+between professor and turma, not to the professor across all their turmas.
+_Avoid_: titular, papel de acesso
+
+**turma de redução**:
+A turma whose grupo diário identifies redução for that professor. One to four
+turmas de redução for the same professor compose a single caderneta
+automatically. Existing groups keep their membership when possible; additional
+turmas fill available places in stable cadastro order, with at most four per
+caderneta. A turma where the professor is regente keeps its separate caderneta.
+The designation belongs to the relationship between professor and turma;
+it is not an intrinsic property of the turma.
+_Avoid_: turma reduzida, turma de regência
 
 **nome curto da turma**:
 What a turma is called on screen, derived from the name the portal writes. The
@@ -101,8 +127,21 @@ _Avoid_: calendário letivo, ano letivo, ambiente
 A month within an etapa. An etapa spans two or three of them. Purely a way of narrowing what you are looking at — it carries no completeness of its own.
 _Avoid_: month, período
 
+**grupo diário**:
+The portal field labeled _Grupo diário_, whose value identifies whether the
+professor is regente of the selected turma or that turma is a turma de redução
+for them. A value beginning with the word `REDUÇÃO` identifies redução:
+`REDUÇÃO MANHÃ`, `REDUÇÃO TARDE` and `REDUÇÃO NOITE` are examples, and the
+portal also uses a professor's name, as in `REDUÇÃO VITORIA`. `REGENTE MANHÃ`
+is an observed value for regente. An unread or ambiguous field remains unknown.
+_Avoid_: redução, turno
+
 **redução**:
-The daily grouping a turma's aulas are filed under. The portal labels this field _Grupo diário_.
+The designation in the grupo diário that marks a turma de redução for the
+professor. The portal writes it as `REDUÇÃO MANHÃ`, `REDUÇÃO TARDE`,
+`REDUÇÃO NOITE` or a named value such as `REDUÇÃO VITORIA`. The suffix is read
+from that field independently of the turno
+written in the turma's name.
 _Avoid_: grupo diário, turno
 
 **aula**:
@@ -170,16 +209,17 @@ An assessment an etapa's notas are given against, with a nome, tipo (e.g. `OBSER
 _Avoid_: assessment, prova, atividade
 
 **disciplina**:
-A subject a turma is taught. A caderneta covers one turma and may hold several,
-each with its own boletim. The portal only offers it once the etapa has an
-avaliação, so no disciplina means no avaliação has been registered yet.
+A subject a turma is taught. Each turma in a caderneta may have several
+disciplinas, each with its own boletim for that turma. The portal only offers
+it once the etapa has an avaliação, so no disciplina means no avaliação has
+been registered yet.
 _Avoid_: subject, matéria, componente
 
 **nota**:
 What one estudante scored on one avaliação — one cell of the boletim, where a
-student's row meets an avaliação's column. Keyed by matrícula, disciplina and
-avaliação, never by name: the name is what a professor writes, the matrícula is
-what the portal stores.
+student's row meets an avaliação's column. Within its turma, keyed by
+matrícula, disciplina and avaliação, never by name: the name is what a
+professor writes, the matrícula is what the portal stores.
 _Avoid_: grade, score, pontuação
 
 **nota personalizada**:

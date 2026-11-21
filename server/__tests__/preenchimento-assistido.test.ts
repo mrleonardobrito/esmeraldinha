@@ -73,6 +73,9 @@ async function freshApp() {
     senha: 'segredo',
     escola: 'Escola',
   });
+  const { retomarSessao } = await import('../portal-sessions');
+  const session = await retomarSessao(sessionId);
+  vi.mocked(retomarSessao).mockResolvedValue({ ...session!, professorId: id });
 
   // As rotas do app exigem uma sessão do auxiliar de ensino: o helper entra
   // uma vez e devolve o mesmo `fetch`, com o token em cada requisição.
@@ -197,6 +200,7 @@ describe('preenchimento assistido do boletim', () => {
 
     const { prepararNotasParaPreenchimento } = await import('../scrape/portal');
     expect(prepararNotasParaPreenchimento).toHaveBeenCalledWith(expect.anything(), {
+      periodoLetivo: '2026',
       etapa: '1ª Etapa',
       turma,
       disciplina: 'MATEMÁTICA',
@@ -359,6 +363,7 @@ describe('preenchimento assistido do boletim', () => {
 
     const { prepararNotasParaPreenchimento } = await import('../scrape/portal');
     expect(prepararNotasParaPreenchimento).toHaveBeenCalledWith(expect.anything(), {
+      periodoLetivo: '2026',
       etapa: '1ª Etapa',
       turma,
       disciplina: 'MATEMÁTICA',

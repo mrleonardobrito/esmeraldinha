@@ -8,6 +8,7 @@ import {
 } from "@tabler/icons-react";
 
 import { EnvioDeMaterial } from "@/components/envio-de-material";
+import { CadernetaPorTurma } from "@/components/caderneta-por-turma";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -86,13 +87,20 @@ export interface LancarNotasProps {
  * sistema_ leva tudo o que está preenchido para uma janela do portal já no
  * boletim certo — e para aí. Salvar continua sendo do auxiliar de ensino.
  */
-export function LancarNotas({
+export function LancarNotas(props: LancarNotasProps) {
+  return <CadernetaPorTurma caderneta={props.caderneta} onClose={props.onClose}>
+    {(caderneta, picker) => <LancarNotasDaTurma {...props} caderneta={caderneta} picker={picker} />}
+  </CadernetaPorTurma>;
+}
+
+function LancarNotasDaTurma({
   caderneta,
   etapa,
   sessionId,
   onClose,
   onGravou,
-}: LancarNotasProps) {
+  picker,
+}: LancarNotasProps & { picker: React.ReactNode }) {
   const [estado, setEstado] = React.useState<Estado>({ status: "loading" });
   /**
    * A disciplina que o auxiliar de ensino escolheu. Nula enquanto ele não
@@ -110,7 +118,7 @@ export function LancarNotas({
   React.useEffect(() => {
     let cancelled = false;
 
-    loadBoletimDaEtapa(caderneta.id, etapa, disciplina ?? undefined)
+    loadBoletimDaEtapa(caderneta.id, etapa, disciplina ?? undefined, caderneta.turma)
       .then((boletim) => {
         if (!cancelled) setEstado({ status: "ready", boletim });
       })
@@ -128,7 +136,7 @@ export function LancarNotas({
     return () => {
       cancelled = true;
     };
-  }, [caderneta.id, etapa, disciplina, reloadToken]);
+  }, [caderneta.id, caderneta.turma, etapa, disciplina, reloadToken]);
 
   /**
    * O que o portal já tem, como texto de campo. Trocar de disciplina troca
@@ -216,6 +224,7 @@ export function LancarNotas({
 
     try {
       await preencherNotasNoPortal(caderneta.id, etapa, notas, {
+        turma: caderneta.turma,
         disciplina: boletim.disciplina,
         notasDoEstudante,
       });
@@ -252,6 +261,8 @@ export function LancarNotas({
           </DialogDescription>
         </DialogHeader>
 
+        {picker}
+
         {enviando ? (
           <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
             <Button
@@ -272,6 +283,7 @@ export function LancarNotas({
               sessionId={sessionId}
               professorId={caderneta.professorId}
               cadernetaId={caderneta.id}
+              turma={caderneta.turma}
               semCard
               onGravou={() => {
                 setEnviando(false);

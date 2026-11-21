@@ -24,12 +24,12 @@ for (const operation of ['preenchimentos-assistidos', 'verificacoes'] as const) 
     const db = getDb();
     let caderneta;
     try {
-      caderneta = getCaderneta(db, context.req.param('id'));
+      caderneta = getCaderneta(db, context.req.param('id'), context.req.query('turma'));
     } catch (error) {
       if (error instanceof CadernetaNotFoundError) return context.json({ error: error.message }, 404);
       throw error;
     }
-    const conhecidas = listAulasDaEtapa(db, caderneta.id, etapa);
+    const conhecidas = listAulasDaEtapa(db, caderneta.id, etapa, caderneta.turma);
     if (aulas.some((aula) => !conhecidas.some((known) => known.mes === aula.mes &&
       known.data === aula.data && known.ordem === aula.ordem))) {
       return context.json({ error: 'Uma das aulas não pertence a esta etapa da caderneta.' }, 422);
@@ -59,7 +59,7 @@ for (const operation of ['preenchimentos-assistidos', 'verificacoes'] as const) 
       for (const mes of new Set(aulas.map((aula) => aula.mes))) {
         porMes.set(mes, await listAulas(session.page, { periodoLetivo, etapa, turma: caderneta.turma, mes }));
       }
-      for (const [mes, salvas] of porMes) atualizarConteudosDoMes(db, caderneta.id, etapa, mes, salvas);
+      for (const [mes, salvas] of porMes) atualizarConteudosDoMes(db, caderneta.id, etapa, mes, salvas, caderneta.turma);
       return context.json({ aulas: aulas.map((aula) => ({
         ...aula,
         preenchida: porMes.get(aula.mes)!.some((saved) => saved.data === aula.data &&

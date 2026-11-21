@@ -18,8 +18,8 @@ for (const situacao of ['Transferido', ' TRANSFERIDO ', 'transferida']) {
           { matricula: '3', nome: 'Caio', situacao, dataMatricula: null },
         ],
       });
-      db.prepare("INSERT INTO caderneta_avaliacoes (caderneta_id, etapa, disciplina, nome, posicao) VALUES (?, 'I ETAPA', 'Português', 'Prova', 0)").run(caderneta.id);
-      const insert = db.prepare("INSERT INTO caderneta_notas (caderneta_id, etapa, disciplina, matricula, avaliacao, valor) VALUES (?, 'I ETAPA', 'Português', ?, 'Prova', 8)");
+      db.prepare("INSERT INTO caderneta_avaliacoes (caderneta_id, turma, etapa, disciplina, nome, posicao) VALUES (?, 'Turma A', 'I ETAPA', 'Português', 'Prova', 0)").run(caderneta.id);
+      const insert = db.prepare("INSERT INTO caderneta_notas (caderneta_id, turma, etapa, disciplina, matricula, avaliacao, valor) VALUES (?, 'Turma A', 'I ETAPA', 'Português', ?, 'Prova', 8)");
       insert.run(caderneta.id, '1');
       insert.run(caderneta.id, '3');
       expect(getCaderneta(db, caderneta.id).etapas[0]).toMatchObject({ totalDeNotas: 2, notasLancadas: 1, boletim: 'parcial' });

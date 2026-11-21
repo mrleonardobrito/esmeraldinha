@@ -25,7 +25,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { loadAulasDaEtapa, type AulaDaCaderneta, type Caderneta, type StatusDaParte } from "@/lib/cadernetas";
+import { loadAulasDaEtapa, turmasDaCaderneta, type AulaDaCaderneta, type Caderneta, type StatusDaParte } from "@/lib/cadernetas";
 import { nomeCurtoDaTurma } from "@/lib/turmas";
 
 /** Uma das partes da caderneta, como a grade a mostra em cada etapa. */
@@ -117,6 +117,10 @@ export function GradeDeCadernetas({
   const { conta } = useConta();
   const showValores = conta?.papel === "auxiliar de ensino";
   const [editedCaderneta, setEditedCaderneta] = React.useState<Caderneta | null>(null);
+  const currentEditedCaderneta = editedCaderneta && cadernetas.find((item) =>
+    item.id === editedCaderneta.id &&
+    turmasDaCaderneta(item).join("\0") === turmasDaCaderneta(editedCaderneta).join("\0"),
+  );
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const etapas = React.useMemo(() => {
     const nomes = new Set<string>();
@@ -143,7 +147,7 @@ export function GradeDeCadernetas({
                 >
                   <span className="flex items-center gap-2">
                     <button type="button" aria-expanded={expanded.has(caderneta.id)}
-                      aria-label={`${expanded.has(caderneta.id) ? "Recolher" : "Expandir"} detalhes de ${nomeCurtoDaTurma(caderneta.turma)}`}
+                      aria-label={`${expanded.has(caderneta.id) ? "Recolher" : "Expandir"} detalhes de ${turmasDaCaderneta(caderneta).map(nomeCurtoDaTurma).join(", ")}`}
                       onClick={() => setExpanded((current) => {
                         const next = new Set(current);
                         if (next.has(caderneta.id)) next.delete(caderneta.id);
@@ -152,7 +156,10 @@ export function GradeDeCadernetas({
                       })}
                       className="inline-flex items-center gap-2 rounded-md text-left hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                       <IconChevronDown className={cn("size-4 shrink-0 transition-transform", expanded.has(caderneta.id) && "rotate-180")} aria-hidden="true" />
-                      {nomeCurtoDaTurma(caderneta.turma)}
+                      <span className="flex flex-col gap-1">
+                        {turmasDaCaderneta(caderneta).map((turma) => <span key={turma}>{nomeCurtoDaTurma(turma)}</span>)}
+                        {turmasDaCaderneta(caderneta).length > 1 && <span className="text-xs text-muted-foreground">{turmasDaCaderneta(caderneta).length} turmas de redução</span>}
+                      </span>
                     </button>
                     <StatusDaRaspagem caderneta={caderneta} />
                   </span>
@@ -207,7 +214,7 @@ export function GradeDeCadernetas({
           </tbody>
         </table>
       </div>
-      {showValores && editedCaderneta && onValoresSalvos && <EditarValoresDaCaderneta key={editedCaderneta.id} caderneta={editedCaderneta} onClose={() => setEditedCaderneta(null)} onSaved={onValoresSalvos} />}
+      {showValores && currentEditedCaderneta && onValoresSalvos && <EditarValoresDaCaderneta key={currentEditedCaderneta.id} caderneta={currentEditedCaderneta} onClose={() => setEditedCaderneta(null)} onSaved={onValoresSalvos} />}
     </div>
   );
 }
@@ -226,26 +233,33 @@ function DetalhesDaCaderneta({ caderneta, processando, onAbrirConteudo, onAbrirB
   const [failed, setFailed] = React.useState(false);
   React.useEffect(() => {
     let active = true;
-    Promise.all(caderneta.etapas.map((etapa) => loadAulasDaEtapa(caderneta.id, etapa.nome)))
+    Promise.all(turmasDaCaderneta(caderneta).flatMap((turma) =>
+      caderneta.etapas.map((etapa) => loadAulasDaEtapa(caderneta.id, etapa.nome, turma))))
       .then((groups) => { if (active) setAulas(groups.flat()); })
       .catch(() => { if (active) setFailed(true); });
     return () => { active = false; };
-  }, [caderneta.id, caderneta.etapas, caderneta.syncedAt]);
+  }, [caderneta]);
 
   const totalAulas = caderneta.etapas.reduce((sum, etapa) => sum + etapa.totalDeAulas, 0);
   const aulasPreenchidas = caderneta.etapas.reduce((sum, etapa) => sum + etapa.aulasPreenchidas, 0);
   const totalNotas = caderneta.etapas.reduce((sum, etapa) => sum + etapa.totalDeNotas, 0);
   const notasLancadas = caderneta.etapas.reduce((sum, etapa) => sum + etapa.notasLancadas, 0);
   const latest = aulas?.filter((aula) => aula.conteudoPreenchido).sort((a, b) => dateKey(b.data).localeCompare(dateKey(a.data)))[0];
-  const status = (done: number, total: number): StatusDaParte => total > 0 && done >= total ? "concluido" : done > 0 ? "parcial" : "pendente";
+  const status = (done: number, total: number, parte: "conteudo" | "boletim"): StatusDaParte => {
+    if (turmasDaCaderneta(caderneta).length > 1 &&
+      caderneta.etapas.some((etapa) => etapa[parte] !== "concluido")) {
+      return done > 0 ? "parcial" : "pendente";
+    }
+    return total > 0 && done >= total ? "concluido" : done > 0 ? "parcial" : "pendente";
+  };
   const rows: { nome: string; status?: StatusDaParte; badges: string[]; action?: "conteudo" | "boletim" }[] = [
-    { nome: "Conteúdo", action: "conteudo", status: processando ? "processando" : status(aulasPreenchidas, totalAulas), badges: [
+    { nome: "Conteúdo", action: "conteudo", status: processando ? "processando" : status(aulasPreenchidas, totalAulas, "conteudo"), badges: [
       `${aulasPreenchidas} de ${totalAulas} aulas preenchidas`,
       ...(latest ? [`Última aula: ${latest.data}`, latest.etapa] : failed ? ["Última aula indisponível"] : aulas === null ? ["Buscando última aula…"] : []),
     ] },
-    { nome: "Boletim", action: "boletim", status: status(notasLancadas, totalNotas), badges: [
+    { nome: "Boletim", action: "boletim", status: status(notasLancadas, totalNotas, "boletim"), badges: [
       totalNotas ? `${notasLancadas} de ${totalNotas} notas lançadas` : "Nenhuma avaliação cadastrada",
-      `${caderneta.etapas.filter((etapa) => etapa.totalDeNotas > 0 && etapa.notasLancadas >= etapa.totalDeNotas).length} de ${caderneta.etapas.length} etapas concluídas`,
+      `${caderneta.etapas.filter((etapa) => etapa.boletim === "concluido").length} de ${caderneta.etapas.length} etapas concluídas`,
     ] },
     { nome: "Frequência", badges: ["Acompanhamento em breve"] },
     { nome: "Ficha de desempenho e ficha descritiva", badges: ["Acompanhamento em breve"] },

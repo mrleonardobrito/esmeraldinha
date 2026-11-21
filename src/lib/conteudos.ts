@@ -1,14 +1,15 @@
 import { requestApi } from "@/lib/api";
+import { turmaQuery } from "@/lib/cadernetas";
 import type { PreenchimentoDeConteudos, VerificacaoDeConteudos, ConteudosVerificados } from "@shared/preenchimento-de-conteudos";
 
-export async function preencherConteudosNoPortal(cadernetaId: string, input: PreenchimentoDeConteudos): Promise<void> {
-  await requestApi(`/api/cadernetas/${encodeURIComponent(cadernetaId)}/conteudos/preenchimentos-assistidos`, {
+export async function preencherConteudosNoPortal(cadernetaId: string, input: PreenchimentoDeConteudos, turma?: string): Promise<void> {
+  await requestApi(`/api/cadernetas/${encodeURIComponent(cadernetaId)}/conteudos/preenchimentos-assistidos${turmaQuery(turma)}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
   });
 }
 
-export async function verificarConteudosNoPortal(cadernetaId: string, input: VerificacaoDeConteudos): Promise<ConteudosVerificados> {
-  const response = await requestApi(`/api/cadernetas/${encodeURIComponent(cadernetaId)}/conteudos/verificacoes`, {
+export async function verificarConteudosNoPortal(cadernetaId: string, input: VerificacaoDeConteudos, turma?: string): Promise<ConteudosVerificados> {
+  const response = await requestApi(`/api/cadernetas/${encodeURIComponent(cadernetaId)}/conteudos/verificacoes${turmaQuery(turma)}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
   });
   return await response.json() as ConteudosVerificados;
@@ -84,6 +85,7 @@ export async function gerarRascunhos(
     arquivos: File[];
   },
   signal?: AbortSignal,
+  turma?: string,
 ): Promise<ConteudosGerados> {
   const form = new FormData();
   if (mes) form.append("mes", mes);
@@ -93,7 +95,7 @@ export async function gerarRascunhos(
   for (const arquivo of arquivos) form.append("arquivos", arquivo);
 
   const response = await requestApi(
-    `/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/conteudos/rascunhos`,
+    `/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/conteudos/rascunhos${turmaQuery(turma)}`,
     { method: "POST", body: form, signal },
   );
 

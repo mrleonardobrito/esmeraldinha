@@ -47,10 +47,19 @@ describe('turmasDoCatalogo', () => {
 
   it('diz em qual período letivo cada turma mora', () => {
     expect(turmasComPeriodo(catalogo)).toEqual([
-      { nome: 'EJA - 1ª FASE - NOTURNO', periodoLetivo: '2026 EJA' },
-      { nome: '3º ANO - 3º ANO A - MATUTINO', periodoLetivo: '2026' },
-      { nome: '5º ANO - 5º ANO B - VESPERTINO', periodoLetivo: '2026' },
+      { nome: 'EJA - 1ª FASE - NOTURNO', periodoLetivo: '2026 EJA', grupoDiario: null },
+      { nome: '3º ANO - 3º ANO A - MATUTINO', periodoLetivo: '2026', grupoDiario: null },
+      { nome: '5º ANO - 5º ANO B - VESPERTINO', periodoLetivo: '2026', grupoDiario: null },
     ]);
+  });
+
+  it('keeps each turma grupo diário when the same turma appears in several etapas', () => {
+    const turma = '3º ANO - 3º ANO A - MATUTINO';
+    expect(turmasComPeriodo({ etapas: [
+      { nome: 'I ETAPA', periodoLetivo: '2026', turmas: [turma], meses: [] },
+      { nome: 'II ETAPA', periodoLetivo: '2026', turmas: [turma], meses: [],
+        gruposDiariosPorTurma: [{ turma, grupoDiario: 'REDUÇÃO TARDE' }] },
+    ] })).toEqual([{ nome: turma, periodoLetivo: '2026', grupoDiario: 'REDUÇÃO TARDE' }]);
   });
 });
 

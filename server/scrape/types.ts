@@ -45,6 +45,11 @@ export interface EtapaOptions {
   readonly periodoLetivo: string;
   readonly turmas: readonly string[];
   readonly meses: readonly string[];
+  /** The professor's grupo diário for each turma, read from the portal. */
+  readonly gruposDiariosPorTurma?: readonly {
+    readonly turma: string;
+    readonly grupoDiario: string | null;
+  }[];
   /**
    * As disciplinas de cada turma da etapa. O portal cadastra a avaliação por
    * turma, não por etapa: duas turmas da mesma etapa têm conjuntos diferentes,

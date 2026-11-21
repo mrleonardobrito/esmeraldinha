@@ -49,7 +49,9 @@ import {
 } from "@/lib/professores";
 import {
   loadCadernetas,
+  loadTurmasDoPortal,
   sincronizarCaderneta,
+  turmasDaCaderneta,
   type Caderneta,
 } from "@/lib/cadernetas";
 import {
@@ -86,6 +88,7 @@ export function Cadernetas() {
     retomada?.cadernetas ?? [],
   );
   const [cadernetasToken, setCadernetasToken] = React.useState(0);
+  const cadernetasRequest = React.useRef(0);
   const [carregandoCadernetas, setCarregandoCadernetas] = React.useState(
     retomada === null,
   );
@@ -145,21 +148,55 @@ export function Cadernetas() {
   }, [selected, session, cadernetas]);
 
   const recarregarCadernetas = React.useCallback(() => {
+    // Ignore reads started before portal discovery or cadastro reconciled turmas.
+    cadernetasRequest.current++;
     setCadernetasToken((atual) => atual + 1);
   }, []);
+
+  React.useEffect(() => {
+    const sessionId = session?.sessionId;
+    if (!sessionId) return;
+    let cancelled = false;
+    loadTurmasDoPortal(sessionId)
+      .then(() => { if (!cancelled) recarregarCadernetas(); })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        toast.error(cause instanceof Error ? cause.message : "Could not read Grupo diário from the portal.");
+      });
+    return () => { cancelled = true; };
+  }, [session?.sessionId, recarregarCadernetas]);
 
   React.useEffect(() => {
     const professorId = selected?.id;
     if (!professorId) return;
 
     let cancelled = false;
+    const request = ++cadernetasRequest.current;
 
     loadCadernetas(professorId)
       .then((carregadas) => {
-        if (!cancelled) setCadernetas(carregadas);
+        if (cancelled || request !== cadernetasRequest.current) return;
+        setCadernetas(carregadas);
+        // An open editor may refer to a caderneta merged during portal discovery.
+        const reconcileEditor = (current: { caderneta: Caderneta; etapa: string } | null) => {
+          if (!current) return null;
+          const caderneta = carregadas.find((item) => item.id === current.caderneta.id) ??
+            carregadas.find((item) => turmasDaCaderneta(item).includes(current.caderneta.turma));
+          return caderneta ? { ...current, caderneta: {
+            ...caderneta,
+            turma: turmasDaCaderneta(caderneta).includes(current.caderneta.turma)
+              ? current.caderneta.turma : caderneta.turma,
+          } } : null;
+        };
+        setLancando(reconcileEditor);
+        setLancandoNotas(reconcileEditor);
+        setExcluindo((current) => current ? carregadas.find((item) =>
+          item.id === current.id &&
+          turmasDaCaderneta(item).join("\0") === turmasDaCaderneta(current).join("\0"),
+        ) ?? null : null);
       })
       .catch((error: unknown) => {
-        if (cancelled) return;
+        if (cancelled || request !== cadernetasRequest.current) return;
         toast.error(
           error instanceof Error
             ? error.message
@@ -167,7 +204,7 @@ export function Cadernetas() {
         );
       })
       .finally(() => {
-        if (!cancelled) setCarregandoCadernetas(false);
+        if (!cancelled && request === cadernetasRequest.current) setCarregandoCadernetas(false);
       });
 
     return () => {
@@ -447,7 +484,7 @@ export function Cadernetas() {
                 <div className="flex flex-col gap-0.5">
                   <CardTitle>Cadernetas</CardTitle>
                   <CardDescription>
-                    Uma linha por turma, uma coluna por etapa do ano letivo.
+                    One row per caderneta, one column per etapa.
                   </CardDescription>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -534,11 +571,10 @@ export function Cadernetas() {
               <CadastrarCaderneta
                 sessionId={session.sessionId}
                 professorId={selected.id}
-                jaCadastradas={cadernetas.map((caderneta) => caderneta.turma)}
+                jaCadastradas={cadernetas.flatMap(turmasDaCaderneta)}
                 onClose={() => setCadastrando(false)}
-                onCadastrou={(novas) => {
-                  setCadernetas((atuais) => [...atuais, ...novas]);
-                }}
+                onTurmasLoaded={recarregarCadernetas}
+                onCadastrou={recarregarCadernetas}
               />
             )}
 

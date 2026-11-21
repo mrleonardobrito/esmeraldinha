@@ -421,6 +421,253 @@ describe('cadernetas CRUD', () => {
     expect(simultaneasNoPico).toBe(1);
   });
 
+  async function catalogoDeReducao(grupos = ['REDUÇÃO TARDE', 'REDUÇÃO MANHÃ']) {
+    const { getCatalogo } = await import('../portal-sessions');
+    vi.mocked(getCatalogo).mockResolvedValue({
+      etapas: catalogo.etapas.map((etapa) => ({
+        ...etapa,
+        gruposDiariosPorTurma: etapa.turmas.map((turma) => ({
+          turma,
+          grupoDiario: grupos[catalogo.etapas[0].turmas.indexOf(turma)] ?? null,
+        })),
+      })),
+    });
+  }
+
+  async function cadastrarReducao(app: Awaited<ReturnType<typeof freshApp>>) {
+    await catalogoDeReducao();
+    const response = await app.fetch(request('/', json({
+      sessionId, professorId, turmas: catalogo.etapas[0].turmas,
+    })));
+    expect(response.status).toBe(201);
+    const { cadernetas } = await response.json() as { cadernetas: { id: string; turmas: string[] }[] };
+    expect(cadernetas).toHaveLength(1);
+    await esperarSincronizacao(app, cadernetas[0].id);
+    return cadernetas[0];
+  }
+
+  const fiveTurmas = ['1º ANO D', '2º ANO C - ANEXO', '3º ANO A', '3º ANO D', '4º ANO C - ANEXO'];
+  function fiveTurmasCatalogo() {
+    return { etapas: [{
+      nome: '1ª Etapa', periodoLetivo: '2026', turmas: fiveTurmas, meses: ['MARÇO'],
+      gruposDiariosPorTurma: fiveTurmas.map((turma, index) => ({
+        turma, grupoDiario: index === 2 ? 'REGENTE MANHÃ' : index === 4 ? 'REDUÇÃO VITORIA' : 'REDUÇÃO TARDE',
+      })),
+    }] };
+  }
+
+  it('automatically creates two cadernetas for four redução turmas and one regente', async () => {
+    const app = await freshApp();
+    const { getCatalogo } = await import('../portal-sessions');
+    vi.mocked(getCatalogo).mockResolvedValue(fiveTurmasCatalogo());
+    const response = await cadastrarVarias(app, fiveTurmas);
+    expect(response.status).toBe(201);
+    const { cadernetas } = await response.json() as { cadernetas: { id: string; turmas: string[] }[] };
+    expect(cadernetas).toHaveLength(2);
+    expect(cadernetas.find((caderneta) => caderneta.turmas.length === 4)?.turmas)
+      .toEqual(fiveTurmas.filter((_, index) => index !== 2));
+    expect(cadernetas.find((caderneta) => caderneta.turmas.length === 1)?.turmas).toEqual([fiveTurmas[2]]);
+    for (const caderneta of cadernetas) await esperarSincronizacao(app, caderneta.id);
+  });
+
+  it('consolidates existing redução cadernetas during list refresh without rereading cached aulas', async () => {
+    const app = await freshApp();
+    const { getDb } = await import('../professores/db');
+    const { replaceTurmas } = await import('../turmas/store');
+    const { createCaderneta, syncCaderneta } = await import('../cadernetas/store');
+    const etapa = fiveTurmasCatalogo().etapas[0];
+    replaceTurmas(getDb(), professorId, etapa.gruposDiariosPorTurma.map(({ turma, grupoDiario }) => ({ nome: turma, grupoDiario })));
+    for (const turma of fiveTurmas) {
+      const caderneta = createCaderneta(getDb(), { professorId, turma });
+      syncCaderneta(getDb(), caderneta.id, { estudantes: [], etapas: [{
+        nome: etapa.nome, meses: etapa.meses,
+        aulas: [{ data: '05/03/2026', ordem: 1, mes: 'MARÇO', preenchida: true, desenvolvimento: turma }],
+      }] });
+    }
+    const response = await app.fetch(request(`?professorId=${professorId}`));
+    const list = await response.json() as { id: string; turmas: string[]; etapas: { totalDeAulas: number }[] }[];
+    expect(list).toHaveLength(2);
+    expect(list.find((caderneta) => caderneta.turmas.length === 4)?.etapas[0].totalDeAulas).toBe(4);
+    const { listAulas } = await import('../scrape/portal');
+    expect(listAulas).not.toHaveBeenCalled();
+  });
+
+  it('keeps queued redução IDs intact until jobs behind a regente have finished', async () => {
+    const app = await freshApp();
+    const { getDb } = await import('../professores/db');
+    const { replaceTurmas } = await import('../turmas/store');
+    const { createCaderneta, getCaderneta } = await import('../cadernetas/store');
+    const { reconcileCadernetasDeReducao } = await import('../cadernetas/reducao');
+    const { sincronizarEmSegundoPlano } = await import('../cadernetas/sincronizacao');
+    const selected = [fiveTurmas[2], fiveTurmas[0], fiveTurmas[1]];
+    replaceTurmas(getDb(), professorId, selected.map((nome, index) => ({ nome, grupoDiario: index === 0 ? 'REGENTE MANHÃ' : 'REDUÇÃO TARDE' })));
+    const cadernetas = selected.map((turma) => createCaderneta(getDb(), { professorId, turma }));
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    const { listAulas } = await import('../scrape/portal');
+    vi.mocked(listAulas).mockImplementation(async () => { await waiting; return []; });
+    try {
+      for (const caderneta of cadernetas) sincronizarEmSegundoPlano({
+        cadernetaId: caderneta.id, sessionId, page: {} as never, catalogo: fiveTurmasCatalogo(),
+      });
+      expect(cadernetas.map(({ id }) => getCaderneta(getDb(), id).syncStatus))
+        .toEqual(['sincronizando', 'sincronizando', 'sincronizando']);
+      expect(reconcileCadernetasDeReducao(getDb(), professorId)).toHaveLength(3);
+    } finally { release(); }
+    for (const caderneta of cadernetas) await esperarSincronizacao(app, caderneta.id);
+    expect(reconcileCadernetasDeReducao(getDb(), professorId)).toHaveLength(2);
+  });
+
+  it('recovers interrupted synchronization after restart without removing cached aulas', async () => {
+    await freshApp();
+    const { getDb, closeDb } = await import('../professores/db');
+    const { createCaderneta, syncCaderneta, marcarSincronizando, getCaderneta } = await import('../cadernetas/store');
+    const caderneta = createCaderneta(getDb(), { professorId, turma: fiveTurmas[0] });
+    syncCaderneta(getDb(), caderneta.id, { estudantes: [], etapas: [{
+      nome: '1ª Etapa', meses: ['MARÇO'], aulas: [{ data: '05/03/2026', mes: 'MARÇO', preenchida: true }],
+    }] });
+    marcarSincronizando(getDb(), caderneta.id);
+    closeDb();
+    const reopened = getCaderneta(getDb(), caderneta.id);
+    expect(reopened.syncStatus).toBe('falhou');
+    expect(reopened.etapas[0].totalDeAulas).toBe(1);
+    marcarSincronizando(getDb(), caderneta.id);
+    expect(getCaderneta(getDb(), caderneta.id).syncStatus).toBe('sincronizando');
+  });
+
+  it('synchronizes the surviving caderneta when grouping happens while the catalogo is loading', async () => {
+    const app = await freshApp();
+    const { getDb } = await import('../professores/db');
+    const { replaceTurmas } = await import('../turmas/store');
+    const { createCaderneta } = await import('../cadernetas/store');
+    const { getCatalogo } = await import('../portal-sessions');
+    replaceTurmas(getDb(), professorId, catalogo.etapas[0].turmas.map((nome) => ({ nome, grupoDiario: 'REDUÇÃO TARDE' })));
+    const original = catalogo.etapas[0].turmas.map((turma) => createCaderneta(getDb(), { professorId, turma }));
+    let release!: () => void;
+    let started!: () => void;
+    const loading = new Promise<void>((resolve) => { started = resolve; });
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(getCatalogo).mockImplementation(async () => { started(); await waiting; return catalogo; });
+    const pending = app.fetch(request(`/${original[1].id}/sincronizacoes`, json({ sessionId })));
+    await loading;
+    let surviving!: { id: string; turmas: string[] };
+    try {
+      const grouped = await (await app.fetch(request(`?professorId=${professorId}`))).json() as { id: string; turmas: string[] }[];
+      expect(grouped).toHaveLength(1);
+      surviving = grouped[0];
+    } finally { release(); }
+    const response = await pending;
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ id: surviving.id, turmas: surviving.turmas });
+    await esperarSincronizacao(app, surviving.id);
+  });
+
+  it('groups turmas de redução and keeps matching aula dates and matrículas separate', async () => {
+    const app = await freshApp();
+    const { listAulas, listEstudantes } = await import('../scrape/portal');
+    vi.mocked(listAulas).mockImplementation(async (_page, filter) => [{
+      data: '05/03/2026', ordem: 1, preenchida: true, desenvolvimento: filter.turma,
+    }]);
+    vi.mocked(listEstudantes).mockImplementation(async (_page, filter) => [{
+      matricula: 'same-matricula', nome: filter.turma,
+    }]);
+    const caderneta = await cadastrarReducao(app);
+    expect(caderneta.turmas).toEqual(catalogo.etapas[0].turmas);
+    const list = await (await app.fetch(request(`?professorId=${professorId}`))).json();
+    expect(list).toHaveLength(1);
+    for (const turma of caderneta.turmas) {
+      const query = `?turma=${encodeURIComponent(turma)}`;
+      const aulas = await (await app.fetch(request(`/${caderneta.id}/etapas/1%C2%AA%20Etapa/aulas${query}`))).json();
+      expect(aulas.aulas).toEqual([expect.objectContaining({ desenvolvimento: turma })]);
+      const estudantes = await (await app.fetch(request(`/${caderneta.id}/estudantes${query}`))).json();
+      expect(estudantes.estudantes).toEqual([expect.objectContaining({ matricula: 'same-matricula', nome: turma })]);
+    }
+  });
+
+  it('requires a member turma for grouped data operations', async () => {
+    const app = await freshApp();
+    const { id } = await cadastrarReducao(app);
+    expect((await app.fetch(request(`/${id}/estudantes`))).status).toBe(422);
+    expect((await app.fetch(request(`/${id}?turma=unknown`))).status).toBe(422);
+    expect((await app.fetch(request(`/${id}/estudantes?turma=unknown`))).status).toBe(422);
+    expect((await app.fetch(request(`/${id}`))).status).toBe(200);
+  });
+
+  it('rejects a sessão belonging to another professor before cadastro or synchronization', async () => {
+    const app = await freshApp();
+    const { id } = (await (await cadastrar(app)).json()) as { id: string };
+    await esperarSincronizacao(app, id);
+    const { retomarSessao } = await import('../portal-sessions');
+    const session = await retomarSessao(sessionId);
+    vi.mocked(retomarSessao).mockResolvedValue({ ...session!, professorId: 'another-professor' });
+    expect((await cadastrar(app, catalogo.etapas[0].turmas[0])).status).toBe(422);
+    expect((await app.fetch(request(`/${id}/sincronizacoes`, json({ sessionId })))).status).toBe(422);
+  });
+
+  it('rejects an unrelated turma in a scoped preview before calling the agent', async () => {
+    const app = await freshApp();
+    const { id } = await cadastrarReducao(app);
+    const form = new FormData();
+    form.append('texto', 'Material');
+    form.append('cadernetaId', id);
+    form.append('turma', 'another-turma');
+    const response = await app.fetch(new Request(
+      `http://localhost/api/cadernetas/sessoes/${sessionId}/envios`, { method: 'POST', body: form },
+    ));
+    expect(response.status).toBe(422);
+    const { chatCompletion } = await import('../ai/openrouter');
+    expect(chatCompletion).not.toHaveBeenCalled();
+  });
+
+  it('writes boletim progress only for the selected turma de redução', async () => {
+    const app = await freshApp();
+    await stubBoletim({ avaliacoes: [{ nome: 'PROVA 1', valor: 10 }], notas: [] });
+    const { id, turmas } = await cadastrarReducao(app);
+    const response = await app.fetch(request(
+      `/${id}/boletim/preenchimentos-assistidos?turma=${encodeURIComponent(turmas[1])}`,
+      json({ etapa: '1ª Etapa', notas: [{ matricula: '2026001', avaliacao: 'PROVA 1', valor: 9 }] }),
+    ));
+    expect(response.status).toBe(200);
+    const { prepararNotasParaPreenchimento } = await import('../scrape/portal');
+    expect(prepararNotasParaPreenchimento).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ turma: turmas[1] }));
+    for (const [index, turma] of turmas.entries()) {
+      const boletim = await (await app.fetch(request(
+        `/${id}/etapas/1%C2%AA%20Etapa/boletim?turma=${encodeURIComponent(turma)}`,
+      ))).json();
+      expect(boletim.notas).toHaveLength(index === 1 ? 1 : 0);
+    }
+  });
+
+  it.each([['REDUÇÃO TARDE', 'Regular'], ['REDUÇÃO TARDE']])(
+    'keeps regente or unconfirmed turmas separate: %j', async (...groups) => {
+      const app = await freshApp();
+      await catalogoDeReducao(groups as string[]);
+      const response = await app.fetch(request('/', json({
+        sessionId, professorId, turmas: catalogo.etapas[0].turmas,
+      })));
+      expect(response.status).toBe(201);
+      const body = await response.json() as { cadernetas: { turmas: string[] }[] };
+      expect(body.cadernetas).toHaveLength(2);
+      expect(body.cadernetas.every((caderneta) => caderneta.turmas.length === 1)).toBe(true);
+    },
+  );
+
+  it('rejects duplicate membership after automatic grouping', async () => {
+    const app = await freshApp();
+    await catalogoDeReducao();
+    const { id } = await cadastrarReducao(app);
+    const duplicate = await app.fetch(request('/', json({
+      sessionId, professorId, turma: catalogo.etapas[0].turmas[1],
+    })));
+    expect(duplicate.status).toBe(409);
+    const list = await (await app.fetch(request(`?professorId=${professorId}`))).json();
+    expect(list).toEqual([expect.objectContaining({ id })]);
+    expect((await app.fetch(request(`/${id}`, { method: 'DELETE' }))).status).toBe(204);
+    expect((await app.fetch(request('/', json({
+      sessionId, professorId, turma: catalogo.etapas[0].turmas[1],
+    })))).status).toBe(201);
+  });
+
   it('não cadastra sem sessão aberta', async () => {
     const { retomarSessao } = await import('../portal-sessions');
     vi.mocked(retomarSessao).mockResolvedValue(undefined);
@@ -453,7 +700,10 @@ describe('cadernetas CRUD', () => {
 
     const response = await app.fetch(request(`/turmas?sessionId=${sessionId}`));
 
-    expect(await response.json()).toEqual({ turmas: ['9º ANO - 9º ANO A - VESPERTINO', '9º ANO - 9º ANO B - MATUTINO'] });
+    expect(await response.json()).toEqual({
+      turmas: ['9º ANO - 9º ANO A - VESPERTINO', '9º ANO - 9º ANO B - MATUTINO'],
+      gruposDiariosPorTurma: catalogo.etapas[0].turmas.map((turma) => ({ turma, grupoDiario: null })),
+    });
   });
 
   it('lista as aulas datadas de uma etapa', async () => {

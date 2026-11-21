@@ -41,7 +41,7 @@ const FILTER = {
   turma: ':turma-SOM-CP-OBR',
   /** O menu de turma num período letivo da EJA. Veja `filtroDeTurma`. */
   turmaComMulti: ':turmaComMulti-SOM-CP-OBR',
-  /** O portal chama a redução de _Grupo diário_. */
+  /** The grupo diário identifies regente or redução for this professor. */
   reducao: ':grupoDiario-SOM-CP-OBR',
   mes: ':mes-SOM-CP-OBR',
   /**
@@ -239,19 +239,33 @@ export async function listConteudoOptions(page: Page): Promise<ConteudoCatalogo>
       const turma = await filtroDeTurma(page);
       const turmas = await readMenuOptions(page, turma);
 
-      // Os meses só carregam depois da turma e da redução. São os meses do
-      // calendário da etapa, iguais para todas as turmas dela, então basta
-      // escolher a primeira.
-      if (turmas[0]) {
-        await selectMenuOption(page, page, turma, turmas[0]);
-        await selectFirstReducao(page);
+      const gruposDiariosPorTurma: { turma: string; grupoDiario: string | null }[] = [];
+      let meses: string[] = [];
+
+      // The grupo diário belongs to the professor's relationship with each
+      // turma. Reading only the first turma would misclassify the others.
+      for (const [index, nomeDaTurma] of turmas.entries()) {
+        await selectMenuOption(page, page, turma, nomeDaTurma);
+        const options = await readMenuOptions(page, FILTER.reducao);
+        gruposDiariosPorTurma.push({
+          turma: nomeDaTurma,
+          grupoDiario: options.length === 1 ? options[0] : null,
+        });
+
+        // Months load after the grupo diário. They follow the etapa's
+        // calendário acadêmico, so the first turma provides the same list.
+        if (index === 0) {
+          if (options[0]) await selectMenuOption(page, page, FILTER.reducao, options[0]);
+          meses = await readMenuOptions(page, FILTER.mes);
+        }
       }
 
       etapas.push({
         nome,
         periodoLetivo,
         turmas,
-        meses: turmas[0] ? await readMenuOptions(page, FILTER.mes) : [],
+        meses,
+        gruposDiariosPorTurma,
       });
     }
   }
@@ -260,14 +274,8 @@ export async function listConteudoOptions(page: Page): Promise<ConteudoCatalogo>
 }
 
 /**
- * A ordem da aula é do portal, não do plano do professor: quem a define é o
- * grupo diário da turma. Só filtramos por ela quando o material a informa —
- * do contrário, a data sozinha já identifica a linha.
- */
-/**
- * A redução não vem do material do professor: é o grupo diário sob o qual a
- * turma arquiva suas aulas. Ficamos com a primeira opção, que é a que o portal
- * usa para a turma.
+ * Select the first grupo diário offered by the portal. The legacy function
+ * name does not imply that every value represents redução.
  */
 export async function selectFirstReducao(page: Page): Promise<string | undefined> {
   const [primeira] = await readMenuOptions(page, FILTER.reducao);
