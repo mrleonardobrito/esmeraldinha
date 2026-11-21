@@ -200,48 +200,25 @@ fichaDeDesempenho.get('/:id/ficha-de-desempenho/previas/atual', (context) => {
   return context.json({ previa: getPrevia(getDb(), caderneta.id, caderneta.turma) });
 });
 
-/** Saves the auxiliar's edits; every row is kept non-decreasing across etapas. */
-fichaDeDesempenho.put('/:id/ficha-de-desempenho/previas/atual', async (context) => {
-  const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
-  if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
-  const atual = getPrevia(getDb(), caderneta.id, caderneta.turma);
-  if (!atual) return context.json({ error: 'Não há prévia para esta turma.' }, 404);
-
-  const parsed = previaEditadaSchema.safeParse(await context.req.json().catch(() => null));
-  if (!parsed.success) return context.json({ error: 'Prévia malformada.' }, 400);
-  // An edit made on an older prévia (one replaced meanwhile by "Gerar a
-  // prévia de novo") must not overwrite the new one.
-  if (parsed.data.versao !== atual.atualizadaEm) {
-    return context.json({ error: 'A prévia mudou enquanto você editava. Recarregue a prévia.', previa: atual }, 409);
-  }
-
-  const editados = new Map(parsed.data.estudantes.map((e) => [e.matricula, e.conceitos]));
-  const fora = [...editados.keys()].find((matricula) => !atual.estudantes.some((e) => e.matricula === matricula));
-  if (fora) return context.json({ error: `A matrícula ${fora} não está na prévia.` }, 422);
-
-  const previa = salvarPrevia(getDb(), caderneta.id, caderneta.turma, {
-    ...atual,
-    estudantes: atual.estudantes.map((estudante) => {
-      const conceitos = editados.get(estudante.matricula);
-      if (!conceitos) return estudante;
-      const normalizados: FichaPlanejada = {};
-      for (const chave of Object.keys(estudante.conceitos)) {
-        normalizados[chave] = normalizarLinha(conceitos[chave] ?? estudante.conceitos[chave], atual.etapas);
-      }
-      return { ...estudante, conceitos: normalizados };
-    }),
-    gerais: parsed.data.gerais,
-    naoResolvidos: parsed.data.naoResolvidos,
-  });
-  return context.json({ previa });
-});
-
 fichaDeDesempenho.delete('/:id/ficha-de-desempenho/previas/atual', (context) => {
   const caderneta = cadernetaDaRota(context.req.param('id'), context.req.query('turma'));
   if (!caderneta) return context.json({ error: 'Caderneta não encontrada.' }, 404);
   apagarPrevia(getDb(), caderneta.id, caderneta.turma);
   return context.body(null, 204);
 });
+
+/**
+ * One estudante's ficha as the screen left it: the prévia's habilidades only,
+ * each row kept non-decreasing across etapas.
+ */
+function fichaDaTela(
+  gerada: FichaPlanejada,
+  editada: FichaPlanejada | undefined,
+  etapas: readonly IndiceDaEtapa[],
+): FichaPlanejada {
+  if (!editada) return gerada;
+  return Object.fromEntries(Object.keys(gerada).map((chave) => [chave, normalizarLinha(editada[chave] ?? gerada[chave], etapas)]));
+}
 
 /**
  * Does every área of the prévia still have exactly the habilidades it was
@@ -271,7 +248,18 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/preenchimentos-assistidos', asy
   const db = getDb();
   const previa = getPrevia(db, caderneta.id, caderneta.turma);
   if (!previa) return context.json({ error: 'Gere a prévia da ficha antes de preencher o portal.' }, 422);
-  if (previa.naoResolvidos.some((item) => item.excecoes.length > 0)) {
+
+  // The screen's edits are not saved: they come with the request, on top of
+  // the prévia version they were made on.
+  const tela = previaEditadaSchema.safeParse(await context.req.json().catch(() => null));
+  if (!tela.success) return context.json({ error: 'Prévia malformada.' }, 400);
+  if (tela.data.versao !== previa.atualizadaEm) {
+    return context.json({ error: 'A prévia foi gerada de novo em outro lugar. Abra a ficha outra vez.' }, 409);
+  }
+  const editados = new Map(tela.data.estudantes.map((e) => [e.matricula, e.conceitos]));
+  const fora = [...editados.keys()].find((matricula) => !previa.estudantes.some((e) => e.matricula === matricula));
+  if (fora) return context.json({ error: `A matrícula ${fora} não está na prévia.` }, 422);
+  if (tela.data.naoResolvidos.some((item) => item.excecoes.length > 0)) {
     return context.json({ error: 'Há nomes nas observações que ainda não foram ligados a um estudante. Resolva ou ignore antes de preencher.' }, 422);
   }
   const estrutura = getEstruturaDaFicha(db, caderneta.professorId, caderneta.turma);
@@ -293,7 +281,7 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/preenchimentos-assistidos', asy
     // transferred since then must not be filled.
     estudantes: listEstudantes(db, caderneta.id, caderneta.turma)
       .map(({ matricula, nome, situacao }) => ({ matricula, nome, situacao })),
-    fichas: new Map(previa.estudantes.map((e) => [e.matricula, e.conceitos])),
+    fichas: new Map(previa.estudantes.map((e) => [e.matricula, fichaDaTela(e.conceitos, editados.get(e.matricula), previa.etapas)])),
     estrutura: estrutura.areas,
   };
 

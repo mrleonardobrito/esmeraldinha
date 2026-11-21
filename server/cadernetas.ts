@@ -235,10 +235,10 @@ cadernetas.use('*', async (context, next) => {
   if (turma !== undefined || scoped) {
     const caderneta = getCaderneta(getDb(), decodeURIComponent(match[1]));
     if (turma !== undefined && !caderneta.turmas.includes(turma)) {
-      return context.json({ error: 'This turma does not belong to the caderneta.' }, 422);
+      return context.json({ error: 'Esta turma não faz parte desta caderneta. Feche e abra a ficha de novo.' }, 422);
     }
     if (scoped && caderneta.turmas.length > 1 && turma === undefined) {
-      return context.json({ error: 'Select a turma from this caderneta.' }, 422);
+      return context.json({ error: 'Escolha uma turma desta caderneta.' }, 422);
     }
   }
   return next();

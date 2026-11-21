@@ -77,30 +77,24 @@ export async function loadPrevia(cadernetaId: string, turma?: string): Promise<P
   return ((await response.json()) as { previa: PreviaDaFicha | null }).previa;
 }
 
-/**
- * Saves the auxiliar's edits on top of the prévia version `versao`. A 409
- * (ApiError) means the prévia was replaced meanwhile.
- */
-export async function salvarPreviaEditada(cadernetaId: string, previa: PreviaDaFicha, versao: string, turma?: string): Promise<PreviaDaFicha> {
-  const body: PreviaEditada = {
-    versao,
-    estudantes: previa.estudantes.map(({ matricula, conceitos }) => ({ matricula, conceitos })),
-    gerais: previa.gerais,
-    naoResolvidos: previa.naoResolvidos,
-  };
-  const response = await requestApi(`${base(cadernetaId)}/ficha-de-desempenho/previas/atual${turmaQuery(turma)}`, {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
-  return ((await response.json()) as { previa: PreviaDaFicha }).previa;
-}
-
 export async function descartarPrevia(cadernetaId: string, turma?: string): Promise<void> {
   await requestApi(`${base(cadernetaId)}/ficha-de-desempenho/previas/atual${turmaQuery(turma)}`, { method: "DELETE" });
 }
 
-/** Starts filling the portal from the saved prévia, one estudante at a time. */
-export async function iniciarPreenchimentoDaFicha(cadernetaId: string, turma?: string): Promise<EstadoDoPreenchimento> {
-  const response = await requestApi(`${base(cadernetaId)}/ficha-de-desempenho/preenchimentos-assistidos${turmaQuery(turma)}`, { method: "POST" });
+/**
+ * Starts filling the portal from the prévia as it is on screen — the edits
+ * are not saved, they travel with this request — one estudante at a time.
+ */
+export async function iniciarPreenchimentoDaFicha(cadernetaId: string, previa: PreviaDaFicha, turma?: string): Promise<EstadoDoPreenchimento> {
+  const body: PreviaEditada = {
+    versao: previa.atualizadaEm,
+    estudantes: previa.estudantes.map(({ matricula, conceitos }) => ({ matricula, conceitos })),
+    gerais: previa.gerais,
+    naoResolvidos: previa.naoResolvidos,
+  };
+  const response = await requestApi(`${base(cadernetaId)}/ficha-de-desempenho/preenchimentos-assistidos${turmaQuery(turma)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
   return ((await response.json()) as { estado: EstadoDoPreenchimento }).estado;
 }
 

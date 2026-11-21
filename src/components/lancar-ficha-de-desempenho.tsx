@@ -27,7 +27,6 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError } from "@/lib/api";
 import type { Caderneta } from "@/lib/cadernetas";
 import {
   aplicarNaFicha,
@@ -42,7 +41,6 @@ import {
   nomeDaArea,
   pendenciasAntesDeAbrir,
   previaConfere,
-  salvarPreviaEditada,
   TODAS_AS_ETAPAS,
   type EstadoDoPreenchimento,
   type EstruturaDaFicha,
@@ -87,20 +85,12 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
   const [arquivos, setArquivos] = React.useState<File[]>([]);
   const [gerando, setGerando] = React.useState(false);
   const [previa, setPrevia] = React.useState<PreviaDaFicha | null>(null);
-  /** Where the screen's edits stand against the saved prévia. */
-  const [salvamento, setSalvamento] = React.useState<"salvo" | "pendente" | "salvando" | "erro">("salvo");
   const [execucao, setExecucao] = React.useState<EstadoDoPreenchimento | null>(null);
   /** With a prévia, the modal shows only its table; the setup comes back on demand. */
   const [vendoPrevia, setVendoPrevia] = React.useState(false);
   const [avisosAbertos, setAvisosAbertos] = React.useState(false);
   const [erro, setErro] = React.useState<string | null>(null);
   const entrada = React.useRef<HTMLInputElement>(null);
-  const timer = React.useRef<number | null>(null);
-  /** The latest edit not yet sent; saves run one at a time, always sending the latest. */
-  const pendente = React.useRef<PreviaDaFicha | null>(null);
-  const fila = React.useRef<Promise<void>>(Promise.resolve());
-  /** The `atualizadaEm` of the prévia the screen's edits are made on. */
-  const versao = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     let vivo = true;
@@ -114,7 +104,6 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
     loadPrevia(caderneta.id, turma)
       .then((salva) => {
         if (!vivo || !salva) return;
-        versao.current = salva.atualizadaEm;
         setPrevia(salva);
         setVendoPrevia(true);
         setAreas(salva.areas);
@@ -146,61 +135,9 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
     return `${encontrada ? nomeDaArea(encontrada.titulo) : `Área ${area}`} · ${h ? `${h.numero} ${h.texto}` : `habilidade ${habilidade}`}`;
   }
 
-  /** Sends the latest pending edit, after any save already in flight. */
-  const enviar = React.useCallback((): Promise<void> => {
-    if (timer.current !== null) {
-      window.clearTimeout(timer.current);
-      timer.current = null;
-    }
-    fila.current = fila.current.then(async () => {
-      const edicao = pendente.current;
-      if (!edicao || !versao.current) return;
-      pendente.current = null;
-      setSalvamento("salvando");
-      try {
-        const salva = await salvarPreviaEditada(caderneta.id, edicao, versao.current, turma);
-        versao.current = salva.atualizadaEm;
-        setSalvamento(pendente.current ? "pendente" : "salvo");
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 409) {
-          // The prévia was replaced meanwhile: the server's copy wins.
-          pendente.current = null;
-          const atual = await loadPrevia(caderneta.id, turma).catch(() => null);
-          versao.current = atual?.atualizadaEm ?? null;
-          setPrevia(atual);
-          setSalvamento("salvo");
-          setErro("A prévia mudou enquanto você editava, e a versão salva foi recarregada.");
-          return;
-        }
-        pendente.current ??= edicao;
-        setSalvamento("erro");
-        setErro(mensagemDe(error, "Não foi possível salvar a prévia."));
-      }
-    });
-    return fila.current;
-  }, [caderneta.id, turma]);
-
-  // Closing the screen sends what was not saved yet.
-  React.useEffect(() => () => { void enviar(); }, [enviar]);
-
-  /** Shows the edit at once and saves it shortly after, so a burst of clicks is one request. */
+  /** Edits live on screen only: they go to the portal with "Preencher no portal". */
   function editar(nova: PreviaDaFicha) {
     setPrevia(nova);
-    pendente.current = nova;
-    setSalvamento("pendente");
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => { void enviar(); }, 600);
-  }
-
-  /** Drops edits not sent yet and waits for any save in flight (before replacing or deleting the prévia). */
-  async function abandonarEdicoes() {
-    if (timer.current !== null) {
-      window.clearTimeout(timer.current);
-      timer.current = null;
-    }
-    pendente.current = null;
-    await fila.current;
-    setSalvamento("salvo");
   }
 
   function aplicar(matriculas: readonly string[], excecoes: readonly Excecao[]): PreviaDaFicha["estudantes"] {
@@ -226,9 +163,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
     setGerando(true);
     setErro(null);
     try {
-      await abandonarEdicoes();
       const nova = await gerarPrevia(caderneta.id, { areas, etapas, texto, arquivos }, undefined, turma);
-      versao.current = nova.atualizadaEm;
       setPrevia(nova);
       setVendoPrevia(true);
       setAvisosAbertos(pendenciasAntesDeAbrir(nova.naoResolvidos) > 0);
@@ -242,9 +177,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
   async function descartar() {
     setErro(null);
     try {
-      await abandonarEdicoes();
       await descartarPrevia(caderneta.id, turma);
-      versao.current = null;
       setPrevia(null);
       setVendoPrevia(false);
     } catch (error) {
@@ -255,9 +188,8 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
   async function preencher() {
     setErro(null);
     try {
-      await enviar();
-      if (pendente.current) return;
-      setExecucao(await iniciarPreenchimentoDaFicha(caderneta.id, turma));
+      if (!previa) return;
+      setExecucao(await iniciarPreenchimentoDaFicha(caderneta.id, previa, turma));
     } catch (error) {
       setErro(mensagemDe(error, "Não foi possível abrir o portal."));
     }
@@ -279,8 +211,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
               <span className="font-medium">Prévia</span>
               <span className="text-muted-foreground">
                 {previa.etapas.map((e) => ETAPAS_DA_FICHA[e - 1].replace(" ETAPA", "")).join(", ")} ETAPA ·{" "}
-                {ficha.areas.filter((a) => previa.areas.includes(a.indice)).map((a) => nomeDaArea(a.titulo)).join(", ")} ·{" "}
-                {salvamento === "salvo" ? "salva" : salvamento === "erro" ? "não salva" : "salvando…"}
+                {ficha.areas.filter((a) => previa.areas.includes(a.indice)).map((a) => nomeDaArea(a.titulo)).join(", ")}
               </span>
               {quantosAvisos > 0 && (
                 <Button
@@ -366,13 +297,6 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
                 </div>
               ))}
 
-              </div>
-            )}
-
-            {salvamento === "erro" && (
-              <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                As últimas mudanças não foram salvas, e o portal só recebe o que está salvo.
-                <Button size="sm" variant="outline" className="ml-auto" onClick={() => void enviar()}>Tentar de novo</Button>
               </div>
             )}
 
@@ -543,7 +467,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
             <Button
               onClick={() => void preencher()}
               disabled={
-                emAndamento || gerando || salvamento !== "salvo" ||
+                emAndamento || gerando ||
                 !previaConfere(previa, etapas, areas) || pendenciasAntesDeAbrir(previa.naoResolvidos) > 0
               }
             >
