@@ -238,6 +238,32 @@ The grade an estudante closes an etapa with, written on their row of the
 boletim. Editable, unlike the nota parcial and the nota calculada.
 _Avoid_: final grade, média
 
+### Classificação de notas
+
+**classificação**:
+How an estudante did in their turma: _Acima da média_ (nota final da etapa of
+8 to 10), _Na média_ (6 to less than 8) or _Abaixo da média_ (less than 6),
+scaled when an etapa's avaliações do not add up to 10. Choosing one generates
+the top of its band (10, 7 or 5), split across the avaliações in steps of
+0,5; editing the nota final or an avaliação moves the classificação to the
+band the sum falls in. Remembered per estudante of the turma, across every
+etapa and disciplina; the portal's notas win when they disagree.
+_Avoid_: conceito, nível, faixa
+
+**classificação padrão**:
+The classificação an estudante of a turma gets while they have neither notas
+on the portal nor a classificação of their own. Starts at _Acima da média_,
+so an empty boletim opens with 10 for everyone.
+_Avoid_: default, classificação geral
+
+**chat de notas**:
+The conversation the auxiliar de ensino has with the agent from _Lançar
+Notas_ about one etapa and disciplina ("a turma foi acima da média, menos
+X"). The agent only decides notas finais; the split into avaliações and the
+classificação follow the same rules as the grid. Nothing reaches the portal
+from it.
+_Avoid_: assistente de notas, IA
+
 ### Chat de conteúdos
 
 **chat de conteúdos**:
