@@ -206,6 +206,17 @@ export const SCHEMA = `
     PRIMARY KEY (professor_id, turma)
   );
 
+  -- A prévia da ficha de desempenho: o que vai ser escrito no portal,
+  -- estudante por estudante, enquanto o auxiliar de ensino a revisa. Guardada
+  -- a cada edição para fechar a janela não custar a revisão.
+  CREATE TABLE IF NOT EXISTS ficha_previas (
+    caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    previa_json TEXT NOT NULL,
+    atualizada_em TEXT NOT NULL,
+    PRIMARY KEY (caderneta_id, turma)
+  );
+
   -- Classificações are typed by the auxiliar, not scraped. They are keyed by
   -- professor and turma rather than caderneta, so they survive turmas de
   -- redução being regrouped into another caderneta.

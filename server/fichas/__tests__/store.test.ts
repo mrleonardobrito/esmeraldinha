@@ -1,9 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
 
-import { beforeEach, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
+import { deleteCaderneta } from '../../cadernetas/store';
 import { SCHEMA } from '../../professores/db';
-import { getEstruturaDaFicha, salvarEstruturaDaFicha } from '../store';
+import { apagarPrevia, getEstruturaDaFicha, getPrevia, salvarEstruturaDaFicha, salvarPrevia } from '../store';
 
 let db: DatabaseSync;
 
@@ -39,4 +40,55 @@ it('replaces the structure when read again', () => {
 
 it('returns null for a turma never read', () => {
   expect(getEstruturaDaFicha(db, 'prof-1', 'OUTRA')).toBeNull();
+});
+
+describe('prévia', () => {
+  function caderneta() {
+    db.prepare(
+      `INSERT INTO cadernetas (id, professor_id, turma, created_at) VALUES ('cad-1', 'prof-1', ?, '2026-01-01T00:00:00.000Z')`,
+    ).run(turma);
+    return 'cad-1';
+  }
+
+  const previa = {
+    areas: [0],
+    etapas: [1, 2, 3, 4] as (1 | 2 | 3 | 4)[],
+    estudantes: [{ matricula: '101', nome: 'ANA', situacao: 'ATIVO', trechos: [], conceitos: { '0.0': ['RD', 'RD', 'R', 'R'] as ('R' | 'RD' | 'NR' | null)[] } }],
+    gerais: [],
+    naoResolvidos: [],
+    descartadas: [],
+    resposta: 'ok',
+  };
+
+  it('saves and reads back the prévia of a turma', () => {
+    const id = caderneta();
+    const salva = salvarPrevia(db, id, turma, previa);
+
+    expect(salva).toMatchObject(previa);
+    expect(getPrevia(db, id, turma)).toEqual(salva);
+  });
+
+  it('replaces the prévia when saved again', () => {
+    const id = caderneta();
+    salvarPrevia(db, id, turma, previa);
+    salvarPrevia(db, id, turma, { ...previa, resposta: 'nova' });
+
+    expect(getPrevia(db, id, turma)?.resposta).toBe('nova');
+  });
+
+  it('deletes the prévia', () => {
+    const id = caderneta();
+    salvarPrevia(db, id, turma, previa);
+    apagarPrevia(db, id, turma);
+
+    expect(getPrevia(db, id, turma)).toBeNull();
+  });
+
+  it('goes away with its caderneta', () => {
+    const id = caderneta();
+    salvarPrevia(db, id, turma, previa);
+    deleteCaderneta(db, id);
+
+    expect(getPrevia(db, id, turma)).toBeNull();
+  });
 });
