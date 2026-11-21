@@ -193,6 +193,18 @@ export const SCHEMA = `
     personalizada REAL,
     PRIMARY KEY (caderneta_id, turma, etapa, disciplina, matricula)
   );
+
+  -- As áreas de conhecimento e habilidades da ficha de desempenho de uma
+  -- turma, lidas do portal abrindo a ficha de um estudante. Dependem da
+  -- série, não do estudante, então uma leitura vale para a turma inteira.
+  CREATE TABLE IF NOT EXISTS ficha_estruturas (
+    professor_id TEXT NOT NULL REFERENCES professores(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    ficha TEXT NOT NULL,
+    areas_json TEXT NOT NULL,
+    lida_em TEXT NOT NULL,
+    PRIMARY KEY (professor_id, turma)
+  );
 `;
 
 /**
