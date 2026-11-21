@@ -184,6 +184,8 @@ export const etapasSchema = z.array(etapaSchema).min(1);
 
 /** What the screen sends back after the auxiliar edits the prévia. */
 export const previaEditadaSchema = z.object({
+  /** The `atualizadaEm` of the prévia these edits were made on. */
+  versao: z.string().min(1),
   estudantes: z.array(z.object({
     matricula: z.string().trim().min(1),
     conceitos: z.record(z.string().regex(/^\d+\.\d+$/), z.array(conceitoSchema.nullable()).length(4)),

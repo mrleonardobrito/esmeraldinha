@@ -163,7 +163,9 @@ describe('ficha de desempenho routes', () => {
     await agenteDevolve(anaComDificuldade);
     await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
 
+    const versao = (await (await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`))).json()).previa.atualizadaEm;
     const edicao = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`, json({
+      versao,
       estudantes: [{ matricula: '10315', conceitos: { '0.0': ['R', 'NR', 'NR', 'R'] } }],
       gerais: [],
       naoResolvidos: [],
@@ -180,7 +182,9 @@ describe('ficha de desempenho routes', () => {
     await agenteDevolve(anaComDificuldade);
     await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
 
+    const versao = (await (await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`))).json()).previa.atualizadaEm;
     const edicao = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`, json({
+      versao,
       estudantes: [{ matricula: '99999', conceitos: { '0.0': ['R', 'R', 'R', 'R'] } }],
       gerais: [],
       naoResolvidos: [],
@@ -290,5 +294,40 @@ describe('ficha de desempenho routes', () => {
       { matricula: '10400', nome: 'NOVA ESTUDANTE', situacao: 'ATIVO' },
     ]);
     expect(plano.fichas.has('10400')).toBe(false);
+  });
+  it('refuses to fill when the habilidades of an área changed since the prévia', async () => {
+    const { app, cadernetaId, professorId } = await comEstrutura();
+    await agenteDevolve(anaComDificuldade);
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
+    const { getDb } = await import('../professores/db');
+    const { salvarEstruturaDaFicha } = await import('../fichas/store');
+    const [primeira, segunda] = estrutura.areas;
+    salvarEstruturaDaFicha(getDb(), professorId, turma, {
+      ...estrutura,
+      areas: [{ ...primeira, habilidades: [...primeira.habilidades, { indice: 1, numero: '2°', texto: 'Nova.' }] }, segunda],
+    });
+
+    const response = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos`, { method: 'POST' }));
+
+    expect(response.status).toBe(422);
+  });
+
+  it('refuses an edit made on an older version of the prévia', async () => {
+    const { app, cadernetaId } = await comEstrutura();
+    await agenteDevolve(anaComDificuldade);
+    const antiga = (await (await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }))).json()).previa;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
+
+    const edicao = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`, json({
+      versao: antiga.atualizadaEm,
+      estudantes: [{ matricula: '10315', conceitos: { '0.0': ['NR', 'NR', 'NR', 'NR'] } }],
+      gerais: [],
+      naoResolvidos: [],
+    }, 'PUT')));
+
+    expect(edicao.status).toBe(409);
+    const atual = await (await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas/atual`))).json();
+    expect(atual.previa.estudantes[0].conceitos['0.0']).toEqual(['RD', 'RD', 'R', 'R']);
   });
 });

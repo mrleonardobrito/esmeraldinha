@@ -7,8 +7,11 @@ import {
   fichaInicial,
   normalizarLinha,
   previaEditadaSchema,
+  chaveDaHabilidade,
+  type AreaDeConhecimento,
   type FichaPlanejada,
   type IndiceDaEtapa,
+  type PreviaDaFicha,
 } from '../../shared/ficha-de-desempenho';
 import { ArquivoIlegivelError, EnvioInvalidoError, OpenRouterError, OpenRouterNotConfiguredError } from '../ai/errors';
 import type { ArquivoEnviado } from '../ai/interpretar-envio';
@@ -206,6 +209,11 @@ fichaDeDesempenho.put('/:id/ficha-de-desempenho/previas/atual', async (context) 
 
   const parsed = previaEditadaSchema.safeParse(await context.req.json().catch(() => null));
   if (!parsed.success) return context.json({ error: 'Prévia malformada.' }, 400);
+  // An edit made on an older prévia (one replaced meanwhile by "Gerar a
+  // prévia de novo") must not overwrite the new one.
+  if (parsed.data.versao !== atual.atualizadaEm) {
+    return context.json({ error: 'A prévia mudou enquanto você editava. Recarregue a prévia.', previa: atual }, 409);
+  }
 
   const editados = new Map(parsed.data.estudantes.map((e) => [e.matricula, e.conceitos]));
   const fora = [...editados.keys()].find((matricula) => !atual.estudantes.some((e) => e.matricula === matricula));
@@ -235,6 +243,19 @@ fichaDeDesempenho.delete('/:id/ficha-de-desempenho/previas/atual', (context) => 
   return context.body(null, 204);
 });
 
+/**
+ * Does every área of the prévia still have exactly the habilidades it was
+ * built with? A renumbered área would move conceitos onto other habilidades.
+ */
+function mesmasHabilidades(previa: PreviaDaFicha, areas: readonly AreaDeConhecimento[]): boolean {
+  const chaves = new Set(Object.keys(previa.estudantes[0]?.conceitos ?? {}));
+  const esperadas = new Set(areas
+    .filter((area) => previa.areas.includes(area.indice))
+    .flatMap((area) => area.habilidades.map((h) => chaveDaHabilidade(area.indice, h.indice))));
+  return previa.areas.every((indice) => areas.some((area) => area.indice === indice)) &&
+    chaves.size === esperadas.size && [...chaves].every((chave) => esperadas.has(chave));
+}
+
 const chaveDaExecucao = (caderneta: Caderneta) => `${caderneta.id}|${caderneta.turma}`;
 
 /**
@@ -254,7 +275,7 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/preenchimentos-assistidos', asy
     return context.json({ error: 'Há nomes nas observações que ainda não foram ligados a um estudante. Resolva ou ignore antes de preencher.' }, 422);
   }
   const estrutura = getEstruturaDaFicha(db, caderneta.professorId, caderneta.turma);
-  if (!estrutura || previa.areas.some((area) => !estrutura.areas.some((candidata) => candidata.indice === area))) {
+  if (!estrutura || !mesmasHabilidades(previa, estrutura.areas)) {
     return context.json({ error: 'A ficha mudou desde a prévia. Releia a ficha no portal e gere a prévia de novo.' }, 422);
   }
 

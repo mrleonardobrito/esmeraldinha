@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ApiError } from "@/lib/api";
 import type { Caderneta } from "@/lib/cadernetas";
 import {
   aplicarNaFicha,
@@ -38,6 +39,7 @@ import {
   loadPrevia,
   nomeDaArea,
   pendenciasAntesDeAbrir,
+  previaConfere,
   salvarPreviaEditada,
   TODAS_AS_ETAPAS,
   type EstadoDoPreenchimento,
@@ -83,11 +85,17 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
   const [arquivos, setArquivos] = React.useState<File[]>([]);
   const [gerando, setGerando] = React.useState(false);
   const [previa, setPrevia] = React.useState<PreviaDaFicha | null>(null);
-  const [salvando, setSalvando] = React.useState(false);
+  /** Where the screen's edits stand against the saved prévia. */
+  const [salvamento, setSalvamento] = React.useState<"salvo" | "pendente" | "salvando" | "erro">("salvo");
   const [execucao, setExecucao] = React.useState<EstadoDoPreenchimento | null>(null);
   const [erro, setErro] = React.useState<string | null>(null);
   const entrada = React.useRef<HTMLInputElement>(null);
-  const salvar = React.useRef<number | null>(null);
+  const timer = React.useRef<number | null>(null);
+  /** The latest edit not yet sent; saves run one at a time, always sending the latest. */
+  const pendente = React.useRef<PreviaDaFicha | null>(null);
+  const fila = React.useRef<Promise<void>>(Promise.resolve());
+  /** The `atualizadaEm` of the prévia the screen's edits are made on. */
+  const versao = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     let vivo = true;
@@ -101,11 +109,12 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
     loadPrevia(caderneta.id, turma)
       .then((salva) => {
         if (!vivo || !salva) return;
+        versao.current = salva.atualizadaEm;
         setPrevia(salva);
         setAreas(salva.areas);
         setEtapas(salva.etapas);
       })
-      .catch(() => {});
+      .catch((error: unknown) => vivo && setErro(mensagemDe(error, "Não foi possível carregar a prévia salva.")));
     loadEstadoDoPreenchimento(caderneta.id, turma).then((estado) => vivo && setExecucao(estado)).catch(() => {});
     return () => { vivo = false; };
   }, [caderneta.id, turma]);
@@ -128,17 +137,61 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
     return `${encontrada ? nomeDaArea(encontrada.titulo) : `Área ${area}`} · ${h ? `${h.numero} ${h.texto}` : `habilidade ${habilidade}`}`;
   }
 
+  /** Sends the latest pending edit, after any save already in flight. */
+  const enviar = React.useCallback((): Promise<void> => {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    fila.current = fila.current.then(async () => {
+      const edicao = pendente.current;
+      if (!edicao || !versao.current) return;
+      pendente.current = null;
+      setSalvamento("salvando");
+      try {
+        const salva = await salvarPreviaEditada(caderneta.id, edicao, versao.current, turma);
+        versao.current = salva.atualizadaEm;
+        setSalvamento(pendente.current ? "pendente" : "salvo");
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 409) {
+          // The prévia was replaced meanwhile: the server's copy wins.
+          pendente.current = null;
+          const atual = await loadPrevia(caderneta.id, turma).catch(() => null);
+          versao.current = atual?.atualizadaEm ?? null;
+          setPrevia(atual);
+          setSalvamento("salvo");
+          setErro("A prévia mudou enquanto você editava, e a versão salva foi recarregada.");
+          return;
+        }
+        pendente.current ??= edicao;
+        setSalvamento("erro");
+        setErro(mensagemDe(error, "Não foi possível salvar a prévia."));
+      }
+    });
+    return fila.current;
+  }, [caderneta.id, turma]);
+
+  // Closing the screen sends what was not saved yet.
+  React.useEffect(() => () => { void enviar(); }, [enviar]);
+
   /** Shows the edit at once and saves it shortly after, so a burst of clicks is one request. */
   function editar(nova: PreviaDaFicha) {
     setPrevia(nova);
-    setSalvando(true);
-    if (salvar.current !== null) window.clearTimeout(salvar.current);
-    salvar.current = window.setTimeout(() => {
-      salvar.current = null;
-      salvarPreviaEditada(caderneta.id, nova, turma)
-        .catch((error: unknown) => setErro(mensagemDe(error, "Não foi possível salvar a prévia.")))
-        .finally(() => { if (salvar.current === null) setSalvando(false); });
-    }, 600);
+    pendente.current = nova;
+    setSalvamento("pendente");
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => { void enviar(); }, 600);
+  }
+
+  /** Drops edits not sent yet and waits for any save in flight (before replacing or deleting the prévia). */
+  async function abandonarEdicoes() {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    pendente.current = null;
+    await fila.current;
+    setSalvamento("salvo");
   }
 
   function aplicar(matriculas: readonly string[], excecoes: readonly Excecao[]): PreviaDaFicha["estudantes"] {
@@ -164,7 +217,10 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
     setGerando(true);
     setErro(null);
     try {
-      setPrevia(await gerarPrevia(caderneta.id, { areas, etapas, texto, arquivos }, undefined, turma));
+      await abandonarEdicoes();
+      const nova = await gerarPrevia(caderneta.id, { areas, etapas, texto, arquivos }, undefined, turma);
+      versao.current = nova.atualizadaEm;
+      setPrevia(nova);
     } catch (error) {
       setErro(mensagemDe(error, "Não foi possível gerar a prévia."));
     } finally {
@@ -175,7 +231,9 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
   async function descartar() {
     setErro(null);
     try {
+      await abandonarEdicoes();
       await descartarPrevia(caderneta.id, turma);
+      versao.current = null;
       setPrevia(null);
     } catch (error) {
       setErro(mensagemDe(error, "Não foi possível descartar a prévia."));
@@ -185,6 +243,8 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
   async function preencher() {
     setErro(null);
     try {
+      await enviar();
+      if (pendente.current) return;
       setExecucao(await iniciarPreenchimentoDaFicha(caderneta.id, turma));
     } catch (error) {
       setErro(mensagemDe(error, "Não foi possível abrir o portal."));
@@ -331,7 +391,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
               <div className="flex items-center gap-2">
                 <h3 id="previa-titulo" className="text-sm font-medium">Prévia</h3>
                 <span className="text-xs text-muted-foreground">
-                  {salvando ? "Salvando…" : "Salva"} · clique numa célula para trocar o conceito
+                  {salvamento === "salvo" ? "Salva" : salvamento === "erro" ? "Não salva" : "Salvando…"} · clique numa célula para trocar o conceito
                 </span>
               </div>
               {previa.resposta && <p className="text-sm text-muted-foreground">{previa.resposta}</p>}
@@ -354,6 +414,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
                   <div className="flex flex-wrap gap-2">
                     <select
                       className="h-9 rounded-md border bg-background px-3 text-foreground"
+                      disabled={gerando || emAndamento}
                       defaultValue=""
                       aria-label={`Escolher o estudante para ${item.estudante}`}
                       onChange={(event) => {
@@ -369,7 +430,7 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
                       {(item.candidatos.length > 0 ? ativos.filter((e) => item.candidatos.includes(e.matricula)) : ativos)
                         .map((e) => <option key={e.matricula} value={e.matricula}>{e.nome}</option>)}
                     </select>
-                    <Button size="sm" variant="ghost" onClick={() => editar({ ...previa, naoResolvidos: previa.naoResolvidos.filter((_, i) => i !== indice) })}>
+                    <Button size="sm" variant="ghost" disabled={gerando || emAndamento} onClick={() => editar({ ...previa, naoResolvidos: previa.naoResolvidos.filter((_, i) => i !== indice) })}>
                       Ignorar
                     </Button>
                   </div>
@@ -383,21 +444,32 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
                     {geral.excecoes.map((e) => <li key={`${e.area}.${e.habilidade}`}>{e.conceito} · {descreverHabilidade(e)}</li>)}
                   </ul>
                   <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => editar({
+                    <Button size="sm" variant="outline" disabled={gerando || emAndamento} onClick={() => editar({
                       ...previa,
                       estudantes: aplicar(geral.estudante ? [geral.estudante.matricula] : ativos.map((e) => e.matricula), geral.excecoes),
                       gerais: previa.gerais.filter((_, i) => i !== indice),
                     })}>
                       {geral.estudante ? `Aplicar a ${geral.estudante.nome}` : "Aplicar a todos"}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => editar({ ...previa, gerais: previa.gerais.filter((_, i) => i !== indice) })}>
+                    <Button size="sm" variant="ghost" disabled={gerando || emAndamento} onClick={() => editar({ ...previa, gerais: previa.gerais.filter((_, i) => i !== indice) })}>
                       Descartar
                     </Button>
                   </div>
                 </div>
               ))}
 
-              <PreviaDaFichaView previa={previa} areas={ficha.areas} disabled={emAndamento} onChange={editar} />
+              {salvamento === "erro" && (
+                <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  As últimas mudanças não foram salvas, e o portal só recebe o que está salvo.
+                  <Button size="sm" variant="outline" className="ml-auto" onClick={() => void enviar()}>Tentar de novo</Button>
+                </div>
+              )}
+              {!previaConfere(previa, etapas, areas) && (
+                <p className="rounded-xl bg-yellow-500/10 px-3 py-2 text-sm">
+                  As etapas ou áreas marcadas não são as desta prévia. Gere a prévia de novo para aplicá-las, ou volte a marcar as da prévia.
+                </p>
+              )}
+              <PreviaDaFichaView previa={previa} areas={ficha.areas} disabled={emAndamento || gerando} onChange={editar} />
             </section>
           )}
 
@@ -416,7 +488,10 @@ function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoPro
           <Button variant="outline" onClick={onClose}>Fechar</Button>
           <Button
             onClick={() => void preencher()}
-            disabled={!previa || emAndamento || salvando || pendenciasAntesDeAbrir(previa.naoResolvidos) > 0}
+            disabled={
+              !previa || emAndamento || gerando || salvamento !== "salvo" ||
+              !previaConfere(previa, etapas, areas) || pendenciasAntesDeAbrir(previa.naoResolvidos) > 0
+            }
           >
             {emAndamento ? <IconLoader data-icon="inline-start" className="animate-spin" /> : <IconExternalLink data-icon="inline-start" />}
             {emAndamento ? "Preenchimento em andamento" : "Preencher no portal"}

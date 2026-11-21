@@ -77,8 +77,13 @@ export async function loadPrevia(cadernetaId: string, turma?: string): Promise<P
   return ((await response.json()) as { previa: PreviaDaFicha | null }).previa;
 }
 
-export async function salvarPreviaEditada(cadernetaId: string, previa: PreviaDaFicha, turma?: string): Promise<PreviaDaFicha> {
+/**
+ * Saves the auxiliar's edits on top of the prévia version `versao`. A 409
+ * (ApiError) means the prévia was replaced meanwhile.
+ */
+export async function salvarPreviaEditada(cadernetaId: string, previa: PreviaDaFicha, versao: string, turma?: string): Promise<PreviaDaFicha> {
   const body: PreviaEditada = {
+    versao,
     estudantes: previa.estudantes.map(({ matricula, conceitos }) => ({ matricula, conceitos })),
     gerais: previa.gerais,
     naoResolvidos: previa.naoResolvidos,
@@ -139,4 +144,15 @@ export function proximoConceito(conceito: Conceito): Conceito {
 /** How many unresolved names still carry exceções; only those block opening the portal. */
 export function pendenciasAntesDeAbrir(naoResolvidos: readonly { excecoes: readonly unknown[] }[]): number {
   return naoResolvidos.filter((item) => item.excecoes.length > 0).length;
+}
+
+/** Are the checked etapas and áreas the ones the prévia was generated with? */
+export function previaConfere(
+  previa: { etapas: readonly number[]; areas: readonly number[] },
+  etapas: readonly number[],
+  areas: readonly number[],
+): boolean {
+  const iguais = (a: readonly number[], b: readonly number[]) =>
+    a.length === b.length && [...a].sort((x, y) => x - y).every((valor, i) => valor === [...b].sort((x, y) => x - y)[i]);
+  return iguais(previa.etapas, etapas) && iguais(previa.areas, areas);
 }
