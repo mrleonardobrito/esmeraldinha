@@ -1,24 +1,31 @@
 import { requestApi } from "@/lib/api";
 import { turmaQuery } from "@/lib/cadernetas";
 import type {
+  Conceito,
   EstruturaDaFicha,
-  Excecao,
-  PreenchimentoDaFicha,
+  IndiceDaEtapa,
+  PreviaDaFicha,
+  PreviaEditada,
 } from "@shared/ficha-de-desempenho";
 
-export type { AreaDeConhecimento, EstruturaDaFicha, Excecao } from "@shared/ficha-de-desempenho";
-
-export type ExcecaoComTrecho = Excecao & { trecho: string };
-
-/** The agent's reading of the observações, checked against the turma. */
-export interface ObservacoesInterpretadas {
-  resposta: string;
-  estudantes: { matricula: string; nome: string; escrito: string; excecoes: ExcecaoComTrecho[] }[];
-  naoResolvidos: { estudante: string; motivo: string; candidatos: string[]; excecoes: ExcecaoComTrecho[] }[];
-  gerais: { trecho: string; estudante: { matricula: string; nome: string } | null; excecoes: Excecao[] }[];
-  descartadas: { motivo: string; trecho: string }[];
-  turma: { matricula: string; nome: string; situacao: string | null }[];
-}
+export type {
+  AreaDeConhecimento,
+  Conceito,
+  EstruturaDaFicha,
+  EstudanteDaPrevia,
+  Excecao,
+  FichaPlanejada,
+  IndiceDaEtapa,
+  PreviaDaFicha,
+} from "@shared/ficha-de-desempenho";
+export {
+  alterarConceito,
+  aplicarNaFicha,
+  chaveDaHabilidade,
+  contarExcecoes,
+  ETAPAS_DA_FICHA,
+  TODAS_AS_ETAPAS,
+} from "@shared/ficha-de-desempenho";
 
 export interface EstadoDoPreenchimento {
   status: "abrindo" | "preenchendo" | "aguardando-auxiliar" | "concluido" | "interrompido" | "falhou";
@@ -29,7 +36,7 @@ export interface EstadoDoPreenchimento {
     matricula: string;
     nome: string;
     escritas: number;
-    mantidos: { area: number; habilidade: number; planejado: string; escrito: string; etapaDoPiso: number }[];
+    mantidos: { area: number; habilidade: number; etapa: number; planejado: string; escrito: string; etapaDoPiso: number }[];
     jaPreenchidos: number;
   }[];
   pulados: { matricula: string; nome: string; motivo: string }[];
@@ -49,34 +56,46 @@ export async function lerEstruturaDaFicha(cadernetaId: string, turma?: string): 
   return ((await response.json()) as { estrutura: EstruturaDaFicha }).estrutura;
 }
 
-export async function interpretarObservacoes(
+/** Reads the observações with the agent and saves the prévia of the turma. */
+export async function gerarPrevia(
   cadernetaId: string,
-  etapa: string,
-  { areas, texto, arquivos }: { areas: number[]; texto: string; arquivos: File[] },
+  { areas, etapas, texto, arquivos }: { areas: number[]; etapas: IndiceDaEtapa[]; texto: string; arquivos: File[] },
   signal?: AbortSignal,
   turma?: string,
-): Promise<ObservacoesInterpretadas> {
+): Promise<PreviaDaFicha> {
   const form = new FormData();
   form.append("areas", JSON.stringify(areas));
+  form.append("etapas", JSON.stringify(etapas));
   form.append("texto", texto);
   for (const arquivo of arquivos) form.append("arquivos", arquivo);
-  const response = await requestApi(
-    `${base(cadernetaId)}/etapas/${encodeURIComponent(etapa)}/ficha-de-desempenho/observacoes${turmaQuery(turma)}`,
-    { method: "POST", body: form, signal },
-  );
-  return (await response.json()) as ObservacoesInterpretadas;
+  const response = await requestApi(`${base(cadernetaId)}/ficha-de-desempenho/previas${turmaQuery(turma)}`, { method: "POST", body: form, signal });
+  return ((await response.json()) as { previa: PreviaDaFicha }).previa;
 }
 
-export async function iniciarPreenchimentoDaFicha(
-  cadernetaId: string,
-  etapa: string,
-  body: PreenchimentoDaFicha,
-  turma?: string,
-): Promise<EstadoDoPreenchimento> {
-  const response = await requestApi(
-    `${base(cadernetaId)}/etapas/${encodeURIComponent(etapa)}/ficha-de-desempenho/preenchimentos-assistidos${turmaQuery(turma)}`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-  );
+export async function loadPrevia(cadernetaId: string, turma?: string): Promise<PreviaDaFicha | null> {
+  const response = await requestApi(`${base(cadernetaId)}/ficha-de-desempenho/previas/atual${turmaQuery(turma)}`);
+  return ((await response.json()) as { previa: PreviaDaFicha | null }).previa;
+}
+
+export async function salvarPreviaEditada(cadernetaId: string, previa: PreviaDaFicha, turma?: string): Promise<PreviaDaFicha> {
+  const body: PreviaEditada = {
+    estudantes: previa.estudantes.map(({ matricula, conceitos }) => ({ matricula, conceitos })),
+    gerais: previa.gerais,
+    naoResolvidos: previa.naoResolvidos,
+  };
+  const response = await requestApi(`${base(cadernetaId)}/ficha-de-desempenho/previas/atual${turmaQuery(turma)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  return ((await response.json()) as { previa: PreviaDaFicha }).previa;
+}
+
+export async function descartarPrevia(cadernetaId: string, turma?: string): Promise<void> {
+  await requestApi(`${base(cadernetaId)}/ficha-de-desempenho/previas/atual${turmaQuery(turma)}`, { method: "DELETE" });
+}
+
+/** Starts filling the portal from the saved prévia, one estudante at a time. */
+export async function iniciarPreenchimentoDaFicha(cadernetaId: string, turma?: string): Promise<EstadoDoPreenchimento> {
+  const response = await requestApi(`${base(cadernetaId)}/ficha-de-desempenho/preenchimentos-assistidos${turmaQuery(turma)}`, { method: "POST" });
   return ((await response.json()) as { estado: EstadoDoPreenchimento }).estado;
 }
 
@@ -112,37 +131,9 @@ export function nomeDaArea(titulo: string): string {
   return tituloLegivel(nome);
 }
 
-/** The reviewed exceções as the start route takes them; a repeated habilidade keeps its last conceito. */
-export function excecoesParaEnviar(
-  revisao: readonly { matricula: string; excecoes: readonly Excecao[] }[],
-): PreenchimentoDaFicha["excecoes"] {
-  const porChave = new Map<string, PreenchimentoDaFicha["excecoes"][number]>();
-  for (const { matricula, excecoes } of revisao) {
-    for (const { area, habilidade, conceito } of excecoes) {
-      porChave.set(`${matricula}|${area}|${habilidade}`, { matricula, area, habilidade, conceito });
-    }
-  }
-  return [...porChave.values()].sort((a, b) =>
-    a.matricula.localeCompare(b.matricula) || a.area - b.area || a.habilidade - b.habilidade);
-}
-
-/**
- * Adds exceções to one estudante's review. A habilidade the estudante
- * already has keeps its conceito: what was said about them specifically
- * outweighs what was said about the whole turma.
- */
-export function aplicarExcecoes(
-  revisao: Readonly<Record<string, ExcecaoComTrecho[]>>,
-  matricula: string,
-  novas: readonly (Excecao & { trecho?: string })[],
-  trecho: string,
-): Record<string, ExcecaoComTrecho[]> {
-  const atuais = [...(revisao[matricula] ?? [])];
-  for (const { area, habilidade, conceito, trecho: proprio } of novas) {
-    if (atuais.some((e) => e.area === area && e.habilidade === habilidade)) continue;
-    atuais.push({ area, habilidade, conceito, trecho: proprio ?? trecho });
-  }
-  return { ...revisao, [matricula]: atuais };
+/** The conceito a click on a cell of the prévia moves to: R → RD → NR → R. */
+export function proximoConceito(conceito: Conceito): Conceito {
+  return conceito === "R" ? "RD" : conceito === "RD" ? "NR" : "R";
 }
 
 /** How many unresolved names still carry exceções; only those block opening the portal. */

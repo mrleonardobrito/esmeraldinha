@@ -7,10 +7,12 @@ import {
   IconPaperclip,
   IconRefresh,
   IconSparkles,
+  IconTrash,
   IconX,
 } from "@tabler/icons-react";
 
 import { CadernetaPorTurma } from "@/components/caderneta-por-turma";
+import { PreviaDaFichaView } from "@/components/previa-da-ficha";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -25,34 +27,39 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Caderneta } from "@/lib/cadernetas";
 import {
-  aplicarExcecoes,
-  excecoesParaEnviar,
+  aplicarNaFicha,
+  descartarPrevia,
+  ETAPAS_DA_FICHA,
+  gerarPrevia,
   iniciarPreenchimentoDaFicha,
-  interpretarObservacoes,
   lerEstruturaDaFicha,
   loadEstadoDoPreenchimento,
   loadEstruturaDaFicha,
+  loadPrevia,
   nomeDaArea,
   pendenciasAntesDeAbrir,
-  type AreaDeConhecimento,
+  salvarPreviaEditada,
+  TODAS_AS_ETAPAS,
   type EstadoDoPreenchimento,
   type EstruturaDaFicha,
   type Excecao,
-  type ExcecaoComTrecho,
-  type ObservacoesInterpretadas,
+  type IndiceDaEtapa,
+  type PreviaDaFicha,
 } from "@/lib/fichas-de-desempenho";
 import { cn } from "@/lib/utils";
 
 export interface LancarFichaDeDesempenhoProps {
   caderneta: Caderneta;
+  /** The etapa the grade was opened from; the screen fills all four by default. */
   etapa: string;
   onClose: () => void;
 }
 
 /**
- * The ficha de desempenho of one etapa: choose the áreas, give the
- * professor's observações, review the exceções and walk through the portal
- * one estudante at a time. Saving stays with the auxiliar de ensino.
+ * The ficha de desempenho of a turma, all four etapas at once by default:
+ * choose the áreas, give the professor's observações, review and edit the
+ * prévia estudante by estudante, then walk through the portal one estudante
+ * at a time. Saving on the portal stays with the auxiliar de ensino.
  */
 export function LancarFichaDeDesempenho(props: LancarFichaDeDesempenhoProps) {
   return (
@@ -64,34 +71,43 @@ export function LancarFichaDeDesempenho(props: LancarFichaDeDesempenhoProps) {
 
 const EM_ANDAMENTO: EstadoDoPreenchimento["status"][] = ["abrindo", "preenchendo", "aguardando-auxiliar"];
 const mensagemDe = (error: unknown, padrao: string) => (error instanceof Error ? error.message : padrao);
+const ativo = (situacao: string | null) => !situacao || situacao.toUpperCase() === "ATIVO";
 
-function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesempenhoProps & { picker: React.ReactNode }) {
+function FichaDaTurma({ caderneta, onClose, picker }: LancarFichaDeDesempenhoProps & { picker: React.ReactNode }) {
   const turma = caderneta.turmas.length > 1 ? caderneta.turma : undefined;
   const [estrutura, setEstrutura] = React.useState<EstruturaDaFicha | null | "carregando">("carregando");
   const [lendo, setLendo] = React.useState(false);
+  const [etapas, setEtapas] = React.useState<IndiceDaEtapa[]>([...TODAS_AS_ETAPAS]);
   const [areas, setAreas] = React.useState<number[]>([]);
   const [texto, setTexto] = React.useState("");
   const [arquivos, setArquivos] = React.useState<File[]>([]);
-  const [interpretando, setInterpretando] = React.useState(false);
-  const [lidas, setLidas] = React.useState<ObservacoesInterpretadas | null>(null);
-  const [revisao, setRevisao] = React.useState<Record<string, ExcecaoComTrecho[]>>({});
-  const [gerais, setGerais] = React.useState<ObservacoesInterpretadas["gerais"]>([]);
-  const [naoResolvidos, setNaoResolvidos] = React.useState<ObservacoesInterpretadas["naoResolvidos"]>([]);
+  const [gerando, setGerando] = React.useState(false);
+  const [previa, setPrevia] = React.useState<PreviaDaFicha | null>(null);
+  const [salvando, setSalvando] = React.useState(false);
   const [execucao, setExecucao] = React.useState<EstadoDoPreenchimento | null>(null);
   const [erro, setErro] = React.useState<string | null>(null);
   const entrada = React.useRef<HTMLInputElement>(null);
+  const salvar = React.useRef<number | null>(null);
 
   React.useEffect(() => {
-    let ativo = true;
+    let vivo = true;
     loadEstruturaDaFicha(caderneta.id, turma)
-      .then((lida) => ativo && setEstrutura(lida))
+      .then((lida) => vivo && setEstrutura(lida))
       .catch((error: unknown) => {
-        if (!ativo) return;
+        if (!vivo) return;
         setEstrutura(null);
         setErro(mensagemDe(error, "Não foi possível carregar a ficha."));
       });
-    loadEstadoDoPreenchimento(caderneta.id, turma).then((estado) => ativo && setExecucao(estado)).catch(() => {});
-    return () => { ativo = false; };
+    loadPrevia(caderneta.id, turma)
+      .then((salva) => {
+        if (!vivo || !salva) return;
+        setPrevia(salva);
+        setAreas(salva.areas);
+        setEtapas(salva.etapas);
+      })
+      .catch(() => {});
+    loadEstadoDoPreenchimento(caderneta.id, turma).then((estado) => vivo && setExecucao(estado)).catch(() => {});
+    return () => { vivo = false; };
   }, [caderneta.id, turma]);
 
   const emAndamento = execucao !== null && EM_ANDAMENTO.includes(execucao.status);
@@ -104,13 +120,30 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
   }, [emAndamento, caderneta.id, turma]);
 
   const ficha = estrutura === "carregando" ? null : estrutura;
-  const turmaDaCaderneta = lidas?.turma ?? [];
-  const ativos = turmaDaCaderneta.filter((e) => !e.situacao || e.situacao.toUpperCase() === "ATIVO");
+  const ativos = previa?.estudantes.filter((e) => ativo(e.situacao)) ?? [];
 
   function descreverHabilidade({ area, habilidade }: { area: number; habilidade: number }): string {
     const encontrada = ficha?.areas.find((a) => a.indice === area);
     const h = encontrada?.habilidades.find((candidata) => candidata.indice === habilidade);
     return `${encontrada ? nomeDaArea(encontrada.titulo) : `Área ${area}`} · ${h ? `${h.numero} ${h.texto}` : `habilidade ${habilidade}`}`;
+  }
+
+  /** Shows the edit at once and saves it shortly after, so a burst of clicks is one request. */
+  function editar(nova: PreviaDaFicha) {
+    setPrevia(nova);
+    setSalvando(true);
+    if (salvar.current !== null) window.clearTimeout(salvar.current);
+    salvar.current = window.setTimeout(() => {
+      salvar.current = null;
+      salvarPreviaEditada(caderneta.id, nova, turma)
+        .catch((error: unknown) => setErro(mensagemDe(error, "Não foi possível salvar a prévia.")))
+        .finally(() => { if (salvar.current === null) setSalvando(false); });
+    }, 600);
+  }
+
+  function aplicar(matriculas: readonly string[], excecoes: readonly Excecao[]): PreviaDaFicha["estudantes"] {
+    return (previa?.estudantes ?? []).map((e) =>
+      matriculas.includes(e.matricula) ? { ...e, conceitos: aplicarNaFicha(e.conceitos, excecoes, previa!.etapas) } : e);
   }
 
   async function lerFicha() {
@@ -120,8 +153,6 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
       const lida = await lerEstruturaDaFicha(caderneta.id, turma);
       setEstrutura(lida);
       setAreas((atuais) => atuais.filter((indice) => lida.areas.some((a) => a.indice === indice)));
-      // The review pointed at the old áreas and habilidades: read the observações again.
-      setLidas(null);
     } catch (error) {
       setErro(mensagemDe(error, "Não foi possível ler a ficha no portal."));
     } finally {
@@ -129,59 +160,69 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
     }
   }
 
-  async function lerObservacoes() {
-    setInterpretando(true);
+  async function gerar() {
+    setGerando(true);
     setErro(null);
     try {
-      const resultado = await interpretarObservacoes(caderneta.id, etapa, { areas, texto, arquivos }, undefined, turma);
-      setLidas(resultado);
-      setRevisao(Object.fromEntries(resultado.estudantes.map((e) => [e.matricula, e.excecoes])));
-      setGerais(resultado.gerais);
-      setNaoResolvidos(resultado.naoResolvidos);
+      setPrevia(await gerarPrevia(caderneta.id, { areas, etapas, texto, arquivos }, undefined, turma));
     } catch (error) {
-      setErro(mensagemDe(error, "Não foi possível ler as observações."));
+      setErro(mensagemDe(error, "Não foi possível gerar a prévia."));
     } finally {
-      setInterpretando(false);
+      setGerando(false);
     }
   }
 
-  function adicionar(matricula: string, excecoes: readonly (Excecao & { trecho?: string })[], trecho: string) {
-    setRevisao((atual) => aplicarExcecoes(atual, matricula, excecoes, trecho));
-  }
-
-  async function abrirNoPortal() {
+  async function descartar() {
     setErro(null);
     try {
-      const inicial = await iniciarPreenchimentoDaFicha(caderneta.id, etapa, {
-        areas,
-        excecoes: excecoesParaEnviar(Object.entries(revisao).map(([matricula, excecoes]) => ({ matricula, excecoes }))),
-      }, turma);
-      setExecucao(inicial);
+      await descartarPrevia(caderneta.id, turma);
+      setPrevia(null);
+    } catch (error) {
+      setErro(mensagemDe(error, "Não foi possível descartar a prévia."));
+    }
+  }
+
+  async function preencher() {
+    setErro(null);
+    try {
+      setExecucao(await iniciarPreenchimentoDaFicha(caderneta.id, turma));
     } catch (error) {
       setErro(mensagemDe(error, "Não foi possível abrir o portal."));
     }
   }
 
-  const comExcecao = Object.entries(revisao).filter(([, excecoes]) => excecoes.length > 0);
-  const nomeDe = (matricula: string) => turmaDaCaderneta.find((e) => e.matricula === matricula)?.nome ?? matricula;
-  const escritoComo = (matricula: string) => {
-    const escrito = lidas?.estudantes.find((e) => e.matricula === matricula)?.escrito;
-    return escrito && escrito.toLocaleUpperCase("pt-BR") !== nomeDe(matricula) ? escrito : null;
-  };
-
   return (
     <Dialog open onOpenChange={(aberto) => !aberto && onClose()}>
-      <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-3xl">
+      <DialogContent className="flex max-h-[92vh] flex-col gap-4 sm:max-w-6xl">
         <DialogHeader>
           <DialogTitle className="font-heading">Ficha de desempenho</DialogTitle>
-          <DialogDescription>
-            {caderneta.turma} <span aria-hidden="true">•</span> {etapa}
-          </DialogDescription>
+          <DialogDescription>{caderneta.turma}</DialogDescription>
         </DialogHeader>
 
         {picker}
 
         <div className="flex min-h-0 flex-col gap-5 overflow-y-auto pr-1">
+          <section className="flex flex-col gap-2" aria-labelledby="etapas-titulo">
+            <h3 id="etapas-titulo" className="text-sm font-medium">Etapas</h3>
+            <div className="flex flex-wrap gap-2">
+              {TODAS_AS_ETAPAS.map((etapa) => {
+                const id = `etapa-${etapa}`;
+                return (
+                  <div key={etapa} className="flex items-center gap-2 rounded-xl border px-3 py-2">
+                    <Checkbox
+                      id={id}
+                      checked={etapas.includes(etapa)}
+                      disabled={emAndamento}
+                      onCheckedChange={(marcado) => setEtapas((atuais) =>
+                        marcado ? [...atuais, etapa].sort((a, b) => a - b) : atuais.filter((e) => e !== etapa))}
+                    />
+                    <Label htmlFor={id} className="font-normal">{ETAPAS_DA_FICHA[etapa - 1]}</Label>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
           <section className="flex flex-col gap-2" aria-labelledby="areas-titulo">
             <div className="flex items-center gap-2">
               <h3 id="areas-titulo" className="text-sm font-medium">Áreas de conhecimento</h3>
@@ -207,7 +248,7 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
                 </Button>
               </div>
             ) : (
-              <ul className="grid gap-2 sm:grid-cols-2">
+              <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {ficha.areas.map((area) => {
                   const id = `area-${area.indice}`;
                   return (
@@ -216,10 +257,8 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
                         id={id}
                         checked={areas.includes(area.indice)}
                         disabled={emAndamento}
-                        onCheckedChange={(marcado) => {
-                          setLidas(null);
-                          setAreas((atuais) => marcado ? [...atuais, area.indice].sort((a, b) => a - b) : atuais.filter((i) => i !== area.indice));
-                        }}
+                        onCheckedChange={(marcado) => setAreas((atuais) =>
+                          marcado ? [...atuais, area.indice].sort((a, b) => a - b) : atuais.filter((i) => i !== area.indice))}
                       />
                       <Label htmlFor={id} className="flex-1 font-normal" title={area.titulo}>
                         {nomeDaArea(area.titulo)}
@@ -236,13 +275,13 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
             <section className="flex flex-col gap-2" aria-labelledby="observacoes-titulo">
               <h3 id="observacoes-titulo" className="text-sm font-medium">Observações do professor</h3>
               <p className="text-sm text-muted-foreground">
-                Quem não aparecer nas observações fica com R em todas as habilidades das áreas escolhidas.
+                Quem não aparecer nas observações fica com R. Uma observação sem etapa vale para todas as etapas marcadas.
               </p>
               <Textarea
                 value={texto}
-                onChange={(event) => { setTexto(event.target.value); setLidas(null); }}
+                onChange={(event) => setTexto(event.target.value)}
                 placeholder="Cole aqui o que o professor mandou sobre os estudantes."
-                rows={4}
+                rows={3}
                 disabled={emAndamento}
               />
               <div className="flex flex-wrap items-center gap-2">
@@ -255,7 +294,6 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
                   onChange={(event) => {
                     const novos = Array.from(event.target.files ?? []);
                     setArquivos((atuais) => [...atuais, ...novos]);
-                    setLidas(null);
                     event.target.value = "";
                   }}
                 />
@@ -278,129 +316,88 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
                 <Button
                   size="sm"
                   className="ml-auto"
-                  onClick={() => void lerObservacoes()}
-                  disabled={interpretando || emAndamento || areas.length === 0 || (!texto.trim() && arquivos.length === 0)}
+                  onClick={() => void gerar()}
+                  disabled={gerando || emAndamento || areas.length === 0 || etapas.length === 0 || (!texto.trim() && arquivos.length === 0)}
                 >
-                  {interpretando ? <IconLoader data-icon="inline-start" className="animate-spin" /> : <IconSparkles data-icon="inline-start" />}
-                  {interpretando ? "Lendo…" : "Ler observações"}
+                  {gerando ? <IconLoader data-icon="inline-start" className="animate-spin" /> : <IconSparkles data-icon="inline-start" />}
+                  {gerando ? "Gerando…" : previa ? "Gerar a prévia de novo" : "Gerar prévia"}
                 </Button>
               </div>
             </section>
           )}
 
-          {lidas && (
-            <section className="flex flex-col gap-3" aria-labelledby="revisao-titulo">
-              <h3 id="revisao-titulo" className="text-sm font-medium">Revisão</h3>
-              {lidas.resposta && <p className="text-sm text-muted-foreground">{lidas.resposta}</p>}
+          {previa && ficha && (
+            <section className="flex flex-col gap-3" aria-labelledby="previa-titulo">
+              <div className="flex items-center gap-2">
+                <h3 id="previa-titulo" className="text-sm font-medium">Prévia</h3>
+                <span className="text-xs text-muted-foreground">
+                  {salvando ? "Salvando…" : "Salva"} · clique numa célula para trocar o conceito
+                </span>
+              </div>
+              {previa.resposta && <p className="text-sm text-muted-foreground">{previa.resposta}</p>}
 
-              {lidas.descartadas.map((item, indice) => (
+              {previa.descartadas.map((item, indice) => (
                 <p key={indice} className="flex gap-2 rounded-xl bg-yellow-500/10 px-3 py-2 text-sm">
                   <IconAlertTriangle className="size-4 shrink-0" aria-hidden="true" />
                   <span>Não aplicado: “{item.trecho}”. {item.motivo}</span>
                 </p>
               ))}
 
-              {naoResolvidos.map((item, indice) => (
+              {previa.naoResolvidos.map((item, indice) => (
                 <div key={`${item.estudante}-${indice}`} className="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm">
-                  <span>“{item.estudante}”: {item.motivo}</span>
+                  <span>Não sei quem é “{item.estudante}”.</span>
                   {item.excecoes.length > 0 && (
                     <ul className="text-xs text-muted-foreground">
                       {item.excecoes.map((e) => <li key={`${e.area}.${e.habilidade}`}>{e.conceito} · {descreverHabilidade(e)}</li>)}
                     </ul>
                   )}
                   <div className="flex flex-wrap gap-2">
-                  <select
-                    className="h-9 rounded-md border bg-background px-3 text-foreground"
-                    defaultValue=""
-                    aria-label={`Escolher o estudante para ${item.estudante}`}
-                    onChange={(event) => {
-                      if (!event.target.value) return;
-                      adicionar(event.target.value, item.excecoes, item.estudante);
-                      setNaoResolvidos((atuais) => atuais.filter((_, i) => i !== indice));
-                    }}
-                  >
-                    <option value="">Quem é?</option>
-                    {(item.candidatos.length > 0 ? turmaDaCaderneta.filter((e) => item.candidatos.includes(e.matricula)) : ativos)
-                      .map((e) => <option key={e.matricula} value={e.matricula}>{e.nome}</option>)}
-                  </select>
-                  <Button size="sm" variant="ghost" onClick={() => setNaoResolvidos((atuais) => atuais.filter((_, i) => i !== indice))}>
-                    Ignorar
-                  </Button>
+                    <select
+                      className="h-9 rounded-md border bg-background px-3 text-foreground"
+                      defaultValue=""
+                      aria-label={`Escolher o estudante para ${item.estudante}`}
+                      onChange={(event) => {
+                        if (!event.target.value) return;
+                        editar({
+                          ...previa,
+                          estudantes: aplicar([event.target.value], item.excecoes),
+                          naoResolvidos: previa.naoResolvidos.filter((_, i) => i !== indice),
+                        });
+                      }}
+                    >
+                      <option value="">Quem é?</option>
+                      {(item.candidatos.length > 0 ? ativos.filter((e) => item.candidatos.includes(e.matricula)) : ativos)
+                        .map((e) => <option key={e.matricula} value={e.matricula}>{e.nome}</option>)}
+                    </select>
+                    <Button size="sm" variant="ghost" onClick={() => editar({ ...previa, naoResolvidos: previa.naoResolvidos.filter((_, i) => i !== indice) })}>
+                      Ignorar
+                    </Button>
                   </div>
                 </div>
               ))}
 
-              {gerais.map((geral, indice) => (
+              {previa.gerais.map((geral, indice) => (
                 <div key={indice} className="flex flex-col gap-2 rounded-xl border px-3 py-2 text-sm">
                   <span>{geral.estudante ? `Sobre ${geral.estudante.nome}` : "Sobre a turma"}: “{geral.trecho}”</span>
                   <ul className="text-xs text-muted-foreground">
                     {geral.excecoes.map((e) => <li key={`${e.area}.${e.habilidade}`}>{e.conceito} · {descreverHabilidade(e)}</li>)}
                   </ul>
                   <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => {
-                      const alvos = geral.estudante ? [geral.estudante.matricula] : ativos.map((e) => e.matricula);
-                      for (const matricula of alvos) adicionar(matricula, geral.excecoes, geral.trecho);
-                      setGerais((atuais) => atuais.filter((_, i) => i !== indice));
-                    }}>{geral.estudante ? `Aplicar a ${geral.estudante.nome}` : "Aplicar a todos"}</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setGerais((atuais) => atuais.filter((_, i) => i !== indice))}>
+                    <Button size="sm" variant="outline" onClick={() => editar({
+                      ...previa,
+                      estudantes: aplicar(geral.estudante ? [geral.estudante.matricula] : ativos.map((e) => e.matricula), geral.excecoes),
+                      gerais: previa.gerais.filter((_, i) => i !== indice),
+                    })}>
+                      {geral.estudante ? `Aplicar a ${geral.estudante.nome}` : "Aplicar a todos"}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => editar({ ...previa, gerais: previa.gerais.filter((_, i) => i !== indice) })}>
                       Descartar
                     </Button>
                   </div>
                 </div>
               ))}
 
-              {comExcecao.length === 0 && (
-                <p className="text-sm text-muted-foreground">Nenhuma dificuldade apontada: todos ficam com R.</p>
-              )}
-              {comExcecao.map(([matricula, excecoes]) => (
-                <div key={matricula} className="flex flex-col gap-1 rounded-xl border px-3 py-2">
-                  <span className="text-sm font-medium">
-                    {nomeDe(matricula)}
-                    {escritoComo(matricula) && <span className="font-normal text-muted-foreground"> — escrito como “{escritoComo(matricula)}”</span>}
-                  </span>
-                  <ul className="flex flex-col gap-1.5">
-                    {excecoes.map((excecao, indice) => (
-                      <li key={`${excecao.area}.${excecao.habilidade}.${indice}`} className="flex items-start gap-2 text-sm">
-                        <select
-                          className="h-8 rounded-md border bg-background px-2 text-foreground"
-                          value={excecao.conceito}
-                          aria-label={`Conceito de ${descreverHabilidade(excecao)}`}
-                          onChange={(event) => setRevisao((atual) => ({
-                            ...atual,
-                            [matricula]: atual[matricula].map((e, i) => i === indice ? { ...e, conceito: event.target.value as "RD" | "NR" } : e),
-                          }))}
-                        >
-                          <option value="RD">RD</option>
-                          <option value="NR">NR</option>
-                        </select>
-                        <span className="flex-1">
-                          {descreverHabilidade(excecao)}
-                          {excecao.trecho && <span className="block text-xs text-muted-foreground">“{excecao.trecho}”</span>}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8"
-                          aria-label="Remover esta exceção"
-                          onClick={() => setRevisao((atual) => ({ ...atual, [matricula]: atual[matricula].filter((_, i) => i !== indice) }))}
-                        >
-                          <IconX aria-hidden="true" />
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-              {ficha && (
-                <NovaExcecao
-                  estudantes={ativos}
-                  areas={ficha.areas.filter((area) => areas.includes(area.indice))}
-                  onAdicionar={(matricula, excecao) => adicionar(matricula, [excecao], "Adicionada pelo auxiliar")}
-                />
-              )}
-              <p className="text-sm text-muted-foreground">
-                {Math.max(ativos.length - comExcecao.length, 0)} estudante(s) ficam com R em todas as habilidades escolhidas.
-              </p>
+              <PreviaDaFichaView previa={previa} areas={ficha.areas} disabled={emAndamento} onChange={editar} />
             </section>
           )}
 
@@ -410,10 +407,19 @@ function FichaDaTurma({ caderneta, etapa, onClose, picker }: LancarFichaDeDesemp
         </div>
 
         <DialogFooter>
+          {previa && (
+            <Button variant="ghost" onClick={() => void descartar()} disabled={emAndamento} className="sm:mr-auto">
+              <IconTrash data-icon="inline-start" />
+              Descartar prévia
+            </Button>
+          )}
           <Button variant="outline" onClick={onClose}>Fechar</Button>
-          <Button onClick={() => void abrirNoPortal()} disabled={!lidas || emAndamento || pendenciasAntesDeAbrir(naoResolvidos) > 0 || areas.length === 0}>
+          <Button
+            onClick={() => void preencher()}
+            disabled={!previa || emAndamento || salvando || pendenciasAntesDeAbrir(previa.naoResolvidos) > 0}
+          >
             {emAndamento ? <IconLoader data-icon="inline-start" className="animate-spin" /> : <IconExternalLink data-icon="inline-start" />}
-            {emAndamento ? "Preenchimento em andamento" : "Abrir no portal"}
+            {emAndamento ? "Preenchimento em andamento" : "Preencher no portal"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -450,7 +456,9 @@ function Andamento({ execucao, descrever }: {
           <span className="font-medium">{p.nome}</span>: conceito mantido por não poder diminuir
           <ul className="text-xs text-muted-foreground">
             {p.mantidos.map((m) => (
-              <li key={`${m.area}.${m.habilidade}`}>{descrever(m)} — planejado {m.planejado}, mantido {m.escrito} da etapa {m.etapaDoPiso}</li>
+              <li key={`${m.area}.${m.habilidade}.${m.etapa}`}>
+                {descrever(m)} — {ETAPAS_DA_FICHA[m.etapa - 1]}: planejado {m.planejado}, mantido {m.escrito} da {ETAPAS_DA_FICHA[m.etapaDoPiso - 1]}
+              </li>
             ))}
           </ul>
         </div>
@@ -459,53 +467,5 @@ function Andamento({ execucao, descrever }: {
         <p key={p.matricula} className="text-muted-foreground">{p.nome || p.matricula} não foi preenchido: {p.motivo}</p>
       ))}
     </section>
-  );
-}
-
-/** Lets the auxiliar add an exceção the agent missed. */
-function NovaExcecao({ estudantes, areas, onAdicionar }: {
-  estudantes: { matricula: string; nome: string }[];
-  areas: AreaDeConhecimento[];
-  onAdicionar: (matricula: string, excecao: Excecao) => void;
-}) {
-  const [matricula, setMatricula] = React.useState("");
-  const [area, setArea] = React.useState<number | null>(null);
-  const [habilidade, setHabilidade] = React.useState<number | null>(null);
-  const [conceito, setConceito] = React.useState<"RD" | "NR">("RD");
-  const escolhida = areas.find((a) => a.indice === area);
-  const campo = "h-9 rounded-md border bg-background px-2 text-sm text-foreground";
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed px-3 py-2">
-      <span className="text-sm font-medium">Adicionar exceção</span>
-      <select className={campo} value={matricula} aria-label="Estudante" onChange={(e) => setMatricula(e.target.value)}>
-        <option value="">Estudante</option>
-        {estudantes.map((e) => <option key={e.matricula} value={e.matricula}>{e.nome}</option>)}
-      </select>
-      <select className={campo} value={area ?? ""} aria-label="Área de conhecimento" onChange={(e) => { setArea(e.target.value === "" ? null : Number(e.target.value)); setHabilidade(null); }}>
-        <option value="">Área</option>
-        {areas.map((a) => <option key={a.indice} value={a.indice}>{nomeDaArea(a.titulo)}</option>)}
-      </select>
-      <select className={cn(campo, "max-w-64")} value={habilidade ?? ""} aria-label="Habilidade" disabled={!escolhida} onChange={(e) => setHabilidade(e.target.value === "" ? null : Number(e.target.value))}>
-        <option value="">Habilidade</option>
-        {escolhida?.habilidades.map((h) => <option key={h.indice} value={h.indice}>{h.numero} {h.texto}</option>)}
-      </select>
-      <select className={campo} value={conceito} aria-label="Conceito" onChange={(e) => setConceito(e.target.value as "RD" | "NR")}>
-        <option value="RD">RD</option>
-        <option value="NR">NR</option>
-      </select>
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={!matricula || area === null || habilidade === null}
-        onClick={() => {
-          if (!matricula || area === null || habilidade === null) return;
-          onAdicionar(matricula, { area, habilidade, conceito });
-          setHabilidade(null);
-        }}
-      >
-        Adicionar
-      </Button>
-    </div>
   );
 }
