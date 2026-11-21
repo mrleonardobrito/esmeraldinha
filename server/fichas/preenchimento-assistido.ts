@@ -63,13 +63,37 @@ async function esperarOutroEstudante(
   { intervaloMs, ociosoMs, signal }: { intervaloMs: number; ociosoMs: number; signal?: AbortSignal },
 ): Promise<string | null | 'ocioso'> {
   const inicio = Date.now();
+  let semDialogo = 0;
   for (;;) {
     if (page.isClosed() || signal?.aborted) return null;
     const matricula = await matriculaDoDialogo(page).catch(() => null);
-    if (matricula !== atual) return matricula;
+    if (matricula !== null && matricula !== atual) return matricula;
+
+    // While a Salvar runs, the portal empties the dialog before rendering the
+    // next estudante: no dialog only means closed once the page is idle and
+    // it stays that way.
+    if (matricula === null) {
+      semDialogo = (await ajaxEmAndamento(page)) ? 0 : semDialogo + 1;
+      if (semDialogo >= 2) return null;
+    } else {
+      semDialogo = 0;
+    }
+
     if (Date.now() - inicio > ociosoMs) return 'ocioso';
     await page.waitForTimeout(intervaloMs).catch(() => {});
   }
+}
+
+async function ajaxEmAndamento(page: Page): Promise<boolean> {
+  return page
+    .evaluate(() => {
+      const janela = window as unknown as {
+        PrimeFaces?: { ajax?: { Queue?: { isEmpty?: () => boolean } } };
+        jQuery?: { active: number };
+      };
+      return janela.PrimeFaces?.ajax?.Queue?.isEmpty?.() === false || (janela.jQuery?.active ?? 0) > 0;
+    })
+    .catch(() => false);
 }
 
 /**

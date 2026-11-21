@@ -138,14 +138,21 @@ export function portalDaFicha({
         document.querySelector('#botoes').hidden = true;
         atual = null;
       }
+      // Like the portal, a Salvar empties the dialog while its AJAX runs and
+      // only then renders the next estudante.
+      window.jQuery = { active: 0 };
       function clicar(botao) {
         window.__cliques.push(botao);
         if (botao === 'Fechar') return fechar();
         salvar();
         const i = ordem.indexOf(atual);
-        if (botao === 'Salvar e sair') return fechar();
-        const proxima = ordem[botao === 'Salvar e próximo' ? i + 1 : i - 1];
-        if (proxima) abrir(proxima); else fechar();
+        const proxima = botao === 'Salvar e sair' ? undefined : ordem[botao === 'Salvar e próximo' ? i + 1 : i - 1];
+        window.jQuery.active = 1;
+        document.querySelector('#dialogo').replaceChildren();
+        setTimeout(() => {
+          if (proxima) abrir(proxima); else fechar();
+          window.jQuery.active = 0;
+        }, 400);
       }
     </script>`;
 }
