@@ -51,6 +51,13 @@ import {
   type Caderneta,
 } from './cadernetas/store';
 import { resolverNotasParaPreview, type NotaResolvida } from './notas/plano';
+import {
+  getClassificacaoPadrao,
+  listClassificacoes,
+  salvarClassificacoes,
+  setClassificacaoPadrao,
+} from './notas/classificacoes';
+import { CLASSIFICACOES } from '../shared/classificacao-de-notas';
 import type { NotaParaLancar } from './scrape/types';
 import { TurmaNaoEncontradaError } from './cadernetas/raspagem';
 import { turmasComPeriodo, turmasDoCatalogo } from './turmas/busca';
@@ -116,6 +123,15 @@ const preenchimentoDeNotasSchema = z
           matricula: z.string().trim().min(1),
           parcial: z.number().min(0).nullish(),
           personalizada: z.number().min(0).nullish(),
+        }),
+      )
+      .default([]),
+    /** Saved only once the portal window has been filled. */
+    classificacoes: z
+      .array(
+        z.object({
+          matricula: z.string().trim().min(1),
+          classificacao: z.enum(CLASSIFICACOES),
         }),
       )
       .default([]),
@@ -1107,8 +1123,9 @@ cadernetas.get('/:id/etapas/:etapa/boletim', (context) => {
   const id = context.req.param('id');
   const etapa = decodeURIComponent(context.req.param('etapa'));
 
+  let caderneta: Caderneta;
   try {
-    getCaderneta(getDb(), id, context.req.query('turma'));
+    caderneta = getCaderneta(getDb(), id, context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -1118,7 +1135,27 @@ cadernetas.get('/:id/etapas/:etapa/boletim', (context) => {
 
   const disciplina = context.req.query('disciplina')?.trim() || undefined;
 
-  return context.json(getBoletimDaEtapa(getDb(), id, etapa, disciplina, context.req.query('turma')));
+  return context.json({
+    ...getBoletimDaEtapa(getDb(), id, etapa, disciplina, caderneta.turma),
+    classificacaoPadrao: getClassificacaoPadrao(getDb(), caderneta.professorId, caderneta.turma),
+    classificacoes: listClassificacoes(getDb(), caderneta.professorId, caderneta.turma),
+  });
+});
+
+const classificacaoPadraoSchema = z.object({ classificacao: z.enum(CLASSIFICACOES) });
+
+/** The turma's classificação padrão, saved as soon as the auxiliar picks it. */
+cadernetas.put('/:id/boletim/classificacao-padrao', async (context) => {
+  const parsed = classificacaoPadraoSchema.safeParse(await context.req.json().catch(() => null));
+
+  if (!parsed.success) {
+    return context.json({ error: 'Informe uma classificação válida.' }, 400);
+  }
+
+  const caderneta = getCaderneta(getDb(), context.req.param('id'), context.req.query('turma'));
+  setClassificacaoPadrao(getDb(), caderneta.professorId, caderneta.turma, parsed.data.classificacao);
+
+  return context.json({ classificacao: parsed.data.classificacao });
 });
 
 /** Os estudantes da turma, que é o que a aba de turmas mostra. */
@@ -1211,7 +1248,7 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
     return context.json({ error: 'Informe a etapa e ao menos uma nota.' }, 400);
   }
 
-  const { etapa, disciplina, notas, notasDoEstudante } = parsed.data;
+  const { etapa, disciplina, notas, notasDoEstudante, classificacoes } = parsed.data;
 
   let caderneta: Caderneta;
   try {
@@ -1278,6 +1315,12 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
       );
     } catch (error) {
       console.error('Falha ao atualizar o progresso do boletim:', error);
+    }
+
+    try {
+      salvarClassificacoes(getDb(), caderneta.professorId, caderneta.turma, classificacoes);
+    } catch (error) {
+      console.error('Failed to save the classificações:', error);
     }
 
     return context.json({ etapa, disciplina: escolhida, notas, notasDoEstudante });
