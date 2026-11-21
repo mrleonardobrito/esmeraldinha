@@ -55,6 +55,27 @@ describe('gerarNotas', () => {
     expect(gerado.falhas.every((falha) => falha.motivo.length > 0)).toBe(true);
   });
 
+  it('refuses a nota whose matrícula and name point to different estudantes', async () => {
+    const complete = agente([
+      { matricula: '2', estudante: 'Ana Lima', notaFinal: 5 },
+      { matricula: '3', estudante: 'Bruno', notaFinal: 6 },
+      { matricula: '1', estudante: 'Aninha', notaFinal: 7 },
+    ]);
+
+    const gerado = await gerarNotas({ ...base, complete });
+
+    // Ana's name with Bruno Souza's matrícula: nobody gets that nota. "Bruno"
+    // is ambiguous but BRUNO ALVES (3) is one of the candidates, and a
+    // nickname that matches nobody leaves the matrícula in charge.
+    expect(gerado.notas).toEqual([
+      { matricula: '3', notaFinal: 6 },
+      { matricula: '1', notaFinal: 7 },
+    ]);
+    expect(gerado.falhas).toEqual([
+      { estudante: 'Ana Lima', motivo: expect.stringContaining('2') },
+    ]);
+  });
+
   it('keeps the last nota when the agent repeats an estudante', async () => {
     const complete = agente([
       { matricula: '1', estudante: 'Ana', notaFinal: 5 },

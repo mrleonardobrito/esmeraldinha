@@ -3,7 +3,12 @@ import { z } from 'zod';
 import { chatCompletion } from './openrouter';
 import { EnvioInvalidoError } from './errors';
 import type { MensagemDaConversa } from './gerar-conteudos';
-import { resolverMatriculaDaNota } from '../notas/estudantes';
+import {
+  EstudanteAmbiguoError,
+  resolverMatricula,
+  resolverMatriculaDaNota,
+  type EstudanteConhecido,
+} from '../notas/estudantes';
 import {
   arredondarNota,
   notaFinalDaClassificacao,
@@ -158,6 +163,42 @@ function descreveConversa(input: GerarNotasInput): string {
 }
 
 /**
+ * The estudante a nota from the agent belongs to. The model copies both the
+ * matrícula and the name, and a classic slip is the right name next to the
+ * neighbouring row's matrícula — so when the name points somewhere else, the
+ * nota goes nowhere instead of to the wrong estudante. A nickname that matches
+ * nobody leaves the matrícula in charge.
+ *
+ * @throws {Error} when the matrícula and the name disagree.
+ */
+function resolverEstudanteDoChat(
+  nota: { readonly matricula: string; readonly estudante: string },
+  estudantes: readonly EstudanteConhecido[],
+): string {
+  const matricula = resolverMatriculaDaNota(nota, estudantes);
+  if (nota.matricula.trim() === '') return matricula;
+
+  let candidatos: readonly string[];
+  try {
+    candidatos = [resolverMatricula(nota.estudante, estudantes)];
+  } catch (error) {
+    if (!(error instanceof EstudanteAmbiguoError)) return matricula;
+    candidatos = estudantes
+      .filter((estudante) => error.candidatos.includes(estudante.nome))
+      .map((estudante) => estudante.matricula);
+  }
+
+  if (!candidatos.includes(matricula)) {
+    throw new Error(
+      `A matrícula ${nota.matricula} não é de "${nota.estudante}". Nenhuma nota foi dada; ` +
+        'peça de novo citando o estudante pelo nome completo.',
+    );
+  }
+
+  return matricula;
+}
+
+/**
  * Turns the chat de notas into notas finais. Never touches the portal: the
  * result lands on the grid as screen edits for the auxiliar to review.
  *
@@ -192,7 +233,7 @@ export async function gerarNotas(input: GerarNotasInput): Promise<NotasGeradas> 
 
   for (const nota of parsed.notas) {
     try {
-      const matricula = resolverMatriculaDaNota(nota, input.estudantes);
+      const matricula = resolverEstudanteDoChat(nota, input.estudantes);
       porMatricula.set(matricula, arredondarNota(nota.notaFinal, total));
     } catch (error) {
       falhas.push({
