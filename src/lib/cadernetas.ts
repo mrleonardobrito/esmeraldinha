@@ -301,3 +301,43 @@ export async function salvarClassificacaoPadrao(
     },
   );
 }
+
+export interface EstudanteNoChatDeNotas {
+  matricula: string;
+  notaFinal: number | null;
+  classificacao: Classificacao | null;
+}
+
+export interface NotasDoChat {
+  resposta: string;
+  notas: { matricula: string; notaFinal: number }[];
+  falhas: { estudante: string; motivo: string }[];
+}
+
+/**
+ * Asks the agent for notas finais. The whole conversation and the grid's
+ * current state go every time: the server keeps nothing between rounds.
+ */
+export async function gerarRascunhosDeNotas(
+  cadernetaId: string,
+  etapa: string,
+  body: {
+    disciplina?: string | null;
+    mensagens: { papel: "auxiliar" | "assistente"; texto: string }[];
+    estudantes: EstudanteNoChatDeNotas[];
+  },
+  signal?: AbortSignal,
+  turma?: string,
+): Promise<NotasDoChat> {
+  const response = await requestApi(
+    `/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/boletim/rascunhos${turmaQuery(turma)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+
+  return (await response.json()) as NotasDoChat;
+}
