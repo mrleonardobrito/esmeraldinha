@@ -37,40 +37,18 @@ import {
   type EstudanteDaCaderneta,
   type NotaDaCaderneta,
 } from "@/lib/cadernetas";
+import {
+  chaveDaNota,
+  chaveDoEstudante,
+  paraNumero,
+  type NotasEditadas,
+} from "@/lib/grade-de-notas";
 import { cn } from "@/lib/utils";
 
 type Estado =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; boletim: BoletimDaEtapa };
-
-/** As duas notas da linha do estudante que o portal deixa editar. */
-type CampoDoEstudante = "parcial" | "personalizada";
-
-/**
- * Cada célula editável da grade, indexada por chave. As colunas de avaliação
- * são `matrícula|avaliação`; as duas do estudante, `matrícula|#parcial` e
- * `matrícula|#personalizada` — o `#` as separa de uma avaliação que por acaso
- * se chamasse igual.
- */
-type NotasEditadas = Record<string, string>;
-
-function chaveDaNota(matricula: string, avaliacao: string): string {
-  return `${matricula}|${avaliacao}`;
-}
-
-function chaveDoEstudante(matricula: string, campo: CampoDoEstudante): string {
-  return `${matricula}|#${campo}`;
-}
-
-/** O número como o auxiliar de ensino o digita: vírgula ou ponto. */
-function paraNumero(bruto: string | undefined): number | undefined {
-  if (bruto === undefined || bruto.trim() === "") return undefined;
-
-  const valor = Number(bruto.replace(",", "."));
-
-  return Number.isFinite(valor) ? valor : undefined;
-}
 
 export interface LancarNotasProps {
   caderneta: Caderneta;
