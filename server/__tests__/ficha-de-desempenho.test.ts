@@ -213,6 +213,29 @@ describe('ficha de desempenho routes', () => {
     expect(inicio.status).toBe(422);
   });
 
+  it('applies an observação about the turma to every estudante of the prévia', async () => {
+    const { app, cadernetaId } = await comEstrutura();
+    await agenteDevolve({
+      resposta: '',
+      estudantes: [],
+      gerais: [
+        { trecho: 'a maioria melhorou gradualmente', estudante: '', excecoes: [
+          { area: -1, habilidade: -1, conceito: 'NR', etapas: [1] },
+          { area: -1, habilidade: -1, conceito: 'RD', etapas: [2, 3] },
+        ] },
+        { trecho: 'Ana tem dificuldade em tudo', estudante: 'Ana Ruthe', excecoes: [{ area: 0, habilidade: -1, conceito: 'NR', etapas: [] }] },
+      ],
+    });
+
+    const { previa } = await (await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }))).json();
+
+    expect(previa.estudantes[0].conceitos['0.0']).toEqual(['NR', 'NR', 'NR', 'NR']);
+    expect(previa.estudantes[1].conceitos['0.0']).toEqual(['NR', 'RD', 'RD', 'R']);
+    expect(previa.estudantes[1].trechos).toEqual(['a maioria melhorou gradualmente']);
+    expect(previa.estudantes[0].trechos).toEqual(['a maioria melhorou gradualmente', 'Ana tem dificuldade em tudo']);
+    expect(previa.gerais).toEqual([]);
+  });
+
   it('refuses to fill from an older version of the prévia', async () => {
     const { app, cadernetaId } = await comEstrutura();
     await agenteDevolve(anaComDificuldade);

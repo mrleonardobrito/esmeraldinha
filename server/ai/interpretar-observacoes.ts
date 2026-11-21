@@ -60,8 +60,14 @@ const EXCECAO_JSON = {
   additionalProperties: false,
   required: ['area', 'habilidade', 'conceito', 'etapas'],
   properties: {
-    area: { type: 'integer', description: 'O número antes do ponto no código da habilidade.' },
-    habilidade: { type: 'integer', description: 'O número depois do ponto no código da habilidade.' },
+    area: {
+      type: 'integer',
+      description: 'O número antes do ponto no código da habilidade; -1 para todas as áreas da lista.',
+    },
+    habilidade: {
+      type: 'integer',
+      description: 'O número depois do ponto no código da habilidade; -1 para todas as habilidades da área.',
+    },
     conceito: { type: 'string', enum: ['RD', 'NR'] },
     etapas: {
       type: 'array',
@@ -157,6 +163,17 @@ function buildSystemPrompt({ turma, etapas, areas, estudantes }: InterpretarObse
     'dificuldade nas etapas antes da III, e R da III em diante. Um conceito',
     'nunca piora de uma etapa para a seguinte.',
     '',
+    'Uma "melhoria gradual" (ou evolução gradual) ao longo do ano é:',
+    'NR na I ETAPA, RD na II e na III ETAPA e R na IV ETAPA.',
+    'Devolva duas exceções: NR com etapas [1] e RD com etapas [2, 3].',
+    '',
+    'Quando a observação fala de todas as habilidades de uma área, use',
+    'habilidade -1 naquela área; de todas as habilidades de todas as áreas,',
+    'use área -1 e habilidade -1. Não liste as habilidades uma a uma.',
+    'Uma observação sobre a turma, "a maioria" ou "os alunos" vale para a',
+    'turma inteira: devolva-a em "gerais" com estudante vazio — o auxiliar',
+    'corrige depois quem foge dela.',
+    '',
     'Cada habilidade recebe um conceito: R (realiza), RD (realiza com',
     'dificuldades) ou NR (não realiza). Um estudante que o professor não cita',
     'foi bem: fica R em tudo, e você não o devolve. Devolva só as exceções —',
@@ -176,11 +193,7 @@ function buildSystemPrompt({ turma, etapas, areas, estudantes }: InterpretarObse
     '',
     'Escreva o nome do estudante como a observação o escreve; quem casa o nome',
     'com a matrícula é o sistema. Nunca invente um estudante.',
-    'Observações sobre a turma inteira vão em "gerais" com estudante vazio —',
-    'nunca as copie para cada estudante. Uma dificuldade de um estudante numa',
-    'área inteira, sem dizer quais habilidades, também vai em "gerais", com o',
-    'nome dele e as habilidades da área que ela parece atingir: o auxiliar',
-    'decide se aplica.',
+    'Nunca copie uma observação sobre a turma para cada estudante.',
     'Responda só o JSON do schema.',
   ].join('\n');
 }
@@ -212,33 +225,37 @@ export async function interpretarObservacoes(input: InterpretarObservacoesInput)
   }
 
   const descartadas: ObservacoesInterpretadas['descartadas'] = [];
-  /** The exceção with its etapas narrowed to the run, or null (and why, in descartadas). */
+  /**
+   * The exceção with its etapas narrowed to the run and "todas" (-1) expanded
+   * into one exceção per habilidade; empty (and why, in descartadas) when it
+   * points nowhere.
+   */
   const valida = (
     excecao: Omit<Excecao, 'etapas'> & { etapas: number[] },
     trecho: string,
-  ): Excecao | null => {
-    const area = areas.find((candidata) => candidata.indice === excecao.area);
-    if (!area) {
-      descartadas.push({ trecho, motivo: `A área ${excecao.area} não está entre as escolhidas.` });
-      return null;
-    }
-    if (!area.habilidades.some((h) => h.indice === excecao.habilidade)) {
-      descartadas.push({ trecho, motivo: `A área "${area.titulo}" não tem a habilidade ${excecao.habilidade}.` });
-      return null;
-    }
+  ): Excecao[] => {
     const daExecucao = excecao.etapas.length === 0
       ? [...input.etapas]
       : input.etapas.filter((etapa) => excecao.etapas.includes(etapa));
     if (daExecucao.length === 0) {
       descartadas.push({ trecho, motivo: 'A observação fala de uma etapa que não está sendo preenchida.' });
-      return null;
+      return [];
     }
-    return {
-      area: excecao.area,
-      habilidade: excecao.habilidade,
-      conceito: excecao.conceito,
-      etapas: [...daExecucao].sort((a, b) => a - b),
-    };
+    const etapas = [...daExecucao].sort((a, b) => a - b);
+
+    const alvo = excecao.area === -1 ? areas : areas.filter((candidata) => candidata.indice === excecao.area);
+    if (alvo.length === 0) {
+      descartadas.push({ trecho, motivo: `A área ${excecao.area} não está entre as escolhidas.` });
+      return [];
+    }
+    const todas = excecao.area === -1 || excecao.habilidade === -1;
+    if (!todas && !alvo[0].habilidades.some((h) => h.indice === excecao.habilidade)) {
+      descartadas.push({ trecho, motivo: `A área "${alvo[0].titulo}" não tem a habilidade ${excecao.habilidade}.` });
+      return [];
+    }
+    return alvo.flatMap((area) => area.habilidades
+      .filter((h) => todas || h.indice === excecao.habilidade)
+      .map((h) => ({ area: area.indice, habilidade: h.indice, conceito: excecao.conceito, etapas })));
   };
 
   /**
@@ -274,10 +291,8 @@ export async function interpretarObservacoes(input: InterpretarObservacoesInput)
   };
 
   for (const lido of parsed.data.estudantes) {
-    const excecoes = lido.excecoes.flatMap((excecao) => {
-      const validada = valida(excecao, excecao.trecho);
-      return validada ? [{ ...validada, trecho: excecao.trecho }] : [];
-    });
+    const excecoes = lido.excecoes.flatMap((excecao) =>
+      valida(excecao, excecao.trecho).map((validada) => ({ ...validada, trecho: excecao.trecho })));
 
     const resolvido = resolver(lido.estudante, lido.matricula);
     if ('matricula' in resolvido) {
@@ -290,7 +305,7 @@ export async function interpretarObservacoes(input: InterpretarObservacoesInput)
   }
 
   for (const geral of parsed.data.gerais) {
-    const excecoes = geral.excecoes.flatMap((excecao) => valida(excecao, geral.trecho) ?? []);
+    const excecoes = geral.excecoes.flatMap((excecao) => valida(excecao, geral.trecho));
     if (excecoes.length === 0) continue;
     if (!geral.estudante) {
       resultado.gerais.push({ trecho: geral.trecho, estudante: null, excecoes });

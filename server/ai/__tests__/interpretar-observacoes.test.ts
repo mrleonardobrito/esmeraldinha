@@ -196,6 +196,50 @@ describe('interpretarObservacoes', () => {
     expect(system).toContain('I ETAPA, II ETAPA, III ETAPA e IV ETAPA');
   });
 
+  it('expands "todas as habilidades" of every chosen área into one exceção per habilidade', async () => {
+    const complete = agente({
+      resposta: '',
+      estudantes: [],
+      gerais: [{
+        trecho: 'melhoria gradual',
+        estudante: '',
+        excecoes: [
+          { area: -1, habilidade: -1, conceito: 'NR', etapas: [1] },
+          { area: -1, habilidade: -1, conceito: 'RD', etapas: [2, 3] },
+        ],
+      }],
+    });
+
+    const resultado = await interpretarObservacoes({ ...base, complete });
+
+    const chaves = (conceito: string) => resultado.gerais[0].excecoes
+      .filter((e) => e.conceito === conceito)
+      .map((e) => `${e.area}.${e.habilidade}:${e.etapas.join('')}`);
+    expect(chaves('NR')).toEqual(['0.0:1', '0.1:1', '3.0:1']);
+    expect(chaves('RD')).toEqual(['0.0:23', '0.1:23', '3.0:23']);
+  });
+
+  it('expands "todas as habilidades" of one área for an estudante', async () => {
+    const complete = agente({
+      resposta: '',
+      estudantes: [{ estudante: 'Ana Ruthe', matricula: '', excecoes: [{ area: 0, habilidade: -1, conceito: 'RD', trecho: 'tudo em EO', etapas: [] }] }],
+      gerais: [],
+    });
+
+    const resultado = await interpretarObservacoes({ ...base, complete });
+
+    expect(resultado.estudantes[0].excecoes.map((e) => `${e.area}.${e.habilidade}`)).toEqual(['0.0', '0.1']);
+  });
+
+  it('the prompt explains melhoria gradual as NR, then RD, then R', async () => {
+    const complete = agente({ resposta: '', estudantes: [], gerais: [] });
+
+    await interpretarObservacoes({ ...base, complete });
+
+    const { system } = complete.mock.calls[0][0] as { system: string };
+    expect(system).toContain('NR na I ETAPA, RD na II e na III ETAPA e R na IV ETAPA');
+  });
+
   it('throws EnvioInvalidoError when there is no text and no file', async () => {
     await expect(interpretarObservacoes({ ...base, texto: '  ', complete: agente({}) })).rejects.toBeInstanceOf(EnvioInvalidoError);
   });

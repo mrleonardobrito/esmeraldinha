@@ -167,17 +167,22 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/previas', async (context) => {
     const previa = salvarPrevia(getDb(), caderneta.id, caderneta.turma, {
       areas: escolhidas.map((area) => area.indice),
       etapas: etapasDaPrevia,
+      // Observações about the turma (or "a maioria") apply to everyone; one
+      // about a named estudante's whole área applies to that estudante. The
+      // auxiliar fixes the exceptions in the prévia.
       estudantes: turma.map(({ matricula, nome, situacao }) => {
         const lido = lidas.estudantes.find((e) => e.matricula === matricula);
+        const gerais = lidas.gerais.filter((geral) => !geral.estudante || geral.estudante.matricula === matricula);
+        const excecoes = [...gerais.flatMap((geral) => geral.excecoes), ...(lido?.excecoes ?? [])];
         return {
           matricula,
           nome,
           situacao,
-          trechos: [...new Set(lido?.excecoes.map((e) => e.trecho) ?? [])],
-          conceitos: fichaInicial(escolhidas, etapasDaPrevia, lido?.excecoes ?? []),
+          trechos: [...new Set([...gerais.map((geral) => geral.trecho), ...(lido?.excecoes.map((e) => e.trecho) ?? [])])],
+          conceitos: fichaInicial(escolhidas, etapasDaPrevia, excecoes),
         };
       }),
-      gerais: lidas.gerais,
+      gerais: [],
       naoResolvidos: lidas.naoResolvidos,
       descartadas: lidas.descartadas,
       resposta: lidas.resposta,
