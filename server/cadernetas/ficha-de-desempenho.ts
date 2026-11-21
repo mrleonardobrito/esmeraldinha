@@ -268,7 +268,10 @@ fichaDeDesempenho.post('/:id/ficha-de-desempenho/preenchimentos-assistidos', asy
     etapas: previa.etapas,
     rotuloDasEtapas: rotulo,
     areas: previa.areas,
-    estudantes: previa.estudantes.map(({ matricula, nome, situacao }) => ({ matricula, nome, situacao })),
+    // The situação is read now, not when the prévia was made: an estudante
+    // transferred since then must not be filled.
+    estudantes: listEstudantes(db, caderneta.id, caderneta.turma)
+      .map(({ matricula, nome, situacao }) => ({ matricula, nome, situacao })),
     fichas: new Map(previa.estudantes.map((e) => [e.matricula, e.conceitos])),
     estrutura: estrutura.areas,
   };

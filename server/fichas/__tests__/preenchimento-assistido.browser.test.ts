@@ -201,3 +201,23 @@ it('fills the four etapas of an estudante from the planned ficha', async () => {
   });
   await page.close();
 });
+
+it('skips an ATIVO estudante who is not in the prévia', async () => {
+  const page = await portal();
+  const semCaio = plano();
+  const fichas = new Map(semCaio.fichas);
+  fichas.delete('103');
+  const { fim, aguardandoEm } = executar(page, { ...semCaio, fichas });
+
+  await aguardandoEm('101');
+  await page.getByRole('button', { name: 'Salvar e próximo' }).click();
+  await aguardandoEm('102');
+  await page.getByRole('button', { name: 'Salvar e próximo' }).click();
+  await aguardandoEm('103');
+  await page.getByRole('button', { name: 'Salvar e sair' }).click();
+
+  const final = await fim;
+  expect((await salvos(page))[103]).toEqual({});
+  expect(final.pulados).toContainEqual({ matricula: '103', nome: 'CAIO', motivo: 'Não está na prévia. Gere a prévia de novo para incluí-lo.' });
+  await page.close();
+});

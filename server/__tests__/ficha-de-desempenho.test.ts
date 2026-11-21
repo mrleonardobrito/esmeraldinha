@@ -261,4 +261,34 @@ describe('ficha de desempenho routes', () => {
     const outro = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos`, { method: 'POST' }));
     expect(outro.status).toBe(409);
   });
+  it('fills with the current situação of each estudante, not the one saved in the prévia', async () => {
+    const { app, cadernetaId } = await comEstrutura();
+    await agenteDevolve(anaComDificuldade);
+    await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/previas`, { method: 'POST', body: formDaPrevia() }));
+    const { getDb } = await import('../professores/db');
+    const { syncCaderneta } = await import('../cadernetas/store');
+    syncCaderneta(getDb(), cadernetaId, {
+      etapas: [{ nome: 'I ETAPA', meses: ['MARÇO'], aulas: [] }],
+      estudantes: [
+        { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', situacao: 'TRANSFERIDO', dataMatricula: null },
+        { matricula: '10316', nome: 'JOÃO PEDRO SANTOS', situacao: 'TRANSFERIDO', dataMatricula: null },
+        { matricula: '10400', nome: 'NOVA ESTUDANTE', situacao: 'ATIVO', dataMatricula: null },
+      ],
+    });
+    const { naSessaoHeaded } = await import('../sessoes-headed');
+    vi.mocked(naSessaoHeaded).mockImplementation(async (_id, _cred, trabalho) => trabalho({} as never));
+    const { acompanharPreenchimento } = await import('../fichas/preenchimento-assistido');
+    vi.mocked(acompanharPreenchimento).mockImplementation(() => new Promise(() => {}));
+
+    const inicio = await app.fetch(request(`/${cadernetaId}/ficha-de-desempenho/preenchimentos-assistidos`, { method: 'POST' }));
+
+    expect(inicio.status).toBe(202);
+    const plano = vi.mocked(acompanharPreenchimento).mock.calls[0][1];
+    expect(plano.estudantes).toEqual([
+      { matricula: '10315', nome: 'ANA RUTHE IZABELLY DA SILVA', situacao: 'TRANSFERIDO' },
+      { matricula: '10316', nome: 'JOÃO PEDRO SANTOS', situacao: 'TRANSFERIDO' },
+      { matricula: '10400', nome: 'NOVA ESTUDANTE', situacao: 'ATIVO' },
+    ]);
+    expect(plano.fichas.has('10400')).toBe(false);
+  });
 });

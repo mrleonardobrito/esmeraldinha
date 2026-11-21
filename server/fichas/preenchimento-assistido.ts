@@ -162,11 +162,15 @@ export async function acompanharPreenchimento(
 
       if (!tratados.has(matricula)) {
         tratados.add(matricula);
-        if (!estudante || !ativo(estudante)) {
+        if (!estudante || !ativo(estudante) || !plano.fichas.has(matricula)) {
           estado.pulados.push({
             matricula,
             nome,
-            motivo: estudante ? `Situação ${estudante.situacao}.` : 'Estudante fora da caderneta.',
+            motivo: !estudante
+              ? 'Estudante fora da caderneta.'
+              : !ativo(estudante)
+                ? `Situação ${estudante.situacao}.`
+                : 'Não está na prévia. Gere a prévia de novo para incluí-lo.',
           });
         } else {
           emitir({ status: 'preenchendo', atual: { matricula, nome } });
