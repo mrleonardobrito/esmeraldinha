@@ -86,6 +86,7 @@ it('clears unsaved notas when changing turma and prepares only the selected turm
         avaliacoes: [{ nome: 'OBSERVAÇÃO', valor: 10, media: null }],
         notas: [{ matricula: '123', avaliacao: 'OBSERVAÇÃO', valor: turma === turmas[0] ? 2 : 8 }],
         notasDoEstudante: [],
+        classificacaoPadrao: 'Acima da média', classificacoes: {},
       } });
     }
     if (url.pathname.endsWith('/preenchimentos-assistidos')) {

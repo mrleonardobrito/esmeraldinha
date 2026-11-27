@@ -1,4 +1,5 @@
 import { requestApi } from "@/lib/api";
+import type { Classificacao } from "@shared/classificacao-de-notas";
 
 /** As cinco partes da caderneta, como definidas no CONTEXT.md. */
 export const PARTES = [
@@ -108,6 +109,10 @@ export interface BoletimDaEtapa {
   avaliacoes: AvaliacaoDaCaderneta[];
   notas: NotaDaCaderneta[];
   notasDoEstudante: NotaDoEstudanteDaCaderneta[];
+  /** The turma's classificação padrão, for rows with nothing else to go by. */
+  classificacaoPadrao: Classificacao;
+  /** Each estudante's stored classificação, keyed by matrícula. */
+  classificacoes: Record<string, Classificacao>;
 }
 
 export async function loadCadernetas(professorId: string): Promise<Caderneta[]> {
@@ -261,6 +266,7 @@ export async function preencherNotasNoPortal(
       parcial?: number | null;
       personalizada?: number | null;
     }[];
+    classificacoes?: readonly { matricula: string; classificacao: Classificacao }[];
   } = {},
 ): Promise<void> {
   await requestApi(`/api/cadernetas/${cadernetaId}/boletim/preenchimentos-assistidos${turmaQuery(opcoes.turma)}`, {
@@ -273,6 +279,65 @@ export async function preencherNotasNoPortal(
       ...(opcoes.notasDoEstudante?.length
         ? { notasDoEstudante: opcoes.notasDoEstudante }
         : {}),
+      ...(opcoes.classificacoes?.length
+        ? { classificacoes: opcoes.classificacoes }
+        : {}),
     }),
   });
+}
+
+/** Saves the turma's classificação padrão right away. */
+export async function salvarClassificacaoPadrao(
+  cadernetaId: string,
+  classificacao: Classificacao,
+  turma?: string,
+): Promise<void> {
+  await requestApi(
+    `/api/cadernetas/${cadernetaId}/boletim/classificacao-padrao${turmaQuery(turma)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ classificacao }),
+    },
+  );
+}
+
+export interface EstudanteNoChatDeNotas {
+  matricula: string;
+  notaFinal: number | null;
+  classificacao: Classificacao | null;
+}
+
+export interface NotasDoChat {
+  resposta: string;
+  notas: { matricula: string; notaFinal: number }[];
+  falhas: { estudante: string; motivo: string }[];
+}
+
+/**
+ * Asks the agent for notas finais. The whole conversation and the grid's
+ * current state go every time: the server keeps nothing between rounds.
+ */
+export async function gerarRascunhosDeNotas(
+  cadernetaId: string,
+  etapa: string,
+  body: {
+    disciplina?: string | null;
+    mensagens: { papel: "auxiliar" | "assistente"; texto: string }[];
+    estudantes: EstudanteNoChatDeNotas[];
+  },
+  signal?: AbortSignal,
+  turma?: string,
+): Promise<NotasDoChat> {
+  const response = await requestApi(
+    `/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/boletim/rascunhos${turmaQuery(turma)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+
+  return (await response.json()) as NotasDoChat;
 }
