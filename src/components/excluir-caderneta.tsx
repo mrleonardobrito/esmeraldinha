@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { excluirCaderneta, type Caderneta } from "@/lib/cadernetas";
+import { excluirCaderneta, turmasDaCaderneta, type Caderneta } from "@/lib/cadernetas";
 
 export interface ExcluirCadernetaProps {
   caderneta: Caderneta;
@@ -54,9 +54,10 @@ export function ExcluirCaderneta({
         <DialogHeader>
           <DialogTitle className="font-heading">Excluir caderneta</DialogTitle>
           <DialogDescription>
-            A caderneta de <strong>{caderneta.turma}</strong> sai da
-            Esmeraldinha, com as aulas e os estudantes que ela leu. O que já
-            está gravado no portal continua lá.
+            Remove da Esmeraldinha a caderneta de{" "}
+            <strong>{turmasDaCaderneta(caderneta).join(", ")}</strong>, com as
+            aulas e os estudantes guardados nela. O que já foi salvo no portal
+            continua lá.
           </DialogDescription>
         </DialogHeader>
 

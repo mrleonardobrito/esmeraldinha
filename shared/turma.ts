@@ -6,6 +6,18 @@ const TURNOS = ['MATUTINO', 'VESPERTINO', 'INTEGRAL'] as const;
 
 export type Turno = (typeof TURNOS)[number];
 
+/** The portal marks redução with a leading token; its suffix may name a professor. */
+export function isReducao(grupoDiario: string | null | undefined): boolean {
+  const normalized = grupoDiario
+    ?.normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .trim()
+    .replace(/\s+/gu, ' ')
+    .toUpperCase();
+
+  return normalized !== undefined && /^REDUCAO(?: |$)/u.test(normalized);
+}
+
 /**
  * O turno escrito no fim do nome da turma, ou `null` quando o portal não o
  * escreveu — nem toda turma segue o padrão, e inventar um turno é pior do que

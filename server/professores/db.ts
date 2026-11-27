@@ -47,6 +47,7 @@ export const SCHEMA = `
     -- É nele que a sessão precisa estar para achá-la. Nulo nas turmas lidas
     -- antes de o cadastro guardá-lo.
     periodo_letivo TEXT,
+    grupo_diario TEXT,
     created_at TEXT NOT NULL,
     UNIQUE (professor_id, nome)
   );
@@ -85,16 +86,28 @@ export const SCHEMA = `
     UNIQUE (professor_id, turma)
   );
 
+  CREATE TABLE IF NOT EXISTS caderneta_turmas (
+    caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    professor_id TEXT NOT NULL REFERENCES professores(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    posicao INTEGER NOT NULL CHECK (posicao BETWEEN 0 AND 3),
+    PRIMARY KEY (caderneta_id, turma),
+    UNIQUE (professor_id, turma),
+    UNIQUE (caderneta_id, posicao)
+  );
+
   CREATE TABLE IF NOT EXISTS caderneta_etapas (
     caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL DEFAULT '',
     nome TEXT NOT NULL,
     posicao INTEGER NOT NULL,
     meses TEXT NOT NULL,
-    PRIMARY KEY (caderneta_id, nome)
+    PRIMARY KEY (caderneta_id, turma, nome)
   );
 
   CREATE TABLE IF NOT EXISTS caderneta_estudantes (
     caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL DEFAULT '',
     -- O boletim é chaveado por matrícula, não por pessoa: é ela que
     -- identifica o estudante dentro da turma.
     matricula TEXT NOT NULL,
@@ -102,11 +115,12 @@ export const SCHEMA = `
     situacao TEXT,
     data_matricula TEXT,
     ordem INTEGER NOT NULL,
-    PRIMARY KEY (caderneta_id, matricula)
+    PRIMARY KEY (caderneta_id, turma, matricula)
   );
 
   CREATE TABLE IF NOT EXISTS caderneta_aulas (
     caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL DEFAULT '',
     etapa TEXT NOT NULL,
     mes TEXT NOT NULL,
     data TEXT NOT NULL,
@@ -119,7 +133,7 @@ export const SCHEMA = `
     codigo_cr TEXT,
     desenvolvimento TEXT,
     ferramentas TEXT,
-    PRIMARY KEY (caderneta_id, etapa, data, ordem)
+    PRIMARY KEY (caderneta_id, turma, etapa, data, ordem)
   );
 
   -- As colunas do boletim de uma etapa. O portal exige que a avaliação exista
@@ -128,15 +142,17 @@ export const SCHEMA = `
   -- próprio boletim. Descobertas no portal junto com as avaliações.
   CREATE TABLE IF NOT EXISTS caderneta_disciplinas (
     caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL DEFAULT '',
     nome TEXT NOT NULL,
     posicao INTEGER NOT NULL,
-    PRIMARY KEY (caderneta_id, nome)
+    PRIMARY KEY (caderneta_id, turma, nome)
   );
 
   -- As colunas do boletim de uma etapa numa disciplina. A mesma etapa tem
   -- avaliações diferentes em cada disciplina, então ela entra na chave.
   CREATE TABLE IF NOT EXISTS caderneta_avaliacoes (
     caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL DEFAULT '',
     etapa TEXT NOT NULL,
     disciplina TEXT NOT NULL,
     nome TEXT NOT NULL,
@@ -146,19 +162,20 @@ export const SCHEMA = `
     valor REAL,
     media REAL,
     posicao INTEGER NOT NULL,
-    PRIMARY KEY (caderneta_id, etapa, disciplina, nome)
+    PRIMARY KEY (caderneta_id, turma, etapa, disciplina, nome)
   );
 
   -- Uma nota é sempre estudante × avaliação, chaveada por matrícula como o
   -- portal a chaveia.
   CREATE TABLE IF NOT EXISTS caderneta_notas (
     caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL DEFAULT '',
     etapa TEXT NOT NULL,
     disciplina TEXT NOT NULL,
     matricula TEXT NOT NULL,
     avaliacao TEXT NOT NULL,
     valor REAL NOT NULL,
-    PRIMARY KEY (caderneta_id, etapa, disciplina, matricula, avaliacao)
+    PRIMARY KEY (caderneta_id, turma, etapa, disciplina, matricula, avaliacao)
   );
 
   -- As notas da linha do estudante que não são de nenhuma avaliação, com os
@@ -166,6 +183,7 @@ export const SCHEMA = `
   -- sozinho e aqui só são guardadas para exibir.
   CREATE TABLE IF NOT EXISTS caderneta_notas_do_estudante (
     caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL DEFAULT '',
     etapa TEXT NOT NULL,
     disciplina TEXT NOT NULL,
     matricula TEXT NOT NULL,
@@ -173,7 +191,48 @@ export const SCHEMA = `
     calculada REAL,
     parcial REAL,
     personalizada REAL,
-    PRIMARY KEY (caderneta_id, etapa, disciplina, matricula)
+    PRIMARY KEY (caderneta_id, turma, etapa, disciplina, matricula)
+  );
+
+  -- As áreas de conhecimento e habilidades da ficha de desempenho de uma
+  -- turma, lidas do portal abrindo a ficha de um estudante. Dependem da
+  -- série, não do estudante, então uma leitura vale para a turma inteira.
+  CREATE TABLE IF NOT EXISTS ficha_estruturas (
+    professor_id TEXT NOT NULL REFERENCES professores(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    ficha TEXT NOT NULL,
+    areas_json TEXT NOT NULL,
+    lida_em TEXT NOT NULL,
+    PRIMARY KEY (professor_id, turma)
+  );
+
+  -- A prévia da ficha de desempenho: o que vai ser escrito no portal,
+  -- estudante por estudante, enquanto o auxiliar de ensino a revisa. Guardada
+  -- a cada edição para fechar a janela não custar a revisão.
+  CREATE TABLE IF NOT EXISTS ficha_previas (
+    caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    previa_json TEXT NOT NULL,
+    atualizada_em TEXT NOT NULL,
+    PRIMARY KEY (caderneta_id, turma)
+  );
+
+  -- Classificações are typed by the auxiliar, not scraped. They are keyed by
+  -- professor and turma rather than caderneta, so they survive turmas de
+  -- redução being regrouped into another caderneta.
+  CREATE TABLE IF NOT EXISTS classificacoes_padrao (
+    professor_id TEXT NOT NULL REFERENCES professores(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    classificacao TEXT NOT NULL,
+    PRIMARY KEY (professor_id, turma)
+  );
+
+  CREATE TABLE IF NOT EXISTS classificacoes_dos_estudantes (
+    professor_id TEXT NOT NULL REFERENCES professores(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    matricula TEXT NOT NULL,
+    classificacao TEXT NOT NULL,
+    PRIMARY KEY (professor_id, turma, matricula)
   );
 `;
 
@@ -191,6 +250,7 @@ const COLUNAS_NOVAS: readonly { tabela: string; coluna: string; tipo: string }[]
   { tabela: 'caderneta_estudantes', coluna: 'data_matricula', tipo: 'TEXT' },
   { tabela: 'turma_estudantes', coluna: 'data_matricula', tipo: 'TEXT' },
   { tabela: 'turmas', coluna: 'periodo_letivo', tipo: 'TEXT' },
+  { tabela: 'turmas', coluna: 'grupo_diario', tipo: 'TEXT' },
   { tabela: 'cadernetas', coluna: 'valor_recebido', tipo: 'REAL' },
   { tabela: 'cadernetas', coluna: 'valor_a_receber', tipo: 'REAL' },
 ];
@@ -269,6 +329,39 @@ function migrarTabelasDoBoletim(database: DatabaseSync): void {
   );
 }
 
+/** Preserve cached records while adding their originating turma to every key. */
+function migrateCadernetaTurmas(database: DatabaseSync): void {
+  if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cadernetas'").get()) return;
+  const createTable = (name: string) => {
+    const start = SCHEMA.indexOf(`  CREATE TABLE IF NOT EXISTS ${name} (`);
+    const end = SCHEMA.indexOf('\n  );', start) + '\n  );'.length;
+    return SCHEMA.slice(start, end);
+  };
+  const tables = ['caderneta_etapas', 'caderneta_estudantes', 'caderneta_aulas',
+    'caderneta_disciplinas', 'caderneta_avaliacoes', 'caderneta_notas', 'caderneta_notas_do_estudante'];
+  database.exec('BEGIN');
+  try {
+    database.exec(createTable('caderneta_turmas'));
+    database.exec(`INSERT OR IGNORE INTO caderneta_turmas (caderneta_id, professor_id, turma, posicao)
+      SELECT id, professor_id, turma, 0 FROM cadernetas`);
+    for (const name of tables) {
+      const columns = database.prepare(`PRAGMA table_info(${name})`).all() as unknown as { name: string }[];
+      if (columns.length === 0 || columns.some((column) => column.name === 'turma')) continue;
+      const names = columns.map((column) => column.name);
+      database.exec(`ALTER TABLE ${name} RENAME TO ${name}_before_turmas`);
+      database.exec(createTable(name));
+      database.exec(`INSERT INTO ${name} (${names.join(', ')}, turma)
+        SELECT ${names.map((column) => `old.${column}`).join(', ')}, c.turma
+        FROM ${name}_before_turmas old JOIN cadernetas c ON c.id = old.caderneta_id`);
+      database.exec(`DROP TABLE ${name}_before_turmas`);
+    }
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 /** Acrescenta ao banco existente as colunas que o schema ganhou depois. */
 export function migrate(database: DatabaseSync): void {
   for (const { tabela, coluna, tipo } of COLUNAS_NOVAS) {
@@ -287,6 +380,7 @@ export function migrate(database: DatabaseSync): void {
   }
 
   migrarTabelasDoBoletim(database);
+  migrateCadernetaTurmas(database);
 }
 
 /**
@@ -306,6 +400,10 @@ export function getDb(): DatabaseSync {
   db = new DatabaseSync(env.dbPath);
   db.exec(SCHEMA);
   migrate(db);
+  // Browser jobs do not survive a process restart; their cached data does.
+  db.prepare(`UPDATE cadernetas SET sync_status = 'falhou',
+    sync_error = 'Synchronization was interrupted. Synchronize the caderneta again.'
+    WHERE sync_status = 'sincronizando'`).run();
 
   return db;
 }

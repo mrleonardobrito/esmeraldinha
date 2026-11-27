@@ -295,24 +295,24 @@ describe('POST /api/cadernetas/sessoes/:id/envios', () => {
       const caderneta = createCaderneta(db, { professorId, turma });
 
       db.prepare(
-        `INSERT INTO caderneta_estudantes (caderneta_id, matricula, nome, ordem)
-         VALUES (?, ?, ?, 0)`,
-      ).run(caderneta.id, '2026001', 'Ana Lima');
+        `INSERT INTO caderneta_estudantes (caderneta_id, turma, matricula, nome, ordem)
+         VALUES (?, ?, ?, ?, 0)`,
+      ).run(caderneta.id, turma, '2026001', 'Ana Lima');
 
       db.prepare(
-        `INSERT INTO caderneta_disciplinas (caderneta_id, nome, posicao)
-         VALUES (?, 'MATEMÁTICA', 0)`,
-      ).run(caderneta.id);
+        `INSERT INTO caderneta_disciplinas (caderneta_id, turma, nome, posicao)
+         VALUES (?, ?, 'MATEMÁTICA', 0)`,
+      ).run(caderneta.id, turma);
 
       // O catálogo que o agente recebe sai daqui: é a sincronização da
       // caderneta que traz as avaliações da turma.
       const inserirAvaliacao = db.prepare(
         `INSERT INTO caderneta_avaliacoes
-           (caderneta_id, etapa, disciplina, nome, tipo, data, valor, media, posicao)
-         VALUES (?, '1ª Etapa', 'MATEMÁTICA', ?, NULL, NULL, NULL, NULL, ?)`,
+           (caderneta_id, turma, etapa, disciplina, nome, tipo, data, valor, media, posicao)
+         VALUES (?, ?, '1ª Etapa', 'MATEMÁTICA', ?, NULL, NULL, NULL, NULL, ?)`,
       );
       ['PROVA 1', 'TRABALHO INDIVIDUAL', 'TRABALHO EM GRUPO', 'ACOMPANHAMENTO']
-        .forEach((avaliacao, indice) => inserirAvaliacao.run(caderneta.id, avaliacao, indice));
+        .forEach((avaliacao, indice) => inserirAvaliacao.run(caderneta.id, turma, avaliacao, indice));
 
       return caderneta;
     }

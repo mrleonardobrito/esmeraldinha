@@ -1,4 +1,5 @@
 import { requestApi } from "@/lib/api";
+import type { Classificacao } from "@shared/classificacao-de-notas";
 
 /** As cinco partes da caderneta, como definidas no CONTEXT.md. */
 export const PARTES = [
@@ -40,6 +41,7 @@ export interface Caderneta {
   id: string;
   professorId: string;
   turma: string;
+  turmas: string[];
   /** Derivado do nome da turma pelo servidor; nulo quando o portal não o escreveu. */
   turno: string | null;
   etapas: EtapaDaCaderneta[];
@@ -107,6 +109,10 @@ export interface BoletimDaEtapa {
   avaliacoes: AvaliacaoDaCaderneta[];
   notas: NotaDaCaderneta[];
   notasDoEstudante: NotaDoEstudanteDaCaderneta[];
+  /** The turma's classificação padrão, for rows with nothing else to go by. */
+  classificacaoPadrao: Classificacao;
+  /** Each estudante's stored classificação, keyed by matrícula. */
+  classificacoes: Record<string, Classificacao>;
 }
 
 export async function loadCadernetas(professorId: string): Promise<Caderneta[]> {
@@ -117,14 +123,38 @@ export async function loadCadernetas(professorId: string): Promise<Caderneta[]> 
   return (await response.json()) as Caderneta[];
 }
 
+export function turmaQuery(turma?: string): string {
+  return turma ? `?turma=${encodeURIComponent(turma)}` : "";
+}
+
+export function turmasDaCaderneta(caderneta: Caderneta): string[] {
+  return caderneta.turmas?.length ? caderneta.turmas : [caderneta.turma];
+}
+
+export async function loadCaderneta(cadernetaId: string, turma: string): Promise<Caderneta> {
+  const response = await requestApi(`/api/cadernetas/${encodeURIComponent(cadernetaId)}${turmaQuery(turma)}`);
+  return await response.json() as Caderneta;
+}
+
+export interface GrupoDiarioDaTurma {
+  turma: string;
+  grupoDiario: string | null;
+}
+
+export interface TurmasDoPortal {
+  turmas: string[];
+  gruposDiariosPorTurma: GrupoDiarioDaTurma[];
+}
+
+export async function loadTurmasDoPortal(sessionId: string): Promise<TurmasDoPortal> {
+  const response = await requestApi(`/api/cadernetas/turmas?sessionId=${encodeURIComponent(sessionId)}`);
+  const body = await response.json() as Partial<TurmasDoPortal>;
+  return { turmas: body.turmas ?? [], gruposDiariosPorTurma: body.gruposDiariosPorTurma ?? [] };
+}
+
 /** As turmas que o professor da sessão tem no portal. */
 export async function loadTurmas(sessionId: string): Promise<string[]> {
-  const response = await requestApi(
-    `/api/cadernetas/turmas?sessionId=${encodeURIComponent(sessionId)}`,
-  );
-  const body = (await response.json()) as { turmas: string[] };
-
-  return body.turmas;
+  return (await loadTurmasDoPortal(sessionId)).turmas;
 }
 
 /** Uma turma que o cadastro não aceitou, e o porquê. */
@@ -139,13 +169,9 @@ export interface CadastroDeCadernetas {
 }
 
 /**
- * Cadastra a caderneta de uma ou mais turmas. Responde na hora: cada turma
- * ganha seu job de leitura do portal, que roda em segundo plano e aparece no
- * `syncStatus` da caderneta.
- *
- * Uma turma recusada — já cadastrada, por exemplo — não impede as outras: ela
- * volta em `recusadas` com o motivo. Só quando nenhuma entra é que a chamada
- * falha.
+ * Creates cadernetas for selected turmas. The server combines turmas de redução
+ * automatically and returns existing cadernetas when their membership expands.
+ * Portal reads run in the background and appear in each caderneta's syncStatus.
  */
 export async function cadastrarCadernetas(input: {
   sessionId: string;
@@ -164,9 +190,10 @@ export async function cadastrarCadernetas(input: {
 export async function loadAulasDaEtapa(
   cadernetaId: string,
   etapa: string,
+  turma?: string,
 ): Promise<AulaDaCaderneta[]> {
   const response = await requestApi(
-    `/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/aulas`,
+    `/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/aulas${turmaQuery(turma)}`,
   );
   const body = (await response.json()) as { aulas: AulaDaCaderneta[] };
 
@@ -176,8 +203,9 @@ export async function loadAulasDaEtapa(
 /** Os estudantes matriculados na turma da caderneta. */
 export async function loadEstudantes(
   cadernetaId: string,
+  turma?: string,
 ): Promise<EstudanteDaCaderneta[]> {
-  const response = await requestApi(`/api/cadernetas/${cadernetaId}/estudantes`);
+  const response = await requestApi(`/api/cadernetas/${cadernetaId}/estudantes${turmaQuery(turma)}`);
   const body = (await response.json()) as { estudantes: EstudanteDaCaderneta[] };
 
   return body.estudantes;
@@ -209,10 +237,13 @@ export async function loadBoletimDaEtapa(
   cadernetaId: string,
   etapa: string,
   disciplina?: string,
+  turma?: string,
 ): Promise<BoletimDaEtapa> {
-  const query = disciplina ? `?disciplina=${encodeURIComponent(disciplina)}` : "";
+  const query = new URLSearchParams();
+  if (disciplina) query.set("disciplina", disciplina);
+  if (turma) query.set("turma", turma);
   const response = await requestApi(
-    `/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/boletim${query}`,
+    `/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/boletim${query.size ? `?${query}` : ""}`,
   );
 
   return (await response.json()) as BoletimDaEtapa;
@@ -228,15 +259,17 @@ export async function preencherNotasNoPortal(
   etapa: string,
   notas: readonly NotaDaCaderneta[],
   opcoes: {
+    turma?: string;
     disciplina?: string | null;
     notasDoEstudante?: readonly {
       matricula: string;
       parcial?: number | null;
       personalizada?: number | null;
     }[];
+    classificacoes?: readonly { matricula: string; classificacao: Classificacao }[];
   } = {},
 ): Promise<void> {
-  await requestApi(`/api/cadernetas/${cadernetaId}/boletim/preenchimentos-assistidos`, {
+  await requestApi(`/api/cadernetas/${cadernetaId}/boletim/preenchimentos-assistidos${turmaQuery(opcoes.turma)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -246,6 +279,65 @@ export async function preencherNotasNoPortal(
       ...(opcoes.notasDoEstudante?.length
         ? { notasDoEstudante: opcoes.notasDoEstudante }
         : {}),
+      ...(opcoes.classificacoes?.length
+        ? { classificacoes: opcoes.classificacoes }
+        : {}),
     }),
   });
+}
+
+/** Saves the turma's classificação padrão right away. */
+export async function salvarClassificacaoPadrao(
+  cadernetaId: string,
+  classificacao: Classificacao,
+  turma?: string,
+): Promise<void> {
+  await requestApi(
+    `/api/cadernetas/${cadernetaId}/boletim/classificacao-padrao${turmaQuery(turma)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ classificacao }),
+    },
+  );
+}
+
+export interface EstudanteNoChatDeNotas {
+  matricula: string;
+  notaFinal: number | null;
+  classificacao: Classificacao | null;
+}
+
+export interface NotasDoChat {
+  resposta: string;
+  notas: { matricula: string; notaFinal: number }[];
+  falhas: { estudante: string; motivo: string }[];
+}
+
+/**
+ * Asks the agent for notas finais. The whole conversation and the grid's
+ * current state go every time: the server keeps nothing between rounds.
+ */
+export async function gerarRascunhosDeNotas(
+  cadernetaId: string,
+  etapa: string,
+  body: {
+    disciplina?: string | null;
+    mensagens: { papel: "auxiliar" | "assistente"; texto: string }[];
+    estudantes: EstudanteNoChatDeNotas[];
+  },
+  signal?: AbortSignal,
+  turma?: string,
+): Promise<NotasDoChat> {
+  const response = await requestApi(
+    `/api/cadernetas/${cadernetaId}/etapas/${encodeURIComponent(etapa)}/boletim/rascunhos${turmaQuery(turma)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+
+  return (await response.json()) as NotasDoChat;
 }

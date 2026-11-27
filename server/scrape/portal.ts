@@ -1,6 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import {
-  closeMenuPanel,
   fillField,
   readMenuOptions,
   selectMenuOption,
@@ -42,7 +41,7 @@ const FILTER = {
   turma: ':turma-SOM-CP-OBR',
   /** O menu de turma num período letivo da EJA. Veja `filtroDeTurma`. */
   turmaComMulti: ':turmaComMulti-SOM-CP-OBR',
-  /** O portal chama a redução de _Grupo diário_. */
+  /** The grupo diário identifies regente or redução for this professor. */
   reducao: ':grupoDiario-SOM-CP-OBR',
   mes: ':mes-SOM-CP-OBR',
   /**
@@ -65,7 +64,7 @@ const AMBIENTE = {
 const DIALOGO_DE_AMBIENTE = '#dialogConfiguracoesAmbiente';
 
 // The portal includes the dropdown icon in the Etapa link's accessible name.
-const ETAPA_MENU_NAME = /^Etapa\b/;
+export const ETAPA_MENU_NAME = /^Etapa\b/;
 
 /**
  * A turma da EJA é multisseriada, e o portal a serve por outro componente:
@@ -74,7 +73,7 @@ const ETAPA_MENU_NAME = /^Etapa\b/;
  * diz qual usar é a página, depois que a etapa foi escolhida e a tela
  * carregou.
  */
-async function filtroDeTurma(page: Page): Promise<string> {
+export async function filtroDeTurma(page: Page): Promise<string> {
   const multi = page.locator(`[id$="${FILTER.turmaComMulti}"]`);
 
   return (await multi.count()) > 0 ? FILTER.turmaComMulti : FILTER.turma;
@@ -128,12 +127,9 @@ export async function login(
 
 /** Escolhe o período no diálogo de ambiente já aberto e entra nele. */
 async function acessarPeriodoLetivo(page: Page, periodoLetivo: string): Promise<void> {
-  await page.locator(`[id$="${AMBIENTE.periodoLetivo}_label"]`).click();
-  // Um professor da EJA vê "2026 EJA" ao lado de "2026"; sem `exact` os dois casam.
-  await page.getByRole('option', { name: periodoLetivo, exact: true }).click();
-  await waitForAjax(page);
-  // No diálogo reaberto o painel fica aberto por cima do Acessar.
-  await closeMenuPanel(page, AMBIENTE.periodoLetivo);
+  // Use the underlying select and its AJAX handler. Opening the animated
+  // overlay can leave it stuck over Acessar, even after the widget's hide().
+  await selectMenuOption(page, page, AMBIENTE.periodoLetivo, periodoLetivo);
 
   await page.getByRole('button', { name: ' Acessar' }).click();
   await expect(page.locator(DIALOGO_DE_AMBIENTE)).toBeHidden({ timeout: AJAX_TIMEOUT_MS });
@@ -243,19 +239,33 @@ export async function listConteudoOptions(page: Page): Promise<ConteudoCatalogo>
       const turma = await filtroDeTurma(page);
       const turmas = await readMenuOptions(page, turma);
 
-      // Os meses só carregam depois da turma e da redução. São os meses do
-      // calendário da etapa, iguais para todas as turmas dela, então basta
-      // escolher a primeira.
-      if (turmas[0]) {
-        await selectMenuOption(page, page, turma, turmas[0]);
-        await selectFirstReducao(page);
+      const gruposDiariosPorTurma: { turma: string; grupoDiario: string | null }[] = [];
+      let meses: string[] = [];
+
+      // The grupo diário belongs to the professor's relationship with each
+      // turma. Reading only the first turma would misclassify the others.
+      for (const [index, nomeDaTurma] of turmas.entries()) {
+        await selectMenuOption(page, page, turma, nomeDaTurma);
+        const options = await readMenuOptions(page, FILTER.reducao);
+        gruposDiariosPorTurma.push({
+          turma: nomeDaTurma,
+          grupoDiario: options.length === 1 ? options[0] : null,
+        });
+
+        // Months load after the grupo diário. They follow the etapa's
+        // calendário acadêmico, so the first turma provides the same list.
+        if (index === 0) {
+          if (options[0]) await selectMenuOption(page, page, FILTER.reducao, options[0]);
+          meses = await readMenuOptions(page, FILTER.mes);
+        }
       }
 
       etapas.push({
         nome,
         periodoLetivo,
         turmas,
-        meses: turmas[0] ? await readMenuOptions(page, FILTER.mes) : [],
+        meses,
+        gruposDiariosPorTurma,
       });
     }
   }
@@ -264,14 +274,8 @@ export async function listConteudoOptions(page: Page): Promise<ConteudoCatalogo>
 }
 
 /**
- * A ordem da aula é do portal, não do plano do professor: quem a define é o
- * grupo diário da turma. Só filtramos por ela quando o material a informa —
- * do contrário, a data sozinha já identifica a linha.
- */
-/**
- * A redução não vem do material do professor: é o grupo diário sob o qual a
- * turma arquiva suas aulas. Ficamos com a primeira opção, que é a que o portal
- * usa para a turma.
+ * Select the first grupo diário offered by the portal. The legacy function
+ * name does not imply that every value represents redução.
  */
 export async function selectFirstReducao(page: Page): Promise<string | undefined> {
   const [primeira] = await readMenuOptions(page, FILTER.reducao);
@@ -860,7 +864,16 @@ export async function prepararAulaParaPreenchimento(
   { periodoLetivo, etapa, turma, mes, data, ordem, conteudo }: PreenchimentoAssistidoFilter,
 ): Promise<void> {
   await selecionarPeriodoLetivo(page, periodoLetivo);
-  await openLancaConteudo(page);
+  await waitForAjax(page);
+
+  // Reopening Lançamento de Conteúdo reloads the table and discards unsaved
+  // aulas. Reuse the actual form so advancing within the same mês preserves
+  // earlier fields, including changes made manually by the auxiliar de ensino.
+  const hasConteudoForm =
+    (await page.locator(`[id$="${FILTER.mes}_input"]`).count()) === 1 &&
+    (await page.locator(`[id$="${FIELD.desenvolvimento}"]`).count()) > 0;
+
+  if (!hasConteudoForm) await openLancaConteudo(page);
 
   await selectMenuOption(page, page, FILTER.etapa, etapa);
   await selectMenuOption(page, page, await filtroDeTurma(page), turma);
@@ -893,4 +906,26 @@ export async function prepararAulaParaPreenchimento(
   // A linha é o assunto da janela: deixá-la à vista poupa o auxiliar de
   // procurá-la numa tabela de um mês inteiro.
   await row.scrollIntoViewIfNeeded().catch(() => {});
+}
+
+/** Keep each mês in its own tab so changing filters cannot discard unsaved aulas. */
+export async function prepararAulasParaPreenchimento(
+  page: Page,
+  aulas: readonly PreenchimentoAssistidoFilter[],
+): Promise<void> {
+  const porMes = new Map<string, PreenchimentoAssistidoFilter[]>();
+  for (const aula of aulas) {
+    const grupo = porMes.get(aula.mes) ?? [];
+    grupo.push(aula);
+    porMes.set(aula.mes, grupo);
+  }
+
+  const initialUrl = page.url();
+  let first = true;
+  for (const grupo of porMes.values()) {
+    const tab = first ? page : await page.context().newPage();
+    if (!first) await tab.goto(initialUrl);
+    first = false;
+    for (const aula of grupo) await prepararAulaParaPreenchimento(tab, aula);
+  }
 }

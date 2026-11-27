@@ -6,7 +6,8 @@ import {
   getCaderneta,
   marcarFalhaNaSincronizacao,
   marcarSincronizando,
-  syncCaderneta,
+  syncCadernetaTurmas,
+  type RaspagemDaTurma,
 } from './store';
 import type { ConteudoCatalogo } from '../scrape/types';
 
@@ -56,8 +57,12 @@ export async function sincronizarCaderneta(input: SincronizarInput): Promise<boo
     marcarSincronizando(getDb(), cadernetaId);
 
     const page = await paginaDoJob(input);
-    const raspagem = await rasparCaderneta(page, catalogo, caderneta.turma);
-    syncCaderneta(getDb(), cadernetaId, raspagem);
+    const raspagens: { turma: string; raspagem: RaspagemDaTurma }[] = [];
+    // One browser page visits every turma serially; commit only the complete result.
+    for (const turma of caderneta.turmas) {
+      raspagens.push({ turma, raspagem: await rasparCaderneta(page, catalogo, turma) });
+    }
+    syncCadernetaTurmas(getDb(), cadernetaId, raspagens);
 
     return true;
   } catch (error) {
@@ -83,12 +88,17 @@ export async function sincronizarCaderneta(input: SincronizarInput): Promise<boo
  * `syncStatus` da sua caderneta, mas eles esperam a vez.
  */
 const filas = new Map<string, Promise<unknown>>();
+const queued = new Set<string>();
 
 /**
  * Dispara a sincronização sem esperar por ela, atrás das que já foram pedidas
  * para a mesma sessão.
  */
 export function sincronizarEmSegundoPlano(input: SincronizarInput): void {
+  if (queued.has(input.cadernetaId) || emAndamento.has(input.cadernetaId)) return;
+  // Queued jobs retain their caderneta id too, so reconciliation must wait for them.
+  marcarSincronizando(getDb(), input.cadernetaId);
+  queued.add(input.cadernetaId);
   const anterior = filas.get(input.sessionId) ?? Promise.resolve();
   // `sincronizarCaderneta` já trata os próprios erros; o `catch` aqui é só
   // para uma falha inesperada não interromper a fila de quem vem depois.
@@ -100,6 +110,7 @@ export function sincronizarEmSegundoPlano(input: SincronizarInput): void {
   filas.set(input.sessionId, atual);
 
   void atual.finally(() => {
+    queued.delete(input.cadernetaId);
     // Só o último da fila a terminar apaga a entrada: apagar a de outro job
     // deixaria o próximo pedido furar a fila.
     if (filas.get(input.sessionId) === atual) filas.delete(input.sessionId);
@@ -110,4 +121,5 @@ export function sincronizarEmSegundoPlano(input: SincronizarInput): void {
 export function resetSincronizacoes(): void {
   emAndamento.clear();
   filas.clear();
+  queued.clear();
 }

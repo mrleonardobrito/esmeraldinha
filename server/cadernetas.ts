@@ -34,9 +34,11 @@ import {
   type MensagemDaConversa,
   type RascunhoDeConteudo,
 } from './ai/gerar-conteudos';
+import { gerarNotas } from './ai/gerar-notas';
 import { garantirCatalogoDeCodigosCR } from './codigos-cr/catalogo';
 import {
   CadernetaNotFoundError,
+  CadernetaInvalidaError,
   TurmaJaCadastradaError,
   createCaderneta,
   deleteCaderneta,
@@ -45,18 +47,26 @@ import {
   listAvaliacoesDoProfessor,
   listDisciplinasDaCaderneta,
   listAulasDaEtapa,
-  listCadernetas,
   listEstudantes,
-  marcarConteudoPreenchido,
   marcarNotasLancadas,
   type Caderneta,
 } from './cadernetas/store';
 import { resolverNotasParaPreview, type NotaResolvida } from './notas/plano';
+import {
+  getClassificacaoPadrao,
+  listClassificacoes,
+  salvarClassificacoes,
+  setClassificacaoPadrao,
+} from './notas/classificacoes';
+import { CLASSIFICACOES } from '../shared/classificacao-de-notas';
 import type { NotaParaLancar } from './scrape/types';
 import { TurmaNaoEncontradaError } from './cadernetas/raspagem';
-import { turmasDoCatalogo } from './turmas/busca';
-import { periodoLetivoDaTurma } from './turmas/store';
+import { turmasComPeriodo, turmasDoCatalogo } from './turmas/busca';
+import { periodoLetivoDaTurma, replaceTurmas } from './turmas/store';
+import { reconcileCadernetasDeReducao } from './cadernetas/reducao';
 import { sincronizarEmSegundoPlano } from './cadernetas/sincronizacao';
+import { preenchimentosDeConteudo } from './cadernetas/preenchimento-de-conteudos';
+import { fichaDeDesempenho } from './cadernetas/ficha-de-desempenho';
 import { env } from './env';
 import { createEncryptionPort } from './encryption';
 import { getDb } from './professores/db';
@@ -118,6 +128,15 @@ const preenchimentoDeNotasSchema = z
         }),
       )
       .default([]),
+    /** Saved only once the portal window has been filled. */
+    classificacoes: z
+      .array(
+        z.object({
+          matricula: z.string().trim().min(1),
+          classificacao: z.enum(CLASSIFICACOES),
+        }),
+      )
+      .default([]),
   })
   .refine(
     (body) => body.notas.length > 0 || body.notasDoEstudante.length > 0,
@@ -126,6 +145,16 @@ const preenchimentoDeNotasSchema = z
 
 export const cadernetas = new Hono<ContaEnv>();
 cadernetas.use('*', restringirValores);
+cadernetas.onError((error, context) => {
+  if (error instanceof CadernetaInvalidaError) {
+    return context.json({ error: error.message }, 422);
+  }
+  if (error instanceof CadernetaNotFoundError) {
+    return context.json({ error: error.message }, 404);
+  }
+  console.error('Failed caderneta request:', error);
+  return context.json({ error: 'Não foi possível concluir a solicitação da caderneta.' }, 500);
+});
 
 function acessoAoProfessor(context: { get: (key: 'identidade') => ContaEnv['Variables']['identidade'] }, professorId: string) {
   const identidade = context.get('identidade');
@@ -196,6 +225,27 @@ cadernetas.use('*', async (context, next) => {
 
   await next();
 });
+
+// A grouped caderneta needs an explicit turma for every data operation.
+cadernetas.use('*', async (context, next) => {
+  const match = context.req.path.match(/\/api\/cadernetas\/([^/]+)(\/.*)?$/);
+  if (!match || ['sessoes', 'turmas'].includes(match[1])) return next();
+  const turma = context.req.query('turma');
+  const scoped = /^\/(etapas|estudantes|conteudos|boletim|ficha-de-desempenho)(\/|$)/.test(match[2] ?? '');
+  if (turma !== undefined || scoped) {
+    const caderneta = getCaderneta(getDb(), decodeURIComponent(match[1]));
+    if (turma !== undefined && !caderneta.turmas.includes(turma)) {
+      return context.json({ error: 'Esta turma não faz parte desta caderneta. Feche e abra a ficha de novo.' }, 422);
+    }
+    if (scoped && caderneta.turmas.length > 1 && turma === undefined) {
+      return context.json({ error: 'Escolha uma turma desta caderneta.' }, 422);
+    }
+  }
+  return next();
+});
+
+cadernetas.route('/', preenchimentosDeConteudo);
+cadernetas.route('/', fichaDeDesempenho);
 
 cadernetas.post('/sessoes', async (context) => {
   const body = await context.req.json().catch(() => null);
@@ -347,6 +397,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
   // Opcional: quando o envio sai de dentro de uma caderneta, o progresso dela
   // é atualizado sem esperar uma nova raspagem.
   const cadernetaId = typeof body.cadernetaId === 'string' ? body.cadernetaId : '';
+  const turmaDoEnvio = typeof body.turma === 'string' ? body.turma.trim() : '';
   const uploads = [body.arquivos ?? []]
     .flat()
     .filter((entry): entry is File => entry instanceof File);
@@ -379,6 +430,13 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
       return context.json({ error: 'Sessão não encontrada ou expirada.' }, 404);
     }
 
+    if (turmaDoEnvio) {
+      if (cadernetaId) cadernetaDoPlano(cadernetaId, session.professorId, turmaDoEnvio);
+      if (!turmasDoCatalogo(catalogo).includes(turmaDoEnvio)) {
+        return context.json({ error: 'A turma não pertence a este professor.' }, 422);
+      }
+    }
+
     // O agente escolhe a disciplina e a avaliação de uma lista fechada, então
     // o catálogo já vai enriquecido: uma segunda leitura do material só para
     // descobrir que ele era de notas custaria outra chamada ao modelo, e nada
@@ -389,7 +447,16 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
       listAvaliacoesDoProfessor(getDb(), session.professorId),
     );
 
-    const plano = await interpretarEnvio({ texto, arquivos, catalogo: comAvaliacoes });
+    const scopedCatalogo = turmaDoEnvio ? {
+      etapas: comAvaliacoes.etapas.filter((etapa) => etapa.turmas.includes(turmaDoEnvio))
+        .map((etapa) => ({
+          ...etapa,
+          turmas: [turmaDoEnvio],
+          disciplinasPorTurma: etapa.disciplinasPorTurma?.filter((entry) => entry.turma === turmaDoEnvio),
+        })),
+    } : comAvaliacoes;
+    const plano = await interpretarEnvio({ texto, arquivos, catalogo: scopedCatalogo });
+    if (cadernetaId) cadernetaDoPlano(cadernetaId, session.professorId, plano.turma);
 
     if (plano.parte === 'boletim') {
       const caderneta = cadernetaDoPlano(cadernetaId, session.professorId, plano.turma);
@@ -401,7 +468,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
         );
       }
 
-      const estudantes = listEstudantes(getDb(), caderneta.id);
+      const estudantes = listEstudantes(getDb(), caderneta.id, caderneta.turma);
 
       if (estudantes.length === 0) {
         throw new BoletimIndisponivelError(
@@ -410,7 +477,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
         );
       }
 
-      const disciplinas = listDisciplinasDaCaderneta(getDb(), caderneta.id);
+      const disciplinas = listDisciplinasDaCaderneta(getDb(), caderneta.id, caderneta.turma);
       const disciplina = plano.disciplina || disciplinas[0];
 
       if (!disciplina) {
@@ -447,6 +514,9 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
       })),
     });
   } catch (error) {
+    if (error instanceof CadernetaInvalidaError || error instanceof CadernetaNotFoundError) {
+      throw error;
+    }
     if (error instanceof OpenRouterNotConfiguredError) {
       return context.json({ error: error.message }, 503);
     }
@@ -507,6 +577,7 @@ cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (co
   }
 
   const { professorId, cadernetaId, etapa, mes, turma, aula } = parsed.data;
+  if (cadernetaId) cadernetaDoPlano(cadernetaId, professorId, turma);
   const { data, ordem, ...conteudo } = aula;
 
   const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), professorId);
@@ -530,16 +601,6 @@ cadernetas.post('/sessoes/:id/envios/aulas/preenchimentos-assistidos', async (co
       }),
     );
 
-    if (cadernetaId) {
-      try {
-        marcarConteudoPreenchido(getDb(), cadernetaId, [{ etapa, data, ordem: ordem ?? null }]);
-      } catch (error) {
-        // O preenchimento assistido só escreve na tela; o auxiliar ainda vai
-        // salvar por conta própria. Um progresso desatualizado se resolve numa
-        // sincronização, e não vale interromper o fluxo por isso.
-        console.error('Falha ao atualizar o progresso da caderneta:', error);
-      }
-    }
 
     return context.json({ etapa, mes, data, ordem: ordem ?? null });
   } catch (error) {
@@ -598,6 +659,7 @@ cadernetas.post('/sessoes/:id/envios/boletim/preenchimentos-assistidos', async (
   }
 
   const { professorId, cadernetaId, etapa, turma, disciplina, notas } = parsed.data;
+  if (cadernetaId) cadernetaDoPlano(cadernetaId, professorId, turma);
 
   const credenciais = await getProfessorCredenciais(getDb(), createEncryptionPort(), professorId);
 
@@ -619,6 +681,7 @@ cadernetas.post('/sessoes/:id/envios/boletim/preenchimentos-assistidos', async (
           cadernetaId,
           notas.map((nota) => ({ etapa, disciplina, ...nota })),
           [],
+          turma,
         );
       } catch (error) {
         console.error('Falha ao atualizar o progresso do boletim:', error);
@@ -651,30 +714,25 @@ cadernetas.post('/sessoes/:id/envios/boletim/preenchimentos-assistidos', async (
 });
 
 
-/**
- * A caderneta que o plano descreve. Quando o envio saiu de dentro de uma
- * caderneta, é aquela; quando saiu do _Upload Inteligente_, é a da turma que
- * o agente identificou — e é por isso que a tela solta também consegue lançar
- * notas sem que ninguém diga de qual turma se trata.
- */
+/** Resolve the plano's turma within its caderneta and professor. */
 function cadernetaDoPlano(
   cadernetaId: string,
   professorId: string,
   turma: string,
 ): Caderneta | undefined {
   if (cadernetaId) {
-    try {
-      return getCaderneta(getDb(), cadernetaId);
-    } catch {
-      // Um id que não existe mais cai no caminho da turma, abaixo.
+    const caderneta = getCaderneta(getDb(), cadernetaId, turma);
+    if (caderneta.professorId !== professorId) {
+      throw new CadernetaInvalidaError('The caderneta belongs to another professor.');
     }
+    return caderneta;
   }
 
   const row = getDb()
-    .prepare('SELECT id FROM cadernetas WHERE professor_id = ? AND turma = ?')
+    .prepare('SELECT caderneta_id AS id FROM caderneta_turmas WHERE professor_id = ? AND turma = ?')
     .get(professorId, turma) as unknown as { id: string } | undefined;
 
-  return row ? getCaderneta(getDb(), row.id) : undefined;
+  return row ? getCaderneta(getDb(), row.id, turma) : undefined;
 }
 
 /** O envio de notas não pôde ser gravado, e o porquê. */
@@ -715,6 +773,10 @@ cadernetas.post('/', async (context) => {
     return context.json({ error: 'Sessão não encontrada ou expirada.' }, 404);
   }
 
+  if (session.professorId !== professorId) {
+    return context.json({ error: 'The sessão do portal belongs to another professor.' }, 422);
+  }
+
   const professor = getDb()
     .prepare('SELECT id FROM professores WHERE id = ?')
     .get(professorId);
@@ -742,6 +804,9 @@ cadernetas.post('/', async (context) => {
   // turma que não é do professor é erro do pedido, não da raspagem.
   const disponiveis = turmasDoCatalogo(catalogo);
 
+  // Persist the relationship before deciding which turmas share a caderneta.
+  replaceTurmas(getDb(), professorId, turmasComPeriodo(catalogo));
+
   const cadastradas: Caderneta[] = [];
   const recusadas: { turma: string; motivo: string }[] = [];
   /** 409 é a resposta de quem pediu uma turma que já tem caderneta. */
@@ -761,15 +826,6 @@ cadernetas.post('/', async (context) => {
     try {
       const caderneta = createCaderneta(getDb(), { professorId, turma });
 
-      // Cada caderneta ganha seu job de raspagem — a fila da sessão é que os
-      // faz esperar a vez na página do portal. A tela não espera por eles.
-      sincronizarEmSegundoPlano({
-        cadernetaId: caderneta.id,
-        sessionId,
-        page: session.page,
-        catalogo,
-      });
-
       cadastradas.push(caderneta);
     } catch (error) {
       if (error instanceof TurmaJaCadastradaError) {
@@ -786,6 +842,16 @@ cadernetas.post('/', async (context) => {
     }
   }
 
+  const accepted = new Set(cadastradas.flatMap((caderneta) => caderneta.turmas));
+  const reconciled = reconcileCadernetasDeReducao(getDb(), professorId);
+  const resulting = reconciled.filter((caderneta) => caderneta.turmas.some((nome) => accepted.has(nome)));
+  // Consolidate first: no queued job should retain a caderneta id removed by grouping.
+  for (const caderneta of resulting) {
+    sincronizarEmSegundoPlano({
+      cadernetaId: caderneta.id, sessionId, page: session.page, catalogo,
+    });
+  }
+
   // Quem manda `turma` continua tendo o pedido de uma turma só: a caderneta
   // quando dá certo, o erro dela quando não dá.
   if (turmas === undefined) {
@@ -793,7 +859,7 @@ cadernetas.post('/', async (context) => {
       return context.json({ error: recusadas[0].motivo }, jaCadastrada ? 409 : 422);
     }
 
-    return context.json(cadastradas[0], 201);
+    return context.json(resulting[0], 201);
   }
 
   // Nenhuma das escolhidas entrou: não há cadastro nenhum para mostrar, e o
@@ -805,7 +871,7 @@ cadernetas.post('/', async (context) => {
     );
   }
 
-  return context.json({ cadernetas: cadastradas, recusadas }, 201);
+  return context.json({ cadernetas: resulting, recusadas }, 201);
 });
 
 /** As turmas que o professor da sessão tem, para escolher no cadastro. */
@@ -817,13 +883,25 @@ cadernetas.get('/turmas', async (context) => {
   }
 
   try {
+    const session = await retomarSessao(sessionId);
+    if (!session) {
+      return context.json({ error: 'Sessão não encontrada ou expirada.' }, 404);
+    }
     const catalogo = await getCatalogo(sessionId);
 
     if (!catalogo) {
       return context.json({ error: 'Sessão não encontrada ou expirada.' }, 404);
     }
 
-    return context.json({ turmas: turmasDoCatalogo(catalogo) });
+    replaceTurmas(getDb(), session.professorId, turmasComPeriodo(catalogo));
+    reconcileCadernetasDeReducao(getDb(), session.professorId);
+
+    return context.json({
+      turmas: turmasDoCatalogo(catalogo),
+      gruposDiariosPorTurma: turmasComPeriodo(catalogo).map(({ nome, grupoDiario }) => ({
+        turma: nome, grupoDiario,
+      })),
+    });
   } catch (error) {
     console.error('Falha ao ler as turmas do professor:', error);
     return context.json({ error: 'Não foi possível ler as turmas no portal.' }, 502);
@@ -842,12 +920,12 @@ cadernetas.get('/', (context) => {
     return context.json({ error: 'Você só pode visualizar as suas cadernetas.' }, 403);
   }
 
-  return context.json(listCadernetas(getDb(), professorId));
+  return context.json(reconcileCadernetasDeReducao(getDb(), professorId));
 });
 
 cadernetas.get('/:id', (context) => {
   try {
-    return context.json(getCaderneta(getDb(), context.req.param('id')));
+    return context.json(getCaderneta(getDb(), context.req.param('id'), context.req.query('turma')));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -862,7 +940,7 @@ cadernetas.get('/:id/etapas/:etapa/aulas', (context) => {
   const etapa = decodeURIComponent(context.req.param('etapa'));
 
   try {
-    getCaderneta(getDb(), id);
+    getCaderneta(getDb(), id, context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -870,7 +948,7 @@ cadernetas.get('/:id/etapas/:etapa/aulas', (context) => {
     throw error;
   }
 
-  return context.json({ etapa, aulas: listAulasDaEtapa(getDb(), id, etapa) });
+  return context.json({ etapa, aulas: listAulasDaEtapa(getDb(), id, etapa, context.req.query('turma')) });
 });
 
 const rascunhosDeConteudoSchema = z.object({
@@ -930,7 +1008,7 @@ cadernetas.post('/:id/etapas/:etapa/conteudos/rascunhos', async (context) => {
 
   let caderneta: Caderneta;
   try {
-    caderneta = getCaderneta(getDb(), id);
+    caderneta = getCaderneta(getDb(), id, context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -970,7 +1048,7 @@ cadernetas.post('/:id/etapas/:etapa/conteudos/rascunhos', async (context) => {
   }
 
   const { mes, mensagens, rascunhos, referencias } = parsed.data;
-  const aulasDaEtapa = listAulasDaEtapa(getDb(), id, etapa);
+  const aulasDaEtapa = listAulasDaEtapa(getDb(), id, etapa, context.req.query('turma'));
   const noEscopo = aulasDaEtapa.filter((aula) => mes === null || aula.mes === mes);
 
   if (noEscopo.length === 0) {
@@ -988,7 +1066,7 @@ cadernetas.post('/:id/etapas/:etapa/conteudos/rascunhos', async (context) => {
     let aulas = porEtapa.get(referencia.etapa);
     if (!aulas) {
       aulas =
-        referencia.etapa === etapa ? aulasDaEtapa : listAulasDaEtapa(getDb(), id, referencia.etapa);
+        referencia.etapa === etapa ? aulasDaEtapa : listAulasDaEtapa(getDb(), id, referencia.etapa, context.req.query('turma'));
       porEtapa.set(referencia.etapa, aulas);
     }
     const aula = aulas.find(
@@ -1048,8 +1126,9 @@ cadernetas.get('/:id/etapas/:etapa/boletim', (context) => {
   const id = context.req.param('id');
   const etapa = decodeURIComponent(context.req.param('etapa'));
 
+  let caderneta: Caderneta;
   try {
-    getCaderneta(getDb(), id);
+    caderneta = getCaderneta(getDb(), id, context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -1059,7 +1138,118 @@ cadernetas.get('/:id/etapas/:etapa/boletim', (context) => {
 
   const disciplina = context.req.query('disciplina')?.trim() || undefined;
 
-  return context.json(getBoletimDaEtapa(getDb(), id, etapa, disciplina));
+  return context.json({
+    ...getBoletimDaEtapa(getDb(), id, etapa, disciplina, caderneta.turma),
+    classificacaoPadrao: getClassificacaoPadrao(getDb(), caderneta.professorId, caderneta.turma),
+    classificacoes: listClassificacoes(getDb(), caderneta.professorId, caderneta.turma),
+  });
+});
+
+const classificacaoPadraoSchema = z.object({ classificacao: z.enum(CLASSIFICACOES) });
+
+/** The turma's classificação padrão, saved as soon as the auxiliar picks it. */
+cadernetas.put('/:id/boletim/classificacao-padrao', async (context) => {
+  const parsed = classificacaoPadraoSchema.safeParse(await context.req.json().catch(() => null));
+
+  if (!parsed.success) {
+    return context.json({ error: 'Informe uma classificação válida.' }, 400);
+  }
+
+  const caderneta = getCaderneta(getDb(), context.req.param('id'), context.req.query('turma'));
+  setClassificacaoPadrao(getDb(), caderneta.professorId, caderneta.turma, parsed.data.classificacao);
+
+  return context.json({ classificacao: parsed.data.classificacao });
+});
+
+const rascunhosDeNotasSchema = z.object({
+  disciplina: z.string().trim().min(1).nullish(),
+  mensagens: z
+    .array(
+      z.object({
+        papel: z.enum(['auxiliar', 'assistente']),
+        texto: z.string().trim().min(1),
+      }),
+    )
+    .min(1),
+  estudantes: z
+    .array(
+      z.object({
+        matricula: z.string().trim().min(1),
+        notaFinal: z.number().min(0).nullable(),
+        classificacao: z.enum(CLASSIFICACOES).nullable(),
+      }),
+    )
+    .default([]),
+});
+
+/**
+ * The chat de notas: from the conversation and what the grid shows now, the
+ * agent decides each estudante's nota final. Stateless and read-only — the
+ * result becomes screen edits, and only _Preencher no sistema_ reaches the
+ * portal.
+ */
+cadernetas.post('/:id/etapas/:etapa/boletim/rascunhos', async (context) => {
+  const etapa = decodeURIComponent(context.req.param('etapa'));
+  const parsed = rascunhosDeNotasSchema.safeParse(await context.req.json().catch(() => null));
+
+  if (!parsed.success) {
+    return context.json({ error: 'Informe a conversa com o agente.' }, 400);
+  }
+
+  const caderneta = getCaderneta(getDb(), context.req.param('id'), context.req.query('turma'));
+  const boletim = getBoletimDaEtapa(
+    getDb(),
+    caderneta.id,
+    etapa,
+    parsed.data.disciplina ?? undefined,
+    caderneta.turma,
+  );
+
+  if (boletim.disciplina === null || boletim.avaliacoes.length === 0) {
+    return context.json(
+      { error: 'Esta etapa não tem avaliação cadastrada nesta disciplina.' },
+      422,
+    );
+  }
+
+  // Names come from the database: the client only says what the grid shows.
+  const naTela = new Map(parsed.data.estudantes.map((estudante) => [estudante.matricula, estudante]));
+  const noPortal = new Set(boletim.notas.map((nota) => nota.matricula));
+
+  try {
+    const geradas = await gerarNotas({
+      turma: caderneta.turma,
+      etapa,
+      disciplina: boletim.disciplina,
+      avaliacoes: boletim.avaliacoes,
+      estudantes: boletim.estudantes.map(({ matricula, nome }) => ({
+        matricula,
+        nome,
+        notaFinal: naTela.get(matricula)?.notaFinal ?? null,
+        classificacao: naTela.get(matricula)?.classificacao ?? null,
+        noPortal: noPortal.has(matricula),
+      })),
+      mensagens: parsed.data.mensagens,
+      signal: context.req.raw.signal,
+    });
+
+    return context.json(geradas);
+  } catch (error) {
+    if (error instanceof OpenRouterNotConfiguredError) {
+      return context.json({ error: error.message }, 503);
+    }
+
+    if (error instanceof EnvioInvalidoError) {
+      return context.json({ error: error.message }, 422);
+    }
+
+    if (error instanceof OpenRouterError) {
+      return context.json({ error: `O agente falhou: ${error.message}` }, 502);
+    }
+
+    console.error('Failed to generate notas:', error);
+    return context.json({ error: 'Não foi possível gerar as notas. Tente novamente.' }, 502);
+  }
 });
 
 /** Os estudantes da turma, que é o que a aba de turmas mostra. */
@@ -1067,7 +1257,7 @@ cadernetas.get('/:id/estudantes', (context) => {
   const id = context.req.param('id');
 
   try {
-    getCaderneta(getDb(), id);
+    getCaderneta(getDb(), id, context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -1075,7 +1265,7 @@ cadernetas.get('/:id/estudantes', (context) => {
     throw error;
   }
 
-  return context.json({ estudantes: listEstudantes(getDb(), id) });
+  return context.json({ estudantes: listEstudantes(getDb(), id, context.req.query('turma')) });
 });
 
 /** Relê a turma no portal: a válvula para quando alguém preenche por fora. */
@@ -1103,21 +1293,28 @@ cadernetas.post('/:id/sincronizacoes', async (context) => {
   }
 
   try {
-    const caderneta = getCaderneta(getDb(), id);
+    const caderneta = getCaderneta(getDb(), id, context.req.query('turma'));
+    if (session.professorId !== caderneta.professorId) {
+      return context.json({ error: 'The sessão do portal belongs to another professor.' }, 422);
+    }
     const catalogo = await getCatalogo(parsed.data.sessionId);
 
     if (!catalogo) {
       return context.json({ error: 'Sessão não encontrada ou expirada.' }, 404);
     }
 
+    // The original id may have been consolidated while the portal was loading.
+    const currentId = cadernetaDoPlano('', caderneta.professorId, caderneta.turma)?.id;
+    if (!currentId) throw new CadernetaNotFoundError(id);
+    const current = getCaderneta(getDb(), currentId, context.req.query('turma'));
     sincronizarEmSegundoPlano({
-      cadernetaId: caderneta.id,
+      cadernetaId: current.id,
       sessionId: parsed.data.sessionId,
       page: session.page,
       catalogo,
     });
 
-    return context.json({ ...caderneta, syncStatus: 'sincronizando' as const }, 202);
+    return context.json({ ...current, syncStatus: 'sincronizando' as const }, 202);
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -1145,11 +1342,11 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
     return context.json({ error: 'Informe a etapa e ao menos uma nota.' }, 400);
   }
 
-  const { etapa, disciplina, notas, notasDoEstudante } = parsed.data;
+  const { etapa, disciplina, notas, notasDoEstudante, classificacoes } = parsed.data;
 
   let caderneta: Caderneta;
   try {
-    caderneta = getCaderneta(getDb(), context.req.param('id'));
+    caderneta = getCaderneta(getDb(), context.req.param('id'), context.req.query('turma'));
   } catch (error) {
     if (error instanceof CadernetaNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -1170,7 +1367,7 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
   try {
     // Sem disciplina informada vale a primeira da caderneta: é o caso de quem
     // tem uma só e não escolheu nada na tela.
-    const escolhida = disciplina ?? listDisciplinasDaCaderneta(getDb(), caderneta.id)[0];
+    const escolhida = disciplina ?? listDisciplinasDaCaderneta(getDb(), caderneta.id, caderneta.turma)[0];
 
     if (!escolhida) {
       return context.json(
@@ -1208,9 +1405,16 @@ cadernetas.post('/:id/boletim/preenchimentos-assistidos', async (context) => {
         caderneta.id,
         notas.map((nota) => ({ etapa, disciplina: escolhida, ...nota })),
         notasDoEstudante.map((nota) => ({ etapa, disciplina: escolhida, ...nota })),
+        caderneta.turma,
       );
     } catch (error) {
       console.error('Falha ao atualizar o progresso do boletim:', error);
+    }
+
+    try {
+      salvarClassificacoes(getDb(), caderneta.professorId, caderneta.turma, classificacoes);
+    } catch (error) {
+      console.error('Failed to save the classificações:', error);
     }
 
     return context.json({ etapa, disciplina: escolhida, notas, notasDoEstudante });
@@ -1259,5 +1463,5 @@ cadernetas.put('/:id', async (context) => {
   if (!parsed.success) return context.json({ error: 'Valores inválidos.' }, 400);
   const result = getDb().prepare('UPDATE cadernetas SET valor_recebido = ?, valor_a_receber = ? WHERE id = ?').run(parsed.data.valorRecebido, parsed.data.valorAReceber, context.req.param('id'));
   if (!result.changes) return context.json({ error: 'Caderneta não encontrada.' }, 404);
-  return context.json(getCaderneta(getDb(), context.req.param('id')));
+  return context.json(getCaderneta(getDb(), context.req.param('id'), context.req.query('turma')));
 });

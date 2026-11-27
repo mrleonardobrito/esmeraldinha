@@ -17,15 +17,10 @@ import { Professores } from "@/pages/professores";
 import { migrateProfessoresFromLocalStorage } from "@/lib/professores-migration";
 import { hasSeenWelcome } from "@/lib/welcome";
 
-/** O app depois da entrada: sidebar, cabeçalho e as rotas. */
 function Esmeraldinha() {
   const { conta } = useConta();
-  // Na primeira execução o guia se abre sozinho; depois disso ele só aparece
-  // se for pedido no cabeçalho.
   const [guiaAberto, setGuiaAberto] = React.useState(() => !hasSeenWelcome());
 
-  // A migração dos professores que ficaram no `localStorage` fala com a API,
-  // então só tem como acontecer depois da entrada.
   React.useEffect(() => {
     if (conta?.papel === "auxiliar de ensino") void migrateProfessoresFromLocalStorage();
   }, [conta?.papel]);
@@ -56,10 +51,6 @@ function Esmeraldinha() {
   );
 }
 
-/**
- * Qual tela existe agora: a entrada enquanto não há sessão, o primeiro
- * acesso enquanto a senha ainda é a temporária, e só então o app.
- */
 function Acesso() {
   const { conta, carregando } = useConta();
 

@@ -26,6 +26,36 @@ beforeEach(() => {
 });
 
 describe('replaceTurmas', () => {
+  it('persists grupo diário independently of the turno and refreshes the relationship', () => {
+    const nome = '9º ANO - 9º ANO A - MATUTINO';
+    const [before] = replaceTurmas(db, professorId, [
+      { nome, periodoLetivo: '2026', grupoDiario: 'Regular' },
+    ]);
+    replaceEstudantes(db, before.id, [
+      { matricula: '123', nome: 'Ana', situacao: 'ATIVO', dataMatricula: null },
+    ]);
+    const [after] = replaceTurmas(db, professorId, [
+      { nome, periodoLetivo: '2026', grupoDiario: 'REDUÇÃO TARDE' },
+    ]);
+
+    expect(getTurma(db, after.id)).toMatchObject({
+      id: before.id, turno: 'MATUTINO', grupoDiario: 'REDUÇÃO TARDE', totalDeEstudantes: 1,
+    });
+  });
+
+  it('keeps grupo diário specific to each professor and preserves an unknown value', () => {
+    db.prepare(
+      `INSERT INTO professores (id, nome, login, senha_encrypted, escola, created_at)
+       VALUES ('prof-2', 'João', '222', X'00', 'Escola', '2026-01-01T00:00:00.000Z')`,
+    ).run();
+    const nome = '9º ANO - 9º ANO A - MATUTINO';
+    replaceTurmas(db, professorId, [{ nome, grupoDiario: 'REDUÇÃO MANHÃ' }]);
+    replaceTurmas(db, 'prof-2', [{ nome }]);
+
+    expect(listTurmas(db, professorId)[0].grupoDiario).toBe('REDUÇÃO MANHÃ');
+    expect(listTurmas(db, 'prof-2')[0].grupoDiario).toBeNull();
+  });
+
   it('guarda as turmas que o portal devolveu, com o turno lido do nome', () => {
     const turmas = replaceTurmas(db, professorId, [
       { nome: '9º ANO - 9º ANO A - VESPERTINO', periodoLetivo: '2026' },

@@ -13,7 +13,7 @@ O glossário do domínio vive em `CONTEXT.md`.
    3. Ficha de desempenho de cada estudante
    4. Ficha descritiva de cada estudante
    5. Boletim de notas de cada estudante
-3. Uma caderneta é vinculada a uma turma
+3. A caderneta covers one turma where the professor is regente, or one to four automatically grouped turmas de redução for that professor, including cadernetas already registered separately. The portal's grupo diário identifies this relationship, as defined in `CONTEXT.md`
 4. Uma caderneta só é considerada finalizada quando essas informações estão preenchidas para todas as aulas de todas as 4 etapas do ano letivo
 5. A data de inicialização e finalização de cada uma das 4 etapas do ano letivo depende do calendário acadêmico
 6. O usuário final do sistema é o auxiliar de ensino, que recebe as solicitações dos professores

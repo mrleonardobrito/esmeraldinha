@@ -167,6 +167,7 @@ export interface EnvioDeMaterialProps {
   professorId: string;
   /** Quando o envio sai de dentro de uma caderneta, o progresso dela sobe junto. */
   cadernetaId?: string;
+  turma?: string;
   /** Sem moldura de card, para quando o envio já está dentro de um modal. */
   semCard?: boolean;
   onGravou?: () => void;
@@ -191,6 +192,7 @@ export function EnvioDeMaterial({
   sessionId,
   professorId,
   cadernetaId,
+  turma,
   semCard,
   onGravou,
   onSessaoExpirada,
@@ -245,7 +247,7 @@ export function EnvioDeMaterial({
     setErro(null);
 
     try {
-      const preview = await preverEnvio(sessionId, { texto, arquivos, cadernetaId });
+      const preview = await preverEnvio(sessionId, { texto, arquivos, cadernetaId, turma });
       setTexto("");
       setTextoAberto(false);
       setArquivos([]);

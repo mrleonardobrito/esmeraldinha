@@ -101,12 +101,14 @@ export async function preverEnvio(
     texto,
     arquivos,
     cadernetaId,
-  }: { texto: string; arquivos: File[]; cadernetaId?: string },
+    turma,
+  }: { texto: string; arquivos: File[]; cadernetaId?: string; turma?: string },
 ): Promise<PreviewDoEnvio> {
   const form = new FormData();
   form.append("texto", texto);
   for (const arquivo of arquivos) form.append("arquivos", arquivo);
   if (cadernetaId) form.append("cadernetaId", cadernetaId);
+  if (turma) form.append("turma", turma);
 
   const response = await requestApi(`/api/cadernetas/sessoes/${sessionId}/envios`, {
     method: "POST",

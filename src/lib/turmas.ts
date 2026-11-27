@@ -18,6 +18,8 @@ export interface Turma {
    * nulo nas turmas lidas antes de o cadastro guardá-lo.
    */
   periodoLetivo: string | null;
+  /** The professor's grupo diário in the portal; null when it was not read. */
+  grupoDiario: string | null;
   totalDeEstudantes: number;
   createdAt: string;
 }

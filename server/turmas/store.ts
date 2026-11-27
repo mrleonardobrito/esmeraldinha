@@ -19,6 +19,8 @@ export interface Turma {
    * Nulo nas turmas lidas antes de o cadastro guardá-lo: uma rebusca preenche.
    */
   periodoLetivo: string | null;
+  /** Null until an unambiguous grupo diário has been read from the portal. */
+  grupoDiario: string | null;
   totalDeEstudantes: number;
   createdAt: string;
 }
@@ -27,6 +29,7 @@ export interface Turma {
 export interface TurmaEncontrada {
   readonly nome: string;
   readonly periodoLetivo?: string | null;
+  readonly grupoDiario?: string | null;
 }
 
 /** Um estudante matriculado na turma, como o portal o lista. */
@@ -51,6 +54,7 @@ interface TurmaRow {
   nome: string;
   turno: string | null;
   periodo_letivo: string | null;
+  grupo_diario: string | null;
   created_at: string;
   total_de_estudantes: number;
 }
@@ -62,6 +66,7 @@ function toTurma(row: TurmaRow): Turma {
     nome: row.nome,
     turno: row.turno,
     periodoLetivo: row.periodo_letivo,
+    grupoDiario: row.grupo_diario,
     totalDeEstudantes: Number(row.total_de_estudantes),
     createdAt: row.created_at,
   };
@@ -73,6 +78,7 @@ const SELECT_TURMA = `
          t.nome,
          t.turno,
          t.periodo_letivo,
+         t.grupo_diario,
          t.created_at,
          COUNT(e.matricula) AS total_de_estudantes
     FROM turmas t
@@ -124,10 +130,10 @@ export function replaceTurmas(
 ): Turma[] {
   const nomes = turmas.map((turma) => turma.nome);
   const insert = db.prepare(
-    `INSERT INTO turmas (id, professor_id, nome, turno, periodo_letivo, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO turmas (id, professor_id, nome, turno, periodo_letivo, grupo_diario, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
-  const update = db.prepare('UPDATE turmas SET periodo_letivo = ? WHERE id = ?');
+  const update = db.prepare('UPDATE turmas SET periodo_letivo = ?, grupo_diario = ? WHERE id = ?');
   const existentes = new Map(
     listTurmas(db, professorId).map((turma) => [turma.nome, turma]),
   );
@@ -142,11 +148,11 @@ export function replaceTurmas(
       }
     }
 
-    for (const { nome, periodoLetivo } of turmas) {
+    for (const { nome, periodoLetivo, grupoDiario } of turmas) {
       const existente = existentes.get(nome);
 
       if (existente) {
-        update.run(periodoLetivo ?? null, existente.id);
+        update.run(periodoLetivo ?? null, grupoDiario ?? null, existente.id);
         continue;
       }
 
@@ -156,6 +162,7 @@ export function replaceTurmas(
         nome,
         turnoDaTurma(nome),
         periodoLetivo ?? null,
+        grupoDiario ?? null,
         createdAt,
       );
     }

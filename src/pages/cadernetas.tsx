@@ -21,6 +21,7 @@ import {
 } from "@/components/grade-de-cadernetas";
 import { LancarConteudo } from "@/components/lancar-conteudo";
 import { LancarNotas } from "@/components/lancar-notas";
+import { LancarFichaDeDesempenho } from "@/components/lancar-ficha-de-desempenho";
 import {
   ProfessorPicker,
   ProfessorPickerSkeleton,
@@ -49,7 +50,9 @@ import {
 } from "@/lib/professores";
 import {
   loadCadernetas,
+  loadTurmasDoPortal,
   sincronizarCaderneta,
+  turmasDaCaderneta,
   type Caderneta,
 } from "@/lib/cadernetas";
 import {
@@ -67,8 +70,6 @@ type ProfessoresState =
 
 export function Cadernetas() {
   const { conta } = useConta();
-  // Voltar para esta tela deve cair onde se estava, não no começo: o que a
-  // visita anterior deixou em aberto é o estado inicial desta.
   const retomada = React.useMemo(() => lerSessaoDeTrabalho(), []);
 
   const [professoresState, setProfessoresState] =
@@ -88,7 +89,7 @@ export function Cadernetas() {
     retomada?.cadernetas ?? [],
   );
   const [cadernetasToken, setCadernetasToken] = React.useState(0);
-  /** Falso só depois da primeira leitura: antes dela a grade é um esqueleto. */
+  const cadernetasRequest = React.useRef(0);
   const [carregandoCadernetas, setCarregandoCadernetas] = React.useState(
     retomada === null,
   );
@@ -100,6 +101,10 @@ export function Cadernetas() {
     etapa: string;
   } | null>(null);
   const [lancandoNotas, setLancandoNotas] = React.useState<{
+    caderneta: Caderneta;
+    etapa: string;
+  } | null>(null);
+  const [lancandoFicha, setLancandoFicha] = React.useState<{
     caderneta: Caderneta;
     etapa: string;
   } | null>(null);
@@ -142,30 +147,62 @@ export function Cadernetas() {
     };
   }, [conta, reloadToken]);
 
-  // O que a próxima visita retoma. Fica fora do React porque precisa
-  // sobreviver ao desmonte que a troca de página provoca.
   React.useEffect(() => {
     if (!selected) return;
     guardarSessaoDeTrabalho({ professor: selected, session, cadernetas });
   }, [selected, session, cadernetas]);
 
-  /** Sobe a cada envio gravado, para a grade refletir o portal. */
   const recarregarCadernetas = React.useCallback(() => {
+    // Ignore reads started before portal discovery or cadastro reconciled turmas.
+    cadernetasRequest.current++;
     setCadernetasToken((atual) => atual + 1);
   }, []);
+
+  React.useEffect(() => {
+    const sessionId = session?.sessionId;
+    if (!sessionId) return;
+    let cancelled = false;
+    loadTurmasDoPortal(sessionId)
+      .then(() => { if (!cancelled) recarregarCadernetas(); })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        toast.error(cause instanceof Error ? cause.message : "Não foi possível ler o grupo diário no portal.");
+      });
+    return () => { cancelled = true; };
+  }, [session?.sessionId, recarregarCadernetas]);
 
   React.useEffect(() => {
     const professorId = selected?.id;
     if (!professorId) return;
 
     let cancelled = false;
+    const request = ++cadernetasRequest.current;
 
     loadCadernetas(professorId)
       .then((carregadas) => {
-        if (!cancelled) setCadernetas(carregadas);
+        if (cancelled || request !== cadernetasRequest.current) return;
+        setCadernetas(carregadas);
+        // An open editor may refer to a caderneta merged during portal discovery.
+        const reconcileEditor = (current: { caderneta: Caderneta; etapa: string } | null) => {
+          if (!current) return null;
+          const caderneta = carregadas.find((item) => item.id === current.caderneta.id) ??
+            carregadas.find((item) => turmasDaCaderneta(item).includes(current.caderneta.turma));
+          return caderneta ? { ...current, caderneta: {
+            ...caderneta,
+            turma: turmasDaCaderneta(caderneta).includes(current.caderneta.turma)
+              ? current.caderneta.turma : caderneta.turma,
+          } } : null;
+        };
+        setLancando(reconcileEditor);
+        setLancandoNotas(reconcileEditor);
+        setLancandoFicha(reconcileEditor);
+        setExcluindo((current) => current ? carregadas.find((item) =>
+          item.id === current.id &&
+          turmasDaCaderneta(item).join("\0") === turmasDaCaderneta(current).join("\0"),
+        ) ?? null : null);
       })
       .catch((error: unknown) => {
-        if (cancelled) return;
+        if (cancelled || request !== cadernetasRequest.current) return;
         toast.error(
           error instanceof Error
             ? error.message
@@ -173,7 +210,7 @@ export function Cadernetas() {
         );
       })
       .finally(() => {
-        if (!cancelled) setCarregandoCadernetas(false);
+        if (!cancelled && request === cadernetasRequest.current) setCarregandoCadernetas(false);
       });
 
     return () => {
@@ -181,11 +218,6 @@ export function Cadernetas() {
     };
   }, [selected?.id, cadernetasToken]);
 
-  /**
-   * A raspagem roda no servidor, em segundo plano, e não tem como avisar a
-   * tela quando termina. Enquanto alguma caderneta estiver sincronizando, a
-   * grade se recarrega sozinha; quando nenhuma estiver, o efeito para.
-   */
   const sincronizando = cadernetas.some(
     (caderneta) => caderneta.syncStatus === "sincronizando",
   );
@@ -205,10 +237,6 @@ export function Cadernetas() {
     setReloadToken((current) => current + 1);
   }
 
-  /**
-   * A conexão parte do clique, não de um efeito: com StrictMode um efeito
-   * rodaria duas vezes em dev e abriria duas sessões no portal.
-   */
   async function connect(professor: Professor) {
     setStatus("connecting");
     setErrorMessage(null);
@@ -228,14 +256,6 @@ export function Cadernetas() {
     }
   }
 
-  /**
-   * A sessão sumiu do servidor sem a tela saber — um restart do processo em
-   * dev é o caso comum, mas ociosidade de verdade também some assim. Não há
-   * o que recuperar dela no id velho, mas a tela não pode ficar sem `session`
-   * nem por um instante: é ele que mantém o modal de envio montado, com o
-   * texto e os anexos que o auxiliar de ensino já tinha preenchido — zerar
-   * primeiro descartaria tudo isso antes da sessão nova chegar.
-   */
   async function reabrirSessao() {
     if (!selected) return;
 
@@ -253,11 +273,6 @@ export function Cadernetas() {
     }
   }
 
-  /**
-   * O que há para editar numa caderneta é o que o portal diz sobre ela: turma,
-   * aulas e estudantes vêm todos de lá, e nenhum é nosso para reescrever.
-   * Atualizar é reler — a raspagem roda em segundo plano e a grade acompanha.
-   */
   async function atualizarCaderneta(caderneta: Caderneta) {
     if (!session) return;
 
@@ -295,6 +310,7 @@ export function Cadernetas() {
     setStatus("idle");
     setLancando(null);
     setLancandoNotas(null);
+    setLancandoFicha(null);
     setCadastrando(false);
     setAnalisando(false);
     setExcluindo(null);
@@ -475,7 +491,7 @@ export function Cadernetas() {
                 <div className="flex flex-col gap-0.5">
                   <CardTitle>Cadernetas</CardTitle>
                   <CardDescription>
-                    Uma linha por turma, uma coluna por etapa do ano letivo.
+                    Uma linha por caderneta, uma coluna por etapa.
                   </CardDescription>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -527,6 +543,9 @@ export function Cadernetas() {
                     onAbrirBoletim={(caderneta, etapa) =>
                       setLancandoNotas({ caderneta, etapa })
                     }
+                    onAbrirFicha={(caderneta, etapa) =>
+                      setLancandoFicha({ caderneta, etapa })
+                    }
                     onAtualizar={(caderneta) => void atualizarCaderneta(caderneta)}
                     onExcluir={setExcluindo}
                   />
@@ -562,11 +581,10 @@ export function Cadernetas() {
               <CadastrarCaderneta
                 sessionId={session.sessionId}
                 professorId={selected.id}
-                jaCadastradas={cadernetas.map((caderneta) => caderneta.turma)}
+                jaCadastradas={cadernetas.flatMap(turmasDaCaderneta)}
                 onClose={() => setCadastrando(false)}
-                onCadastrou={(novas) => {
-                  setCadernetas((atuais) => [...atuais, ...novas]);
-                }}
+                onTurmasLoaded={recarregarCadernetas}
+                onCadastrou={recarregarCadernetas}
               />
             )}
 
@@ -577,6 +595,14 @@ export function Cadernetas() {
                 sessionId={session.sessionId}
                 onClose={() => setLancando(null)}
                 onGravou={recarregarCadernetas}
+              />
+            )}
+
+            {lancandoFicha && (
+              <LancarFichaDeDesempenho
+                caderneta={lancandoFicha.caderneta}
+                etapa={lancandoFicha.etapa}
+                onClose={() => setLancandoFicha(null)}
               />
             )}
 
@@ -596,10 +622,6 @@ export function Cadernetas() {
   );
 }
 
-/**
- * O portal demora para responder ao login, então a espera mostra o que vem
- * depois — o cabeçalho e a grade em cinza — em vez de uma tela vazia.
- */
 function ConectandoAoPortal({ nome }: { nome: string }) {
   return (
     <Card>

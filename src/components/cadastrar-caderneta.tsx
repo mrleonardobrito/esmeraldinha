@@ -15,8 +15,10 @@ import {
 } from "@/components/ui/sheet";
 import {
   cadastrarCadernetas,
-  loadTurmas,
+  loadTurmasDoPortal,
+  turmasDaCaderneta,
   type Caderneta,
+  type GrupoDiarioDaTurma,
   type TurmaRecusada,
 } from "@/lib/cadernetas";
 import { nomeCurtoDaTurma } from "@/lib/turmas";
@@ -25,7 +27,7 @@ import { cn } from "@/lib/utils";
 type TurmasState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; turmas: string[] };
+  | { status: "ready"; turmas: string[]; gruposDiariosPorTurma: GrupoDiarioDaTurma[] };
 
 export interface CadastrarCadernetaProps {
   sessionId: string;
@@ -34,6 +36,7 @@ export interface CadastrarCadernetaProps {
   jaCadastradas: string[];
   onClose: () => void;
   onCadastrou: (cadernetas: Caderneta[]) => void;
+  onTurmasLoaded?: () => void;
 }
 
 export function CadastrarCaderneta({
@@ -42,6 +45,7 @@ export function CadastrarCaderneta({
   jaCadastradas,
   onClose,
   onCadastrou,
+  onTurmasLoaded,
 }: CadastrarCadernetaProps) {
   const [turmasState, setTurmasState] = React.useState<TurmasState>({
     status: "loading",
@@ -54,9 +58,11 @@ export function CadastrarCaderneta({
   React.useEffect(() => {
     let cancelled = false;
 
-    loadTurmas(sessionId)
-      .then((turmas) => {
-        if (!cancelled) setTurmasState({ status: "ready", turmas });
+    loadTurmasDoPortal(sessionId)
+      .then((data) => {
+        if (cancelled) return;
+        setTurmasState({ status: "ready", ...data });
+        onTurmasLoaded?.();
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -72,12 +78,17 @@ export function CadastrarCaderneta({
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, onTurmasLoaded]);
 
   const disponiveis =
     turmasState.status === "ready"
       ? turmasState.turmas.filter((turma) => !jaCadastradas.includes(turma))
       : [];
+  const gruposDiarios = new Map(
+    turmasState.status === "ready"
+      ? turmasState.gruposDiariosPorTurma.map(({ turma, grupoDiario }) => [turma, grupoDiario])
+      : [],
+  );
 
   function alternar(turma: string) {
     setSelecionadas((atuais) =>
@@ -110,8 +121,8 @@ export function CadastrarCaderneta({
 
       toast.success(
         cadernetas.length === 1
-          ? `Caderneta de ${nomeCurtoDaTurma(cadernetas[0].turma)} cadastrada.`
-          : `${cadernetas.length} cadernetas cadastradas. A leitura do portal acontece uma turma de cada vez.`,
+          ? `Caderneta pronta: ${turmasDaCaderneta(cadernetas[0]).map(nomeCurtoDaTurma).join(", ")}.`
+          : `${cadernetas.length} cadernetas prontas. As turmas de redução são agrupadas automaticamente.`,
       );
 
       // As recusadas ficam à vista; fechar o sheet as esconderia.
@@ -141,8 +152,9 @@ export function CadastrarCaderneta({
         <SheetHeader>
           <SheetTitle className="font-heading">Nova caderneta</SheetTitle>
           <SheetDescription>
-            Escolha as turmas. O sistema lê as aulas de cada uma no portal
-            em segundo plano, uma turma de cada vez.
+            Selecione as turmas. As turmas de redução são agrupadas
+            automaticamente em uma caderneta, com até quatro turmas. Cada turma
+            em que o professor é regente tem a própria caderneta.
           </SheetDescription>
         </SheetHeader>
 
@@ -167,6 +179,7 @@ export function CadastrarCaderneta({
               desabilitado={salvando}
               onAlternar={alternar}
               onAlternarTodas={alternarTodas}
+              gruposDiarios={gruposDiarios}
             />
           </div>
 
@@ -217,9 +230,7 @@ export function CadastrarCaderneta({
             )}
             {salvando
               ? "Cadastrando…"
-              : selecionadas.length > 1
-                ? `Cadastrar ${selecionadas.length} cadernetas`
-                : "Cadastrar"}
+              : "Criar cadernetas"}
           </Button>
           <Button variant="outline" onClick={onClose} disabled={salvando}>
             {recusadas.length > 0 ? "Fechar" : "Cancelar"}
@@ -237,6 +248,7 @@ function Turmas({
   desabilitado,
   onAlternar,
   onAlternarTodas,
+  gruposDiarios,
 }: {
   state: TurmasState;
   disponiveis: string[];
@@ -244,6 +256,7 @@ function Turmas({
   desabilitado: boolean;
   onAlternar: (turma: string) => void;
   onAlternarTodas: () => void;
+  gruposDiarios: ReadonlyMap<string, string | null>;
 }) {
   if (state.status === "loading") {
     return (
@@ -307,7 +320,12 @@ function Turmas({
               disabled={desabilitado}
               onCheckedChange={() => onAlternar(turma)}
             />
-            {nomeCurtoDaTurma(turma)}
+            <span className="flex flex-col gap-1">
+              <span>{nomeCurtoDaTurma(turma)}</span>
+              <span className="text-xs text-muted-foreground">
+                Grupo diário: {gruposDiarios.get(turma) ?? "indisponível"}
+              </span>
+            </span>
           </label>
         );
       })}

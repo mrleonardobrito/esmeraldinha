@@ -141,11 +141,6 @@ export function Professores() {
     }
   }
 
-  /**
-   * Relê turmas e estudantes no portal para um professor já cadastrado — o
-   * caminho para quem foi cadastrado antes de a leitura de estudantes existir.
-   * A senha não é pedida de novo: ela já está guardada, e o servidor a decifra.
-   */
   async function relerDoPortal(professor: Professor) {
     setRelendo(professor.id);
 

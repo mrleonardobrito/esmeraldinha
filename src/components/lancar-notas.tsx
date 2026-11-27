@@ -7,7 +7,11 @@ import {
   IconUpload,
 } from "@tabler/icons-react";
 
+import { CLASSIFICACOES, isClassificacao, type Classificacao } from "@shared/classificacao-de-notas";
+
+import { ChatDeNotas } from "@/components/chat-de-notas";
 import { EnvioDeMaterial } from "@/components/envio-de-material";
+import { CadernetaPorTurma } from "@/components/caderneta-por-turma";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,45 +35,30 @@ import {
 import {
   loadBoletimDaEtapa,
   preencherNotasNoPortal,
+  salvarClassificacaoPadrao,
   type BoletimDaEtapa,
   type Caderneta,
   type EstudanteDaCaderneta,
   type NotaDaCaderneta,
 } from "@/lib/cadernetas";
+import {
+  chaveDaNota,
+  chaveDoEstudante,
+  edicoesParaAvaliacao,
+  edicoesParaClassificacao,
+  edicoesParaNotaFinal,
+  formatarNota,
+  notasBase,
+  paraNumero,
+  resumoDaLinha,
+  type NotasEditadas,
+} from "@/lib/grade-de-notas";
 import { cn } from "@/lib/utils";
 
 type Estado =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; boletim: BoletimDaEtapa };
-
-/** As duas notas da linha do estudante que o portal deixa editar. */
-type CampoDoEstudante = "parcial" | "personalizada";
-
-/**
- * Cada célula editável da grade, indexada por chave. As colunas de avaliação
- * são `matrícula|avaliação`; as duas do estudante, `matrícula|#parcial` e
- * `matrícula|#personalizada` — o `#` as separa de uma avaliação que por acaso
- * se chamasse igual.
- */
-type NotasEditadas = Record<string, string>;
-
-function chaveDaNota(matricula: string, avaliacao: string): string {
-  return `${matricula}|${avaliacao}`;
-}
-
-function chaveDoEstudante(matricula: string, campo: CampoDoEstudante): string {
-  return `${matricula}|#${campo}`;
-}
-
-/** O número como o auxiliar de ensino o digita: vírgula ou ponto. */
-function paraNumero(bruto: string | undefined): number | undefined {
-  if (bruto === undefined || bruto.trim() === "") return undefined;
-
-  const valor = Number(bruto.replace(",", "."));
-
-  return Number.isFinite(valor) ? valor : undefined;
-}
 
 export interface LancarNotasProps {
   caderneta: Caderneta;
@@ -82,17 +71,26 @@ export interface LancarNotasProps {
 
 /**
  * A tela de lançar notas: uma linha por estudante, uma coluna por avaliação da
- * disciplina, mais a nota parcial e a nota personalizada. _Preencher no
- * sistema_ leva tudo o que está preenchido para uma janela do portal já no
- * boletim certo — e para aí. Salvar continua sendo do auxiliar de ensino.
+ * disciplina, mais a classificação, a nota final e as notas da linha.
+ * Classificação, nota final e avaliações se movem juntas: a classificação e a
+ * nota final saem sempre da soma das avaliações. _Preencher no sistema_ leva
+ * tudo o que está preenchido para uma janela do portal já no boletim certo —
+ * e para aí. Salvar continua sendo do auxiliar de ensino.
  */
-export function LancarNotas({
+export function LancarNotas(props: LancarNotasProps) {
+  return <CadernetaPorTurma caderneta={props.caderneta} onClose={props.onClose}>
+    {(caderneta, picker) => <LancarNotasDaTurma {...props} caderneta={caderneta} picker={picker} />}
+  </CadernetaPorTurma>;
+}
+
+function LancarNotasDaTurma({
   caderneta,
   etapa,
   sessionId,
   onClose,
   onGravou,
-}: LancarNotasProps) {
+  picker,
+}: LancarNotasProps & { picker: React.ReactNode }) {
   const [estado, setEstado] = React.useState<Estado>({ status: "loading" });
   /**
    * A disciplina que o auxiliar de ensino escolheu. Nula enquanto ele não
@@ -100,6 +98,11 @@ export function LancarNotas({
    * caderneta. Guardar só a escolha evita o efeito se realimentar.
    */
   const [disciplina, setDisciplina] = React.useState<string | null>(null);
+  /**
+   * The padrão the auxiliar picked on this screen; null until they pick one,
+   * and then the boletim's stored padrão applies.
+   */
+  const [padraoEscolhido, setPadraoEscolhido] = React.useState<Classificacao | null>(null);
   const [editadas, setEditadas] = React.useState<NotasEditadas>({});
   const [enviando, setEnviando] = React.useState(false);
   const [preenchendo, setPreenchendo] = React.useState(false);
@@ -110,7 +113,7 @@ export function LancarNotas({
   React.useEffect(() => {
     let cancelled = false;
 
-    loadBoletimDaEtapa(caderneta.id, etapa, disciplina ?? undefined)
+    loadBoletimDaEtapa(caderneta.id, etapa, disciplina ?? undefined, caderneta.turma)
       .then((boletim) => {
         if (!cancelled) setEstado({ status: "ready", boletim });
       })
@@ -128,35 +131,21 @@ export function LancarNotas({
     return () => {
       cancelled = true;
     };
-  }, [caderneta.id, etapa, disciplina, reloadToken]);
+  }, [caderneta.id, caderneta.turma, etapa, disciplina, reloadToken]);
+
+  const pronto = estado.status === "ready" ? estado.boletim : null;
+  const classificacaoPadrao = padraoEscolhido ?? pronto?.classificacaoPadrao ?? null;
 
   /**
-   * O que o portal já tem, como texto de campo. Trocar de disciplina troca
+   * O que o portal já tem, como texto de campo, com as notas geradas pela
+   * classificação de quem ainda não tem nenhuma. Trocar de disciplina troca
    * este mapa junto: as edições são uma camada por cima dele, e não uma cópia
    * que sobreviveria à troca e lançaria a nota de uma disciplina na outra.
    */
-  const doPortal = React.useMemo(() => {
-    const valores: NotasEditadas = {};
-
-    if (estado.status !== "ready") return valores;
-
-    for (const nota of estado.boletim.notas) {
-      valores[chaveDaNota(nota.matricula, nota.avaliacao)] = String(nota.valor);
-    }
-
-    for (const nota of estado.boletim.notasDoEstudante) {
-      if (nota.parcial !== null) {
-        valores[chaveDoEstudante(nota.matricula, "parcial")] = String(nota.parcial);
-      }
-      if (nota.personalizada !== null) {
-        valores[chaveDoEstudante(nota.matricula, "personalizada")] = String(
-          nota.personalizada,
-        );
-      }
-    }
-
-    return valores;
-  }, [estado]);
+  const doPortal = React.useMemo(
+    () => (pronto && classificacaoPadrao ? notasBase(pronto, classificacaoPadrao) : {}),
+    [pronto, classificacaoPadrao],
+  );
 
   /** O que a tela mostra: o portal, com as edições por cima. */
   const valores = React.useMemo(
@@ -166,6 +155,29 @@ export function LancarNotas({
 
   function recarregar() {
     setReloadToken((atual) => atual + 1);
+  }
+
+  function editar(edicoes: NotasEditadas) {
+    setEditadas((atuais) => ({ ...atuais, ...edicoes }));
+    setAberto(false);
+  }
+
+  async function trocarPadrao(escolhido: Classificacao) {
+    const anterior = classificacaoPadrao;
+    setPadraoEscolhido(escolhido);
+    setErro(null);
+    setAberto(false);
+
+    try {
+      await salvarClassificacaoPadrao(caderneta.id, escolhido, caderneta.turma);
+    } catch (error: unknown) {
+      setPadraoEscolhido(anterior);
+      setErro(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar a classificação padrão.",
+      );
+    }
   }
 
   async function preencher() {
@@ -206,6 +218,13 @@ export function LancarNotas({
       })
       .filter((nota) => nota.parcial !== undefined || nota.personalizada !== undefined);
 
+    // Each row's classificação, as it shows now, is remembered for the other
+    // etapas and disciplinas once the portal window is filled.
+    const classificacoes = boletim.estudantes.flatMap(({ matricula }) => {
+      const { classificacao } = resumoDaLinha(valores, matricula, boletim.avaliacoes);
+      return classificacao ? [{ matricula, classificacao }] : [];
+    });
+
     if (notas.length === 0 && notasDoEstudante.length === 0) {
       setErro("Preencha ao menos uma nota antes de mandar para o portal.");
       return;
@@ -216,8 +235,10 @@ export function LancarNotas({
 
     try {
       await preencherNotasNoPortal(caderneta.id, etapa, notas, {
+        turma: caderneta.turma,
         disciplina: boletim.disciplina,
         notasDoEstudante,
+        classificacoes,
       });
       setAberto(true);
       onGravou();
@@ -232,13 +253,12 @@ export function LancarNotas({
     }
   }
 
-  const pronto = estado.status === "ready" ? estado.boletim : null;
   // Sem disciplina não há avaliação cadastrada: não há o que preencher.
   const semAvaliacao = pronto !== null && pronto.avaliacoes.length === 0;
 
   return (
     <Dialog open onOpenChange={(estaAberto) => !estaAberto && onClose()}>
-      <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-4xl">
+      <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-6xl">
         <DialogHeader>
           <DialogTitle className="font-heading">Lançar Notas</DialogTitle>
           <DialogDescription>
@@ -251,6 +271,8 @@ export function LancarNotas({
             )}
           </DialogDescription>
         </DialogHeader>
+
+        {picker}
 
         {enviando ? (
           <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
@@ -272,6 +294,7 @@ export function LancarNotas({
               sessionId={sessionId}
               professorId={caderneta.professorId}
               cadernetaId={caderneta.id}
+              turma={caderneta.turma}
               semCard
               onGravou={() => {
                 setEnviando(false);
@@ -282,46 +305,97 @@ export function LancarNotas({
           </div>
         ) : (
           <>
-            {pronto && pronto.disciplinas.length > 1 && (
-              <div className="flex items-center gap-2">
-                <Label htmlFor="disciplina" className="shrink-0">
-                  Disciplina
-                </Label>
-                <Select
-                  value={pronto.disciplina ?? undefined}
-                  onValueChange={(escolhida) => {
-                    // As edições eram do boletim anterior; levá-las para a
-                    // outra disciplina lançaria nota no lugar errado.
-                    setEditadas({});
-                    setErro(null);
-                    setAberto(false);
-                    setDisciplina(escolhida);
-                  }}
-                  disabled={preenchendo}
-                >
-                  <SelectTrigger id="disciplina" className="w-64">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <DisciplinasDoSelect
-                      disciplinas={pronto.disciplinas}
-                      disciplinasLancadas={pronto.disciplinasLancadas}
-                    />
-                  </SelectContent>
-                </Select>
+            {pronto && (
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                {pronto.disciplinas.length > 1 && (
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="disciplina" className="shrink-0">
+                      Disciplina
+                    </Label>
+                    <Select
+                      value={pronto.disciplina ?? undefined}
+                      onValueChange={(escolhida) => {
+                        // As edições eram do boletim anterior; levá-las para a
+                        // outra disciplina lançaria nota no lugar errado.
+                        setEditadas({});
+                        setErro(null);
+                        setAberto(false);
+                        setDisciplina(escolhida);
+                      }}
+                      disabled={preenchendo}
+                    >
+                      <SelectTrigger id="disciplina" className="w-64">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <DisciplinasDoSelect
+                          disciplinas={pronto.disciplinas}
+                          disciplinasLancadas={pronto.disciplinasLancadas}
+                        />
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {!semAvaliacao && classificacaoPadrao && (
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="classificacao-padrao" className="shrink-0">
+                      Classificação padrão da turma
+                    </Label>
+                    <Select
+                      value={classificacaoPadrao}
+                      onValueChange={(escolhida) => {
+                        if (isClassificacao(escolhida)) void trocarPadrao(escolhida);
+                      }}
+                      disabled={preenchendo}
+                    >
+                      <SelectTrigger id="classificacao-padrao" className="w-44">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <OpcoesDeClassificacao />
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             )}
 
             <GradeDeNotas
               estado={estado}
-              editadas={valores}
+              valores={valores}
               disabled={preenchendo}
-              onEditar={(chave, valor) => {
-                setEditadas((atuais) => ({ ...atuais, [chave]: valor }));
-                setAberto(false);
-              }}
+              onEditar={editar}
               onTentarDeNovo={recarregar}
             />
+
+            {pronto && !semAvaliacao && (
+              <ChatDeNotas
+                // A new disciplina starts a new conversation.
+                key={pronto.disciplina}
+                cadernetaId={caderneta.id}
+                etapa={etapa}
+                turma={caderneta.turma}
+                disciplina={pronto.disciplina}
+                estudantes={() =>
+                  pronto.estudantes.map(({ matricula }) => ({
+                    matricula,
+                    ...resumoDaLinha(valores, matricula, pronto.avaliacoes),
+                  }))
+                }
+                onNotas={(notas) =>
+                  editar(
+                    Object.assign(
+                      {},
+                      ...notas.map(({ matricula, notaFinal }) =>
+                        edicoesParaNotaFinal(matricula, pronto.avaliacoes, notaFinal),
+                      ),
+                    ),
+                  )
+                }
+                disabled={preenchendo}
+              />
+            )}
 
             {erro && (
               <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -368,6 +442,14 @@ export function LancarNotas({
       </DialogContent>
     </Dialog>
   );
+}
+
+function OpcoesDeClassificacao() {
+  return CLASSIFICACOES.map((classificacao) => (
+    <SelectItem key={classificacao} value={classificacao}>
+      {classificacao}
+    </SelectItem>
+  ));
 }
 
 /**
@@ -422,15 +504,15 @@ function DisciplinasDoSelect({
 
 function GradeDeNotas({
   estado,
-  editadas,
+  valores,
   disabled,
   onEditar,
   onTentarDeNovo,
 }: {
   estado: Estado;
-  editadas: NotasEditadas;
+  valores: NotasEditadas;
   disabled: boolean;
-  onEditar: (chave: string, valor: string) => void;
+  onEditar: (edicoes: NotasEditadas) => void;
   onTentarDeNovo: () => void;
 }) {
   if (estado.status === "loading") {
@@ -480,6 +562,7 @@ function GradeDeNotas({
             <th className="sticky left-0 z-10 bg-muted/40 px-3 py-2.5 text-left font-heading text-xs font-semibold tracking-wide text-muted-foreground uppercase">
               Estudante
             </th>
+            <ColunaFixa titulo="Classificação" />
             {avaliacoes.map((avaliacao) => (
               <th
                 key={avaliacao.nome}
@@ -496,6 +579,7 @@ function GradeDeNotas({
                 </span>
               </th>
             ))}
+            <ColunaFixa titulo="Nota final" nota="soma das avaliações" />
             <ColunaFixa titulo="Nota origem" nota="o portal preenche" />
             <ColunaFixa titulo="Nota calculada" nota="o portal calcula" />
             <ColunaFixa titulo="Nota parcial" />
@@ -509,7 +593,7 @@ function GradeDeNotas({
               estudante={estudante}
               avaliacoes={avaliacoes}
               calculadas={calculadas.get(estudante.matricula)}
-              editadas={editadas}
+              valores={valores}
               disabled={disabled}
               onEditar={onEditar}
             />
@@ -537,17 +621,23 @@ function LinhaDoEstudante({
   estudante,
   avaliacoes,
   calculadas,
-  editadas,
+  valores,
   disabled,
   onEditar,
 }: {
   estudante: EstudanteDaCaderneta;
   avaliacoes: BoletimDaEtapa["avaliacoes"];
   calculadas: BoletimDaEtapa["notasDoEstudante"][number] | undefined;
-  editadas: NotasEditadas;
+  valores: NotasEditadas;
   disabled: boolean;
-  onEditar: (chave: string, valor: string) => void;
+  onEditar: (edicoes: NotasEditadas) => void;
 }) {
+  const { matricula } = estudante;
+  const resumo = resumoDaLinha(valores, matricula, avaliacoes);
+  // The portal shows the personalizada as the nota final whenever it exists,
+  // whatever the avaliações add up to.
+  const personalizadaNoPortal = calculadas?.personalizada ?? null;
+
   return (
     <tr className="border-b last:border-b-0">
       <th
@@ -557,14 +647,36 @@ function LinhaDoEstudante({
         <span className="flex flex-col">
           {estudante.nome}
           <span className="text-xs font-normal text-muted-foreground tabular-nums">
-            {estudante.matricula}
+            {matricula}
           </span>
         </span>
       </th>
 
+      <td className="px-3 py-2 align-middle">
+        <Select
+          value={resumo.classificacao ?? ""}
+          onValueChange={(escolhida) => {
+            if (isClassificacao(escolhida)) {
+              onEditar(edicoesParaClassificacao(matricula, avaliacoes, escolhida));
+            }
+          }}
+          disabled={disabled}
+        >
+          <SelectTrigger
+            className="w-40"
+            aria-label={`Classificação de ${estudante.nome}`}
+          >
+            <SelectValue placeholder="—" />
+          </SelectTrigger>
+          <SelectContent>
+            <OpcoesDeClassificacao />
+          </SelectContent>
+        </Select>
+      </td>
+
       {avaliacoes.map((avaliacao) => {
-        const chave = chaveDaNota(estudante.matricula, avaliacao.nome);
-        const valor = editadas[chave] ?? "";
+        const chave = chaveDaNota(matricula, avaliacao.nome);
+        const valor = valores[chave] ?? "";
         // Uma nota acima do valor da avaliação o portal recusaria: melhor
         // dizer isso aqui, enquanto ainda dá para corrigir.
         const numero = paraNumero(valor);
@@ -577,7 +689,9 @@ function LinhaDoEstudante({
           <td key={avaliacao.nome} className="px-3 py-2 align-middle">
             <CampoDeNota
               valor={valor}
-              onChange={(novo) => onEditar(chave, novo)}
+              onChange={(novo) =>
+                onEditar(edicoesParaAvaliacao(valores, matricula, avaliacoes, avaliacao.nome, novo))
+              }
               disabled={disabled}
               invalido={excedeu}
               rotulo={`Nota de ${estudante.nome} em ${avaliacao.nome}`}
@@ -585,6 +699,26 @@ function LinhaDoEstudante({
           </td>
         );
       })}
+
+      <td className="px-3 py-2 align-middle">
+        <span className="flex flex-col gap-1">
+          <CampoDeNotaFinal
+            valor={resumo.notaFinal}
+            onConfirmar={(notaFinal) =>
+              onEditar(edicoesParaNotaFinal(matricula, avaliacoes, notaFinal))
+            }
+            disabled={disabled}
+            rotulo={`Nota final de ${estudante.nome}`}
+          />
+          {personalizadaNoPortal !== null && (
+            <span className="flex max-w-44 items-start gap-1 text-[0.7rem] leading-tight text-muted-foreground">
+              <IconAlertTriangle className="mt-px size-3 shrink-0 text-destructive" />
+              A nota personalizada do portal sobrepõe esta nota final. Apague-a
+              no portal para valer a soma.
+            </span>
+          )}
+        </span>
+      </td>
 
       {/* A origem e a calculada o portal preenche sozinho; aqui só se leem. */}
       <td className="px-3 py-2 align-middle">
@@ -595,13 +729,13 @@ function LinhaDoEstudante({
       </td>
 
       {(["parcial", "personalizada"] as const).map((campo) => {
-        const chave = chaveDoEstudante(estudante.matricula, campo);
+        const chave = chaveDoEstudante(matricula, campo);
 
         return (
           <td key={campo} className="px-3 py-2 align-middle">
             <CampoDeNota
-              valor={editadas[chave] ?? ""}
-              onChange={(novo) => onEditar(chave, novo)}
+              valor={valores[chave] ?? ""}
+              onChange={(novo) => onEditar({ [chave]: novo })}
               disabled={disabled}
               rotulo={
                 campo === "parcial"
@@ -639,6 +773,49 @@ function CampoDeNota({
       aria-label={rotulo}
       aria-invalid={invalido}
       className={cn("w-20 tabular-nums", invalido && "border-destructive")}
+    />
+  );
+}
+
+/**
+ * The nota final is typed freely and only applied on blur or Enter: splitting
+ * "8," mid-typing would scatter the row before the auxiliar finishes.
+ */
+function CampoDeNotaFinal({
+  valor,
+  onConfirmar,
+  disabled,
+  rotulo,
+}: {
+  valor: number | null;
+  onConfirmar: (notaFinal: number) => void;
+  disabled: boolean;
+  rotulo: string;
+}) {
+  const [rascunho, setRascunho] = React.useState<string | null>(null);
+
+  function confirmar() {
+    const numero = paraNumero(rascunho ?? undefined);
+    if (rascunho !== null && numero !== undefined) onConfirmar(numero);
+    setRascunho(null);
+  }
+
+  return (
+    <Input
+      value={rascunho ?? (valor === null ? "" : formatarNota(valor))}
+      onChange={(evento) => setRascunho(evento.target.value)}
+      onBlur={confirmar}
+      onKeyDown={(evento) => {
+        if (evento.key === "Enter") {
+          evento.preventDefault();
+          confirmar();
+        }
+      }}
+      disabled={disabled}
+      inputMode="decimal"
+      placeholder="—"
+      aria-label={rotulo}
+      className="w-20 font-medium tabular-nums"
     />
   );
 }

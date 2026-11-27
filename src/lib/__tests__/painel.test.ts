@@ -39,6 +39,7 @@ function caderneta(
     id,
     professorId: "prof-1",
     turma: "PRÉ-ESCOLA II - PRÉ-ESCOLA II - C - INTEGRAL",
+    turmas: ["PRÉ-ESCOLA II - PRÉ-ESCOLA II - C - INTEGRAL"],
     turno: "INTEGRAL",
     etapas,
     totalDeEstudantes: 20,

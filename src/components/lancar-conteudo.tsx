@@ -9,6 +9,7 @@ import {
 } from "@tabler/icons-react";
 
 import { ChatDeConteudos } from "@/components/chat-de-conteudos";
+import { CadernetaPorTurma } from "@/components/caderneta-por-turma";
 import { EnvioDeMaterial } from "@/components/envio-de-material";
 import {
   Accordion,
@@ -58,13 +59,20 @@ interface Conversa {
  * manda material de uma aula, ou abre o chat que escreve o que falta num mês
  * ou na etapa inteira.
  */
-export function LancarConteudo({
+export function LancarConteudo(props: LancarConteudoProps) {
+  return <CadernetaPorTurma caderneta={props.caderneta} onClose={props.onClose}>
+    {(caderneta, picker) => <LancarConteudoDaTurma {...props} caderneta={caderneta} picker={picker} />}
+  </CadernetaPorTurma>;
+}
+
+function LancarConteudoDaTurma({
   caderneta,
   etapa,
   sessionId,
   onClose,
   onGravou,
-}: LancarConteudoProps) {
+  picker,
+}: LancarConteudoProps & { picker: React.ReactNode }) {
   const [estado, setEstado] = React.useState<Estado>({ status: "loading" });
   const [enviandoPara, setEnviandoPara] = React.useState<AulaDaCaderneta | null>(null);
   const [conversa, setConversa] = React.useState<Conversa | null>(null);
@@ -73,7 +81,7 @@ export function LancarConteudo({
   React.useEffect(() => {
     let cancelled = false;
 
-    loadAulasDaEtapa(caderneta.id, etapa)
+    loadAulasDaEtapa(caderneta.id, etapa, caderneta.turma)
       .then((aulas) => {
         if (!cancelled) setEstado({ status: "ready", aulas });
       })
@@ -89,7 +97,7 @@ export function LancarConteudo({
     return () => {
       cancelled = true;
     };
-  }, [caderneta.id, etapa, reloadToken]);
+  }, [caderneta.id, caderneta.turma, etapa, reloadToken]);
 
   function recarregar() {
     setReloadToken((atual) => atual + 1);
@@ -113,6 +121,8 @@ export function LancarConteudo({
             {caderneta.turma} <span aria-hidden="true">•</span> {etapa}
           </DialogDescription>
         </DialogHeader>
+
+        {picker}
 
         {conversando ? (
           <ChatDeConteudos
@@ -148,6 +158,7 @@ export function LancarConteudo({
               sessionId={sessionId}
               professorId={caderneta.professorId}
               cadernetaId={caderneta.id}
+              turma={caderneta.turma}
               semCard
               onGravou={() => {
                 setEnviandoPara(null);
