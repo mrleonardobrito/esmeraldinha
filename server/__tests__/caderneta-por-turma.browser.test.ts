@@ -152,8 +152,8 @@ it('registers four turmas de redução and one turma with professor regente with
     await page.goto('http://cadastro.test/');
     await page.getByRole('checkbox', { name: 'Todas as turmas', exact: true }).check();
     expect(await page.getByRole('checkbox').count()).toBe(6);
-    expect(await page.getByText(/Turmas de redução are combined automatically/).count()).toBe(1);
-    await page.getByRole('button', { name: 'Create cadernetas', exact: true }).click();
+    expect(await page.getByText(/As turmas de redução são agrupadas automaticamente/).count()).toBe(1);
+    await page.getByRole('button', { name: 'Criar cadernetas', exact: true }).click();
     await page.getByRole('status', { name: 'Saved cadernetas' }).waitFor();
     await page.getByRole('heading', { name: 'Nova caderneta' }).waitFor({ state: 'hidden' });
     expect(posted).toEqual({ sessionId: 'portal', professorId: 'prof', turmas: selected });

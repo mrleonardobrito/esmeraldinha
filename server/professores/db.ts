@@ -194,6 +194,29 @@ export const SCHEMA = `
     PRIMARY KEY (caderneta_id, turma, etapa, disciplina, matricula)
   );
 
+  -- As áreas de conhecimento e habilidades da ficha de desempenho de uma
+  -- turma, lidas do portal abrindo a ficha de um estudante. Dependem da
+  -- série, não do estudante, então uma leitura vale para a turma inteira.
+  CREATE TABLE IF NOT EXISTS ficha_estruturas (
+    professor_id TEXT NOT NULL REFERENCES professores(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    ficha TEXT NOT NULL,
+    areas_json TEXT NOT NULL,
+    lida_em TEXT NOT NULL,
+    PRIMARY KEY (professor_id, turma)
+  );
+
+  -- A prévia da ficha de desempenho: o que vai ser escrito no portal,
+  -- estudante por estudante, enquanto o auxiliar de ensino a revisa. Guardada
+  -- a cada edição para fechar a janela não custar a revisão.
+  CREATE TABLE IF NOT EXISTS ficha_previas (
+    caderneta_id TEXT NOT NULL REFERENCES cadernetas(id) ON DELETE CASCADE,
+    turma TEXT NOT NULL,
+    previa_json TEXT NOT NULL,
+    atualizada_em TEXT NOT NULL,
+    PRIMARY KEY (caderneta_id, turma)
+  );
+
   -- Classificações are typed by the auxiliar, not scraped. They are keyed by
   -- professor and turma rather than caderneta, so they survive turmas de
   -- redução being regrouped into another caderneta.

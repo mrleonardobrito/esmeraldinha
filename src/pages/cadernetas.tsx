@@ -21,6 +21,7 @@ import {
 } from "@/components/grade-de-cadernetas";
 import { LancarConteudo } from "@/components/lancar-conteudo";
 import { LancarNotas } from "@/components/lancar-notas";
+import { LancarFichaDeDesempenho } from "@/components/lancar-ficha-de-desempenho";
 import {
   ProfessorPicker,
   ProfessorPickerSkeleton,
@@ -103,6 +104,10 @@ export function Cadernetas() {
     caderneta: Caderneta;
     etapa: string;
   } | null>(null);
+  const [lancandoFicha, setLancandoFicha] = React.useState<{
+    caderneta: Caderneta;
+    etapa: string;
+  } | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -161,7 +166,7 @@ export function Cadernetas() {
       .then(() => { if (!cancelled) recarregarCadernetas(); })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        toast.error(cause instanceof Error ? cause.message : "Could not read Grupo diário from the portal.");
+        toast.error(cause instanceof Error ? cause.message : "Não foi possível ler o grupo diário no portal.");
       });
     return () => { cancelled = true; };
   }, [session?.sessionId, recarregarCadernetas]);
@@ -190,6 +195,7 @@ export function Cadernetas() {
         };
         setLancando(reconcileEditor);
         setLancandoNotas(reconcileEditor);
+        setLancandoFicha(reconcileEditor);
         setExcluindo((current) => current ? carregadas.find((item) =>
           item.id === current.id &&
           turmasDaCaderneta(item).join("\0") === turmasDaCaderneta(current).join("\0"),
@@ -304,6 +310,7 @@ export function Cadernetas() {
     setStatus("idle");
     setLancando(null);
     setLancandoNotas(null);
+    setLancandoFicha(null);
     setCadastrando(false);
     setAnalisando(false);
     setExcluindo(null);
@@ -484,7 +491,7 @@ export function Cadernetas() {
                 <div className="flex flex-col gap-0.5">
                   <CardTitle>Cadernetas</CardTitle>
                   <CardDescription>
-                    One row per caderneta, one column per etapa.
+                    Uma linha por caderneta, uma coluna por etapa.
                   </CardDescription>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -536,6 +543,9 @@ export function Cadernetas() {
                     onAbrirBoletim={(caderneta, etapa) =>
                       setLancandoNotas({ caderneta, etapa })
                     }
+                    onAbrirFicha={(caderneta, etapa) =>
+                      setLancandoFicha({ caderneta, etapa })
+                    }
                     onAtualizar={(caderneta) => void atualizarCaderneta(caderneta)}
                     onExcluir={setExcluindo}
                   />
@@ -585,6 +595,14 @@ export function Cadernetas() {
                 sessionId={session.sessionId}
                 onClose={() => setLancando(null)}
                 onGravou={recarregarCadernetas}
+              />
+            )}
+
+            {lancandoFicha && (
+              <LancarFichaDeDesempenho
+                caderneta={lancandoFicha.caderneta}
+                etapa={lancandoFicha.etapa}
+                onClose={() => setLancandoFicha(null)}
               />
             )}
 

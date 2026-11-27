@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SCHEMA } from '../../professores/db';
+import { getPrevia, salvarPrevia } from '../../fichas/store';
 import { reconcileCadernetasDeReducao } from '../reducao';
 import {
   createCaderneta,
@@ -106,6 +107,19 @@ describe('automatic reconciliation of cadernetas de redução', () => {
       expect(db.prepare(`SELECT COUNT(*) AS total FROM ${table}`).get()).toEqual({ total: 5 });
     }
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  it('keeps the ficha de desempenho prévia of a turma that joins a group', () => {
+    const before = fiveCadernetas();
+    const previa = {
+      areas: [0], etapas: [1, 2, 3, 4] as (1 | 2 | 3 | 4)[], gerais: [], naoResolvidos: [], descartadas: [], resposta: '',
+      estudantes: [{ matricula: '1', nome: reducao[2], situacao: 'ATIVO', trechos: [], conceitos: { '0.0': ['RD', 'RD', 'R', 'R'] as ('R' | 'RD' | 'NR' | null)[] } }],
+    };
+    salvarPrevia(db, before[2].id, reducao[2], previa);
+
+    const merged = reconcileCadernetasDeReducao(db, 'p1').find((caderneta) => caderneta.turmas.length === 4)!;
+
+    expect(getPrevia(db, merged.id, reducao[2])).toMatchObject(previa);
   });
 
   it('is idempotent and does not change another professor', () => {

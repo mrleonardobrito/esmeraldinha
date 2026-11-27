@@ -39,7 +39,7 @@ conta.put('/pronouns', exigirSessao, async (context) => {
   const identity = context.get('identidade');
   if (identity.papel !== 'professor') return context.json({ error: 'Access denied.' }, 403);
   const parsed = pronounsSchema.safeParse(await context.req.json().catch(() => null));
-  if (!parsed.success) return context.json({ error: 'Invalid pronouns.' }, 400);
+  if (!parsed.success) return context.json({ error: 'Pronomes inválidos.' }, 400);
   getDb().prepare('UPDATE professores SET pronouns = ? WHERE id = ?')
     .run(parsed.data.pronouns, identity.professorId);
   return context.json(parsed.data);

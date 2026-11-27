@@ -66,6 +66,7 @@ import { periodoLetivoDaTurma, replaceTurmas } from './turmas/store';
 import { reconcileCadernetasDeReducao } from './cadernetas/reducao';
 import { sincronizarEmSegundoPlano } from './cadernetas/sincronizacao';
 import { preenchimentosDeConteudo } from './cadernetas/preenchimento-de-conteudos';
+import { fichaDeDesempenho } from './cadernetas/ficha-de-desempenho';
 import { env } from './env';
 import { createEncryptionPort } from './encryption';
 import { getDb } from './professores/db';
@@ -152,7 +153,7 @@ cadernetas.onError((error, context) => {
     return context.json({ error: error.message }, 404);
   }
   console.error('Failed caderneta request:', error);
-  return context.json({ error: 'Unable to complete the caderneta request.' }, 500);
+  return context.json({ error: 'Não foi possível concluir a solicitação da caderneta.' }, 500);
 });
 
 function acessoAoProfessor(context: { get: (key: 'identidade') => ContaEnv['Variables']['identidade'] }, professorId: string) {
@@ -230,20 +231,21 @@ cadernetas.use('*', async (context, next) => {
   const match = context.req.path.match(/\/api\/cadernetas\/([^/]+)(\/.*)?$/);
   if (!match || ['sessoes', 'turmas'].includes(match[1])) return next();
   const turma = context.req.query('turma');
-  const scoped = /^\/(etapas|estudantes|conteudos|boletim)(\/|$)/.test(match[2] ?? '');
+  const scoped = /^\/(etapas|estudantes|conteudos|boletim|ficha-de-desempenho)(\/|$)/.test(match[2] ?? '');
   if (turma !== undefined || scoped) {
     const caderneta = getCaderneta(getDb(), decodeURIComponent(match[1]));
     if (turma !== undefined && !caderneta.turmas.includes(turma)) {
-      return context.json({ error: 'This turma does not belong to the caderneta.' }, 422);
+      return context.json({ error: 'Esta turma não faz parte desta caderneta. Feche e abra a ficha de novo.' }, 422);
     }
     if (scoped && caderneta.turmas.length > 1 && turma === undefined) {
-      return context.json({ error: 'Select a turma from this caderneta.' }, 422);
+      return context.json({ error: 'Escolha uma turma desta caderneta.' }, 422);
     }
   }
   return next();
 });
 
 cadernetas.route('/', preenchimentosDeConteudo);
+cadernetas.route('/', fichaDeDesempenho);
 
 cadernetas.post('/sessoes', async (context) => {
   const body = await context.req.json().catch(() => null);
@@ -431,7 +433,7 @@ cadernetas.post('/sessoes/:id/envios', async (context) => {
     if (turmaDoEnvio) {
       if (cadernetaId) cadernetaDoPlano(cadernetaId, session.professorId, turmaDoEnvio);
       if (!turmasDoCatalogo(catalogo).includes(turmaDoEnvio)) {
-        return context.json({ error: 'The turma does not belong to this professor.' }, 422);
+        return context.json({ error: 'A turma não pertence a este professor.' }, 422);
       }
     }
 
