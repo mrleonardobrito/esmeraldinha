@@ -112,11 +112,14 @@ A shared PostgreSQL database is acceptable, with module ownership and transactio
 
 ## What exists in this branch
 
-- `server/modules/identity/domain`: existing identity type and pure access predicates.
-- `application/resolve-session.ts`: one real use case with injected read ports.
-- Legacy Hono middleware now calls this use case and the public module API. Existing session and database implementations remain unchanged.
+- `server/modules/identity/domain`: existing identity type and pure access predicates, including `hasDirectAccess`.
+- `server/modules/identity/application`: the two async ports (`IdentityProvider`, `IdentityRepository`), the shared `ApplicationSessions` contract and the identity service (sign-in, per-request session resolution with active-status check, sign-out, session revocation).
+- `server/infrastructure/local`: SQLite/local adapters wrapping the existing conta and professores stores, preserving IDs and the current `/api/conta` contract. `server/infrastructure/sessions.ts`: provider-neutral in-memory sessões da aplicação.
+- `server/app.ts` composes the local bundle; the Hono middleware and the conta/professores routes receive the identity service. Suspending or deleting a professor closes their sessions, and a suspended professor's existing token is denied.
 - Existing caderneta access helper and financial response filter consume the centralized predicates.
-- Vitest unit coverage and a static boundary check for migrated modules.
+- Vitest unit coverage for the service and the local adapters, and a static boundary check for migrated modules.
+
+Not yet implemented: the conta do professor (senha temporária by e-mail and primeiro acesso for professores), the Supabase bundle and binding portal sessions to the actor.
 
 This is not a completed authorization redesign, provider migration, database migration, tenant implementation or security audit. Legacy generic route guards and response filtering remain as compatibility layers.
 

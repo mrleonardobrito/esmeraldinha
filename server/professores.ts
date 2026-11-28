@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 
 import { professorSchema, professorUpdateSchema } from '../shared/professor';
-import { encerrarSessoesDoProfessor } from './conta/sessoes';
+import type { IdentityService } from './modules/identity';
 import { createEncryptionPort } from './encryption';
 import { getDb } from './professores/db';
 import {
@@ -14,97 +14,102 @@ import {
   setProfessorAcesso,
 } from './professores/store';
 
-export const professores = new Hono();
 
-professores.get('/', (context) => {
-  const list = listProfessores(getDb());
-  return context.json(list);
-});
+export function createProfessoresRoutes(identity: IdentityService) {
+  const professores = new Hono();
 
-professores.post('/', async (context) => {
-  const body = await context.req.json().catch(() => null);
-  const parsed = professorSchema.safeParse(body);
+  professores.get('/', (context) => {
+    const list = listProfessores(getDb());
+    return context.json(list);
+  });
 
-  if (!parsed.success) {
-    return context.json(
-      { error: parsed.error.issues[0]?.message ?? 'Dados do professor inválidos.' },
-      400,
-    );
-  }
+  professores.post('/', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    const parsed = professorSchema.safeParse(body);
 
-  try {
-    const professor = await createProfessor(getDb(), createEncryptionPort(), parsed.data);
-    return context.json(professor, 201);
-  } catch (error) {
-    if (error instanceof DuplicateLoginError) {
-      return context.json({ error: error.message }, 409);
+    if (!parsed.success) {
+      return context.json(
+        { error: parsed.error.issues[0]?.message ?? 'Dados do professor inválidos.' },
+        400,
+      );
     }
 
-    console.error('Falha ao cadastrar professor:', error);
-    return context.json({ error: 'Não foi possível cadastrar o professor.' }, 500);
-  }
-});
+    try {
+      const professor = await createProfessor(getDb(), createEncryptionPort(), parsed.data);
+      return context.json(professor, 201);
+    } catch (error) {
+      if (error instanceof DuplicateLoginError) {
+        return context.json({ error: error.message }, 409);
+      }
 
-professores.put('/:id', async (context) => {
-  const id = context.req.param('id');
-  const body = await context.req.json().catch(() => null);
-  const parsed = professorUpdateSchema.safeParse(body);
+      console.error('Falha ao cadastrar professor:', error);
+      return context.json({ error: 'Não foi possível cadastrar o professor.' }, 500);
+    }
+  });
 
-  if (!parsed.success) {
-    return context.json(
-      { error: parsed.error.issues[0]?.message ?? 'Dados do professor inválidos.' },
-      400,
-    );
-  }
+  professores.put('/:id', async (context) => {
+    const id = context.req.param('id');
+    const body = await context.req.json().catch(() => null);
+    const parsed = professorUpdateSchema.safeParse(body);
 
-  try {
-    const professor = await updateProfessor(getDb(), createEncryptionPort(), id, parsed.data);
-    return context.json(professor);
-  } catch (error) {
-    if (error instanceof DuplicateLoginError) {
-      return context.json({ error: error.message }, 409);
+    if (!parsed.success) {
+      return context.json(
+        { error: parsed.error.issues[0]?.message ?? 'Dados do professor inválidos.' },
+        400,
+      );
     }
 
-    if (error instanceof ProfessorNotFoundError) {
-      return context.json({ error: error.message }, 404);
+    try {
+      const professor = await updateProfessor(getDb(), createEncryptionPort(), id, parsed.data);
+      return context.json(professor);
+    } catch (error) {
+      if (error instanceof DuplicateLoginError) {
+        return context.json({ error: error.message }, 409);
+      }
+
+      if (error instanceof ProfessorNotFoundError) {
+        return context.json({ error: error.message }, 404);
+      }
+
+      console.error('Falha ao atualizar professor:', error);
+      return context.json({ error: 'Não foi possível atualizar o professor.' }, 500);
+    }
+  });
+
+  professores.put('/:id/acesso', async (context) => {
+    const body = await context.req.json().catch(() => null) as { liberado?: unknown } | null;
+    if (typeof body?.liberado !== 'boolean') {
+      return context.json({ error: 'Informe se o acesso deve ser liberado.' }, 400);
     }
 
-    console.error('Falha ao atualizar professor:', error);
-    return context.json({ error: 'Não foi possível atualizar o professor.' }, 500);
-  }
-});
-
-professores.put('/:id/acesso', async (context) => {
-  const body = await context.req.json().catch(() => null) as { liberado?: unknown } | null;
-  if (typeof body?.liberado !== 'boolean') {
-    return context.json({ error: 'Informe se o acesso deve ser liberado.' }, 400);
-  }
-
-  try {
-    const professor = setProfessorAcesso(getDb(), context.req.param('id'), body.liberado);
-    if (!body.liberado) encerrarSessoesDoProfessor(professor.id);
-    return context.json(professor);
-  } catch (error) {
-    if (error instanceof ProfessorNotFoundError) {
-      return context.json({ error: error.message }, 404);
+    try {
+      const professor = setProfessorAcesso(getDb(), context.req.param('id'), body.liberado);
+      if (!body.liberado) await identity.closeProfessorSessions(professor.id);
+      return context.json(professor);
+    } catch (error) {
+      if (error instanceof ProfessorNotFoundError) {
+        return context.json({ error: error.message }, 404);
+      }
+      throw error;
     }
-    throw error;
-  }
-});
+  });
 
-professores.delete('/:id', (context) => {
-  const id = context.req.param('id');
+  professores.delete('/:id', async (context) => {
+    const id = context.req.param('id');
 
-  try {
-    deleteProfessor(getDb(), id);
-    encerrarSessoesDoProfessor(id);
-    return context.body(null, 204);
-  } catch (error) {
-    if (error instanceof ProfessorNotFoundError) {
-      return context.json({ error: error.message }, 404);
+    try {
+      await identity.closeProfessorSessions(id);
+      deleteProfessor(getDb(), id);
+      return context.body(null, 204);
+    } catch (error) {
+      if (error instanceof ProfessorNotFoundError) {
+        return context.json({ error: error.message }, 404);
+      }
+
+      console.error('Falha ao excluir professor:', error);
+      return context.json({ error: 'Não foi possível excluir o professor.' }, 500);
     }
+  });
 
-    console.error('Falha ao excluir professor:', error);
-    return context.json({ error: 'Não foi possível excluir o professor.' }, 500);
-  }
-});
+  return professores;
+}

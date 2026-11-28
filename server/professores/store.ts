@@ -76,8 +76,11 @@ export function getProfessorPorLogin(db: DatabaseSync, login: string): Professor
   return row ? toProfessor(row) : null;
 }
 
-/** Localiza o professor pelo CPF e confere sua senha do portal sem expô-la. */
-export async function autenticarProfessor(
+/**
+ * Localiza o professor pelo CPF e confere sua senha do portal sem expô-la.
+ * Não decide o acesso: quem decide é o módulo identity.
+ */
+export async function conferirSenhaDoProfessor(
   db: DatabaseSync,
   encryption: EncryptionPort,
   login: string,
@@ -89,7 +92,7 @@ export async function autenticarProfessor(
   if (!row) return null;
 
   const senhaGuardada = await encryption.decrypt(Buffer.from(row.senha_encrypted));
-  return row.acesso_liberado === 1 && textoConfere(senha, senhaGuardada) ? toProfessor(row) : null;
+  return textoConfere(senha, senhaGuardada) ? toProfessor(row) : null;
 }
 
 /** Lists every professor cadastrado. Never includes the senha. */
