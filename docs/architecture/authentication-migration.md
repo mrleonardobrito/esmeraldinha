@@ -1,194 +1,151 @@
-# Authentication migration: interchangeable infrastructure
+# Authentication migration — small-installation MVP
 
-Status: proposed target; documentation only. Based on the architecture foundation branch from develop. The separate feat/supabase-migration branch is excluded.
+Status: proposed, documentation only. Current scale: four users and one management installation. This is the default implementation guide, not a hypothetical SaaS target. Based on develop through architecture-foundation; feat/supabase-migration is excluded.
 
-## Decision
+## 1. Decision
 
-The application core owns internal identity, authentication workflows, papel de acesso, professor access grants, ownership policies, and application session lifecycle. SQLite/local authentication and Supabase are independent infrastructure implementations of the same application-owned ports. Neither imports the other. The core imports neither.
+Keep one application, two roles and two interchangeable infrastructure implementations. The core owns internal identity, authentication workflows, access status and authorization rules. SQLite/local authentication and Supabase implement the same application-owned async interfaces; neither imports the other. Supabase Auth handles authentication credentials and provider tokens, not product permissions.
 
-Use the existing React, Electron and Hono stack. No dedicated auth microservice, generic database RPC, or full pedagogical migration is required for the identity refactor.
-
-Supabase Auth verifies credentials and manages provider credentials, tokens and recovery; it does not decide product permissions. The core owns identity and access records even when physically persisted in Supabase PostgreSQL. Never duplicate provider password hashes or copy portal passwords into Supabase Auth.
-
-## Dependency direction
+Use React, Electron, Hono and TypeScript as today. For remote access use one trusted hosted Hono process, Supabase Auth and its PostgreSQL database; keep Playwright on the desktop. No new auth microservice, DI framework, ORM, Redis session store, event bus, background queue or generic database RPC. Reuse existing code where it works.
 
 ```mermaid
 flowchart TD
-  H[Hono routes] --> UC[Core identity use cases]
-  UC --> D[Core identity and access policies]
-  UC --> P[Application-owned ports]
-  L[Local infrastructure] -. implements .-> P
-  S[Supabase infrastructure] -. implements .-> P
-  L --> SQ[(SQLite)]
-  S --> A[Supabase Auth]
-  S --> PG[(Private PostgreSQL schema)]
-  C[Composition root] --> L
+  UI[React / Electron] --> H[Hono routes]
+  H --> I[Identity service and access policy]
+  I --> P[Two shared async ports]
+  L[Local auth + SQLite] -. implements .-> P
+  S[Supabase Auth + PostgreSQL] -. implements .-> P
+  I --> M[Shared in-memory application sessions]
+  C[Startup composition] --> L
   C --> S
-  C --> UC
 ```
 
-The composition root selects the implementation once at startup. No provider conditionals in use cases, no provider SDK types, SQL, table names, JWT claims, or transport-specific errors in core contracts. Other modules use identity's public index. Select a complete, compatible identity bundle; do not mix unrelated identity stores and authentication providers accidentally.
-
-## Target layout
+## 2. Minimal code layout
 
 ```text
 server/
   modules/
     identity/
-      domain/
+      domain/                  # existing identity and access-policy
       application/
-        ports/
-          identity-provider.ts
-          user-repository.ts
-          access-repository.ts
-          session-store.ts
-          identity-unit-of-work.ts
-        use-cases/
-      presentation/
+        ports.ts               # two interfaces
+        identity-service.ts    # login, grant, revoke, resolve session
       index.ts
+      __tests__/
   infrastructure/
     local/
-      authentication/
-      repositories/
-      sessions/
-      mappers/
-      database/
+      identity-provider.ts
+      identity-repository.ts   # wrap current SQLite stores
     supabase/
-      authentication/
-      repositories/
-      sessions/
-      mappers/
-      database/
-  composition/
-    local.ts
-    remote.ts
-  app.ts
+      identity-provider.ts
+      identity-repository.ts   # English rows mapped to core
+    sessions.ts                # provider-neutral in-memory session implementation
+  app.ts                       # composition or a small factory called from here
 supabase/
-  migrations/
+  migrations/                  # when implementing the remote adapter
 ```
 
-Move one real slice at a time. Existing server/conta and professores stores become compatibility adapters first; do not move the entire repository in one PR. Export only the public core contracts needed by the composition root. Infrastructure may be grouped by technology rather than embedded in each module; the same dependency rule applies.
+Use plain functions or a small service object with dependency injection. Existing routes remain presentation; no separate command/handler, mapper class, entity base class or unit-of-work framework for every operation. Split files only when they become difficult to understand. Each module exposes index.ts. Keep the domain terminology from CONTEXT.md; new Supabase schema and persisted enum values use English.
 
-## Shared contracts (illustrative)
+## 3. Two shared ports
 
-The contracts use asynchronous methods so synchronous SQLite can implement them without forcing Supabase to imitate synchronous SQL. The types below are illustrative application-owned types, not implemented signatures. Extend them only for concrete use cases. Preserve Portuguese domain vocabulary in core; English physical schema and adapter DTOs are intentional.
+Illustrative target signatures, not implemented in this document:
 
 ```typescript
 interface IdentityProvider {
-  authenticate(input: AuthenticationInput): Promise<VerifiedIdentity>;
-  verify(proof: ProviderProof): Promise<VerifiedIdentity>;
-  provision(input: EnrollmentInput): Promise<EnrollmentResult>;
-  revoke(providerSession: ProviderSessionRef): Promise<void>;
+  authenticate(input: LoginInput): Promise<VerifiedIdentity>;
+  provision(input: EnrollmentInput): Promise<ProvisionedIdentity>;
 }
 
-interface UserRepository {
-  findById(id: UserId): Promise<InternalUser | null>;
-  findByExternalIdentity(identity: ExternalIdentity): Promise<InternalUser | null>;
-  save(user: InternalUser): Promise<void>;
-}
-
-interface AccessRepository {
-  findByProfessor(professorId: ProfessorId): Promise<ProfessorAccess | null>;
-  findByUser(userId: UserId): Promise<ProfessorAccess | null>;
-  save(access: ProfessorAccess, expectedRevision: number): Promise<void>;
-}
-
-interface SessionStore {
-  create(session: ApplicationSession): Promise<void>;
-  find(id: SessionId): Promise<ApplicationSession | null>;
-  revoke(id: SessionId): Promise<void>;
-  revokeByUser(userId: UserId): Promise<void>;
-}
-
-interface IdentityUnitOfWork {
-  run<T>(work: (repositories: IdentityRepositories) => Promise<T>): Promise<T>;
+interface IdentityRepository {
+  findBySubject(subject: string): Promise<InternalUser | null>;
+  findByProfessor(professorId: string): Promise<InternalUser | null>;
+  findById(id: string): Promise<InternalUser | null>;
+  save(user: InternalUser, expectedRevision: number | null): Promise<InternalUser>;
 }
 ```
 
-AuthenticationInput and EnrollmentInput describe product-level requests rather than Supabase email APIs. VerifiedIdentity carries verified external identity (provider, issuer, subject), not trusted product permissions. ProviderProof and ProviderSessionRef are opaque to the core; secret material is handled by infrastructure and never serialized to ordinary DTOs. Define a consistent typed error taxonomy (invalid credentials, unavailable, conflict, expired, not found), expiry semantics, null behavior, optimistic concurrency, and atomicity. IdentityRepositories provides transaction-bound repositories; do not attempt to wrap separate remote HTTP writes in a fake transaction. A server-side PostgreSQL transaction or one transactional RPC can implement the atomic contract.
+LoginInput, EnrollmentInput, VerifiedIdentity, ProvisionedIdentity and InternalUser are application-owned types. A verified identity is not an access grant. A provisioned identity is not necessarily verified. A provider subject is opaque and scoped to the configured provider/issuer. Use one provider per runtime; no need for a separate identity_links table. If an onboarding or recovery capability differs, make the difference explicit in the contract/UX; never claim verification that did not occur. Add recovery/logout provider methods only when those flows are wired. The provider adapter owns provider token handling, validation and cleanup; never expose refresh tokens to core entities or renderer.
 
-Local provisioning must also prove control of the intended account/credential before activation; it must not report email verification it cannot perform. Provider-specific enrollment delivery and recovery UX may differ behind transport adapters; product-level admission and security guarantees may not. A capability unavailable locally must fail explicitly rather than pretending success.
+Implement both ports using the local stores first, then implement the Supabase versions. Use Promise even for SQLite; do not emulate SQLite SQL in Supabase. Return the same domain types and error semantics. A single save is atomic, with a revision check and unique constraints. No generic transaction abstraction is needed for a one-row access transition. Add a real transaction-specific method when a use case needs atomic changes across rows.
 
-| Port | Local implementation | Supabase implementation |
-| --- | --- | --- |
-| IdentityProvider | LocalIdentityProvider (existing local verification behind a port) | SupabaseIdentityProvider |
-| UserRepository | SQLiteUserRepository | SupabaseUserRepository |
-| AccessRepository | SQLiteAccessRepository | SupabaseAccessRepository |
-| SessionStore | MemorySessionStore initially or SQLiteSessionStore | Server-side session store backed by private PostgreSQL or memory for a single process |
-| IdentityUnitOfWork | SQLiteIdentityUnitOfWork | PostgreSQLIdentityUnitOfWork |
-
-Provider sessions and application sessions are distinct. Supabase Auth session validity is not authorization; application session rules are identical in both modes. Session IDs are generated securely; store only token hashes where appropriate. Use shared contract suites against each adapter and fake ports for pure use-case tests. Never hide semantic differences behind identical method names.
-
-## Composition and runtime modes
+Keep the existing in-memory application session mechanism as a shared, provider-neutral implementation, injected into the identity service; no separate session adapter for each provider or persistent session table now. Store token, internal user ID, grant revision and idle expiry; restart signs everyone out. Revoke individual sessions on logout and all sessions for a suspended user. Verify current user status/revision for every protected request, including after re-enable. Provider logout is additional cleanup, not the access authority.
 
 ```typescript
-// Composition only; illustrative.
-const dependencies = mode === 'local'
-  ? createLocalInfrastructure(config)
-  : createSupabaseInfrastructure(config);
-
-const identity = createIdentityModule(dependencies);
+// At startup only; illustrative.
+const identity = createIdentityService({
+  ...(mode === 'local'
+    ? createLocalIdentityInfrastructure(config)
+    : createSupabaseIdentityInfrastructure(config)),
+  sessions: createMemorySessions(),
+});
 ```
 
-Local: trusted local Hono + SQLite + local authentication; database stays on the authorized installation. Remote: hosted Hono + Supabase Auth + private PostgreSQL repositories; the renderer and desktop are untrusted clients of the remote authority. Do not package server-only Supabase adapters/secrets in Electron. If remote auth is introduced before migrating pedagogical data, do not claim that professores can access the auxiliary's local SQLite from another machine. Cross-device access requires a scoped hosted data path first. Never distribute the full auxiliary database or encryption key to professores.
+The two bundles are alternatives for the same authoritative identity data. No automatic fallback, dual writes or implicit synchronization. Provider outage must fail closed in remote mode. Configuration chooses a provider once at startup, not inside each use case.
 
-The two implementations are alternatives for an authoritative data set, not automatic mirrors. No silent fallback to SQLite on remote outages or rejected credentials. No dual writes, implicit synchronization or provider switching during a request. If hybrid deployment is needed, define authority by module/aggregate and design explicit sync separately. Offline access after central revocation cannot be guaranteed; deny protected remote actions when live admission cannot be checked.
+## 4. One new application table in Supabase
 
-## Minimal model: fresh English schema
+Supabase already supplies auth.users. For one auxiliary and a few professores, use a single application-owned table in an unexposed schema, iam.users. Combine internal identity, provider link and admission state in one row. No separate profiles, permissions, roles, grants, organizations or identity_links tables yet.
 
-The core uses its own stable user ID and existing professor/conta IDs, independent of external subjects. A professor cadastro can exist without an application user. For one management installation, use three application-owned tables in private schema iam, in addition to Supabase-managed auth.users:
-
-| Table | Proposed columns |
+| Field | Purpose |
 | --- | --- |
-| users | id UUID PK, role, status, core_account_id UUID nullable, session_revision BIGINT, created_at, updated_at |
-| identity_links | id UUID PK, user_id UUID FK, provider, issuer, subject, created_at |
-| teacher_access | id UUID PK, core_teacher_id UUID, teacher_user_id UUID nullable FK, granted_by_user_id UUID FK, status, revision BIGINT, created_at, updated_at |
+| id UUID PK | Stable internal identity, independent of provider |
+| auth_subject TEXT NULL UNIQUE | Opaque provider identity; null before provisioning |
+| role TEXT | teaching_assistant or teacher |
+| account_id UUID NULL UNIQUE | Existing conta ID for auxiliar |
+| teacher_id UUID NULL UNIQUE | Existing professor ID for teacher |
+| status TEXT | pending, active or suspended |
+| revision BIGINT | Increment on admission or security-sensitive transitions |
+| created_at, updated_at | Basic traceability |
 
-Persist English roles teaching_assistant and teacher, user statuses pending/active/suspended, grant statuses pending/active/suspended/revoked. Map at the repository boundary to core terms. Enforce unique (provider, issuer, subject), unique core_teacher_id and unique non-null teacher_user_id. Active access requires an active teacher user and eligible grant; issuer must be an authorized auxiliar at the time of granting. Use transactional checks and compare-and-set revisions. Do not infer identity from matching email, name or CPF. No hard FK to auth.users is required for portable provider links; missing provider identity fails closed. SQLite may retain legacy Portuguese names behind mappers or adopt the new logical model through migrations; no physical schema parity requirement. Session persistence tables are optional infrastructure details, not a fourth required business entity.
+A professor cadastro may exist without a row in iam.users. A row for the auxiliar references the existing conta; a row for a professor references their existing professor ID. Enforce role-specific references (exactly one of account_id or teacher_id as appropriate), unique provider subject and professor link, active rows requiring a bound subject, and valid status values. Reserve pending rows before provisioning. Do not authorize by email, CPF or name. Do not duplicate password hashes, portal credentials or pedagogical data in iam. No required foreign key to auth.users, so the provider mapping remains replaceable. If a provider identity disappears, deny access until resolved.
 
-Before sharing a deployment across multiple management customers, introduce trusted organization/membership or equivalent ownership boundaries and scope every resource and grant. The single-installation model is not safe for multi-tenant hosting.
+SQLite may retain conta/professores and add only the fields needed for the shared contracts; map legacy names at the boundary. Preserve IDs and one authoritative admission flag. Do not force identical physical schemas. The old acesso_liberado must become a projection or be replaced when switching authority.
 
-## Grant access and login
+## 5. Simple onboarding and login
 
-1. The auxiliar selects an existing professor. The core checks the actor and the target's management scope, reserves a pending internal user/grant with stable IDs, then requests enrollment through the provider port.
-2. In remote mode, the recommended enrollment mechanism is a verified email invitation and an independent application password or approved OTP. A server-only Supabase admin adapter performs invitation delivery. The returned provider ID is a binding candidate, not proof of verified email. Bind the verified external identity only to the reserved internal user. Unrelated existing accounts and ambiguous provider responses require reconciliation; never link by matching email alone.
-3. On successful enrollment, the core atomically activates user and grant if still eligible. A verified provider account without active core access has no application access. Failed or uncertain provisioning stays pending/denied. Do not blindly retry provider creation or delete ambiguous accounts.
-4. On login, resolve verified provider identity -> internal user -> active grant -> existing professorId. Create an application session with the current session and grant revisions. Check live status and revisions on protected requests.
-5. Suspension/revocation updates the core grant first and increments its revision; invalidate application sessions, revoke provider sessions as appropriate, and close/cancel associated portal automation where possible. Restore access with a new revision and fresh authentication. Never revive an old session or let stale acceptance reactivate a revoked grant.
+The auxiliar chooses a registered professor, grants access and supplies the verified-contact destination required by the chosen enrollment flow. Hosted Hono checks the active auxiliary identity and the target professor, reserves a pending internal user, and calls the server-only provider adapter to send an invitation. Supabase Auth manages the invitation and verification. Store the returned subject only against that reserved record; a matching email alone never establishes ownership. The professor accepts, authenticates and the core activates the pending user only if the binding is correct and the revision has not changed. A failed or uncertain invitation remains denied; with four users, reconcile manually rather than building a distributed provisioning system.
 
-CONTEXT.md currently specifies CPF and portal senha. Email invitation with independent credentials is a proposed UX change requiring approval. Native Supabase email/password login does not itself establish portal identity. If CPF + portal senha must remain, design a trusted portal validation and supported provider integration before enabling remote login. Do not silently copy the portal senha into Supabase. Existing local behavior may remain during the incremental refactor, but is not proof of live portal validation.
+For remote mode, prefer a verified email invitation and independent application password or OTP. The current CONTEXT.md specifies CPF plus portal senha; changing to email is a proposed UX change and needs product approval. If the current UX is mandatory, design trusted portal identity validation and a supported exchange before remote launch. Do not copy portal senha into Supabase or trust an Electron assertion. The existing local login can stay during the refactor, but is not live portal validation.
 
-## Authorization and sensitive data
+On login, the provider proves identity; the core loads the matching internal user and requires active status; the application creates an opaque session. On suspension, the core saves suspended status with an incremented revision first, then invalidates sessions and closes/cancels related portal automation. Restore by an authorized action, increment revision and require a fresh authentication. Stale invitation acceptance cannot reactivate a suspended row. Do not require an event bus or durable provisioning journal for this.
 
-Use core policies for actor/action/resource. Every server-side read, list and mutation must constrain trusted professorId and management scope; validate nested turma, matrícula, etapa, avaliação and portal session references. A professor cannot manage access, view another professor's records or read auxiliary financial values. Explicit DTOs exclude portal credentials and financial fields. Do not rely on hiding buttons, UUID secrecy, JWT roles or generic URL inspection alone.
+## 6. Security that is not optional
 
-Keep portal credentials separate, encrypted with the existing OS-backed mechanism where feasible; no portal password in Auth, identity schema, logs or ordinary DTOs. Remote credential storage requires a separate threat model. Never copy the full local database to professor devices.
+- One trusted server-side authorization boundary: every protected list, read, mutation and nested reference is scoped to the authenticated professor's stored ID. The single auxiliar can manage the installation. No client-supplied role/owner, no UUID secrecy, no UI-only restrictions.
+- Explicit professor DTOs omit auxiliary financial values and credentials; other professors' records are never sent to the client. Keep portal credentials encrypted, separate from application auth and preferably local. Never copy the entire auxiliary database or encryption key to another device.
+- Verify provider tokens with supported SDK verification, issuer, audience and expiry; do not trust user-editable metadata, email matching or session retrieval alone. Check active core status and revision regardless of valid provider JWT. No public self-enrollment.
+- Secret/service-role keys, privileged clients and database credentials stay on the hosted server, never Electron. Use HTTPS, rate limits, safe invitation redirects and protected token handling. No bearer/refresh tokens in renderer localStorage or sensitive logs.
+- iam stays outside exposed Data API schemas; deny public/client grants, use least privilege and RLS as defense in depth. If exposing tables, use ownership policies on all operations. Do not use broad authenticated-only policies.
+- Preserve restricted primeiro acesso in local mode; provision remote auxiliar through a trusted operator, not a bundled default password. Bind portal sessions to authenticated actor and target professor, recheck on resume.
+- Before a second independent management customer, implement explicit organization/membership or equivalent trusted scope and negative cross-tenant tests. Four users do not justify weaker isolation within the current installation.
 
-Verify provider tokens with supported SDK verification and check issuer, subject, audience and expiry; never trust user-editable metadata or session retrieval alone. Keep secret/service-role keys and DB credentials hosted only. Use HTTPS, invitation redirect allowlists, rate limits and verified enrollment. Keep iam out of exposed Data API schemas, revoke public/client access, use least-privilege roles and RLS as defense in depth. If a table is exposed later, require ownership policies for all operations, including UPDATE checks. Keep refresh/bearer tokens out of renderer localStorage and logs. Record grant transitions without sensitive payloads. Provider logout alone is not immediate revocation of issued JWTs; live core grant and session checks are mandatory.
+## 7. Deployment and data scope
 
-## Migration sequence
+Local mode remains a trusted single-installation desktop Hono with SQLite. Remote mode uses one hosted Hono process with the Supabase adapter; all remote clients are untrusted. An authenticated professor on another device cannot read the auxiliary's local SQLite simply because Supabase login works. Provide a scoped hosted data path for the relevant pedagogical records before cross-device launch. Move only required data in a separate migration; do not expose raw SQLite, use a generic store RPC or ship the whole database. Do not implement offline remote authorization: if live access cannot be checked, deny remote protected actions.
 
-| Step | Scope | Gate |
+## 8. Incremental migration
+
+| Step | Work | Done when |
 | --- | --- | --- |
-| 1 | Characterize legacy behavior; fix active-session suspension and restricted primeiro acesso | Negative tests |
-| 2 | Extract asynchronous shared ports, use cases and local adapters | Existing API and SQLite behavior preserved |
-| 3 | Add adapter contract suites and explicit composition | Same suite passes with local/fake implementations |
-| 4 | Create fresh Supabase schema, repositories and provider adapter in local environment | Same contract suite, privilege and transaction tests |
-| 5 | Provision auxiliary securely; implement managed grant/enrollment/revoke | No public self-enrollment, no embedded bootstrap password |
-| 6 | Map existing access-enabled professores to pending enrollment, preserve IDs | Approved login UX, no password export |
-| 7 | Select remote bundle at deployment; remove weaker fallback | Backup, rollback drill, live revocation |
-| 8 | Enable scoped remote pedagogical data path | Cross-professor tests; tenant isolation before shared hosting |
+| 1 | Fix suspension of active legacy sessions; characterize current auth | Negative tests pass |
+| 2 | Extract two async ports and identity service, wrap SQLite, reuse memory sessions | Current HTTP/data contracts preserved |
+| 3 | Implement English iam.users schema and Supabase adapters locally | Same contract tests and database privilege tests pass |
+| 4 | Wire auxiliary grant/invitation, login and suspend/restore; provision auxiliary securely | Pending/foreign identities denied; no leaked secrets |
+| 5 | Preserve existing IDs; enroll current professores deliberately; select remote mode | Approved login UX, tested backup/rollback, no weaker fallback |
+| 6 | Provide scoped remote pedagogical data path | Cross-professor read/write tests pass before launch |
 
-Keep legacy HTTP endpoints as compatibility adapters where feasible. acesso_liberado becomes a projection of the authoritative core access grant after cutover, not a second authority. Do not create Supabase migrations until implementation; use the installed CLI's documented migration workflow. No hosted database changes are authorized by this document.
+Keep existing HTTP endpoints where possible. Use local provider tests and the same repository contract tests for Supabase: missing records, unique subjects/professor IDs, stale revision and consistent errors. Test expired/revoked sessions, restoration, pending/wrong identities, cross-professor reads/writes, financial fields, portal ownership, provider outages and denied direct database access. Run pnpm typecheck, pnpm lint, pnpm test and real local Supabase integration tests before deployment.
 
-## Acceptance tests
+## 9. Explicitly deferred
 
-- Run identical repository/session contract suites against local and Supabase implementations: missing records, uniqueness, stale revisions, atomic rollback, revocation and error mapping.
-- Run identity use cases with fake ports, independent of the SDK and database.
-- Valid provider account without active core grant is denied; stale, expired and revoked sessions are denied in both modes.
-- Professor A cannot list/read/write/delete professor B's records, nested resources or portal sessions; no auxiliary financial values or foreign credentials leak.
-- Pending enrollment, wrong identity, duplicate grants, stale invitation and provider outages cannot grant access.
-- Static boundary checks forbid provider dependencies in domain/application and imports between infrastructure implementations. Update the existing architecture test when moving adapters.
-- Run pnpm typecheck, pnpm lint, pnpm test and real local Supabase integration/privilege tests before deployment.
+| Defer | Trigger for reconsideration |
+| --- | --- |
+| Separate grant/role/link tables | Multiple roles, multiple providers per user or multiple grants per professor |
+| Organizations and memberships | Before a second independent management customer |
+| Persistent or distributed sessions / Redis | Multiple API replicas or required session survival across restarts |
+| Generic unit of work | Several use cases actually need multi-repository atomicity |
+| Durable provisioning journal or workers | Enrollment failures or throughput make manual reconciliation impractical |
+| Event bus/outbox, elaborate DDD, monorepo split | Real cross-module delivery, reliability or packaging requirements |
 
-References for implementation: [Supabase Auth](https://supabase.com/docs/guides/auth), [sessions](https://supabase.com/docs/guides/auth/sessions), [RLS](https://supabase.com/docs/guides/database/postgres/row-level-security). Verify current SDK and CLI documentation before implementing. This is a design proposal, not a tested or deployed integration.
+This guide is documentation only. No schema, dependencies, deployed Supabase project or runtime code are changed. Verify current Supabase SDK/CLI docs before implementation: https://supabase.com/docs/guides/auth and https://supabase.com/docs/guides/database/postgres/row-level-security.

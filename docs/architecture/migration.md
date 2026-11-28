@@ -26,6 +26,10 @@ flowchart LR
 
 Keep compatibility exports until all callers are migrated. Avoid a folder-only refactor and avoid introducing a parallel backend. Prefer a single authoritative path. For stateful changes, rollback means restoring a compatible release and data backup, not silently falling back to weaker authentication.
 
+## Default scope for four users
+
+Prioritize identity, access revocation, portal-session ownership and regression tests. Keep a single service per small module, two shared async identity ports and in-memory application sessions. Do not pre-create the full module map or introduce generic transactions, separate grants/roles tables, Redis sessions, queues, event bus, worker or monorepo packages. Refactor other modules only when a change exposes a real problem. The [small-installation authentication guide](authentication-migration.md) is the implementation target; later phases below are conditional, not required for the MVP.
+
 ## Ordered work
 
 | Phase | Scope | Exit criteria |
@@ -38,11 +42,11 @@ Keep compatibility exports until all callers are migrated. Avoid a folder-only r
 | 5 | boletim / fichas | Pure classificação, nota distribution and conceito progression policies; boundary tests for grouped turmas and portal precedence |
 | 6 | portal adapters and operations | Isolate page selectors, normalized DTOs and session state; typed operation lifecycle; safe retries and verification |
 | 7 | assistants | Structured output validation, scope, human approval, privacy-safe context and durable rascunhos if product requires |
-| 8 | Remote identity/data | Supabase Auth adapter, user mappings, explicit organizations/grants, subscriptions, tenant-safe repositories and schema migration; no weaker fallback |
+| 8 | Remote identity/data | Two shared identity ports, Supabase Auth adapter, one English identity table, scoped repositories and schema migration; no weaker fallback. Organizations before a second management customer; subscriptions only when required. |
 | 9 | deployment and observability | Cloud authorization and validated client results; job durability/outbox only where needed; audit and operational metrics |
 | 10 | workspace evolution | Separate apps/packages only when executable boundaries justify it; retire shims and tighten CI rules |
 
-The [authentication migration guide](authentication-migration.md) defines independent SQLite/local and Supabase adapters of identical core-owned async contracts. Migrate and test the local adapter first, then implement the remote bundle. Never silently fall back, dual-write or share concrete infrastructure across bundles. Identity/provider integration can move earlier if its required security gates and contract tests are complete. Shared data hosting must not precede organization isolation. No new dependency, framework or queue is required for phases 0–2.
+The [authentication migration guide](authentication-migration.md) defines independent SQLite/local and Supabase adapters of identical core-owned async contracts. Migrate and test the local adapter first, then implement the remote bundle. Never silently fall back, dual-write or share concrete infrastructure across bundles. Identity/provider integration can move earlier if its required security gates and contract tests are complete. Single-installation remote hosting requires professor-level isolation; a second independent management customer requires organization isolation before onboarding. No new dependency, framework or queue is required for phases 0–2.
 
 ## Known debt intentionally retained in phase 0
 

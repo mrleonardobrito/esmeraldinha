@@ -6,6 +6,25 @@ Status: proposed target with a first integrated slice. Baseline: develop at `42c
 
 Evolve the current desktop monolith into a modular monolith with explicit boundaries, use cases organized by feature (vertical slices), and selective Ports and Adapters. Use DDD for complex domain rules and simple functions for simple operations. Retain React, Hono, Electron, TypeScript, SQLite and Playwright during migration. Use the ubiquitous language in CONTEXT.md; do not translate domain terms into English identifiers.
 
+## Default architecture for the current four-user installation
+
+Treat the context map and module anatomy below as an evolution map, not a folder or implementation checklist. The current target is one modular application and one management installation. Keep existing React, Electron, Hono, TypeScript, SQLite, Playwright and direct typed calls. Add Supabase behind the same async identity ports as the local implementation; see [the small-installation authentication guide](authentication-migration.md).
+
+```text
+server/
+  modules/<module>/
+    index.ts            # public contract
+    domain/            # only where real business rules justify it
+    application/       # service functions, ports.ts when I/O differs
+    __tests__/
+  infrastructure/
+    local/             # SQLite/local adapters
+    supabase/          # remote adapters; English physical schema
+  app.ts               # composition and routes
+```
+
+Start with identity and keep the other existing modules in place. Use simple services and repository functions, not mandatory entities, aggregates, commands, handlers, factories, mappers or folder layers. A repository interface is useful at a real persistence seam, not for every query. Prefer one database, one Hono process, memory sessions and direct calls. For remote use, hosted Hono is authoritative and Electron keeps Playwright. Do not create empty modules, workers, a workspace split, event bus, distributed locks or dedicated audit/subscription systems until a concrete use case warrants them. Preserve security and ownership checks, provider independence and regression tests regardless of user count.
+
 ## Current and target deployment
 
 Today Electron hosts the UI and local Hono API; the API operates SQLite and Playwright. The local application remains the supported deployment during this refactor.
@@ -43,7 +62,7 @@ These are candidate ownership boundaries, not a mandate to create separate packa
 | operations | durable job lifecycle, sync, cancellation, retry and verification | existing synchronization and assisted filling routes |
 | organizations / subscriptions / audit | future access scope, entitlements and traceability | not assumed to exist today |
 
-Core identity, authentication workflows and authorization records remain provider-independent. Local SQLite/auth and Supabase infrastructure implement the same asynchronous application-owned ports. Their physical schemas may differ; map at the boundary and select the bundle only in composition. See [authentication migration](authentication-migration.md). Keep authorization within identity initially; extract a separate authorization module only if the policy surface warrants it. A professor may exist without an Esmeraldinha identity. Before shared hosting, replace the single conta assumption with explicit organization memberships and grants.
+Core identity, authentication workflows and authorization records remain provider-independent. Local SQLite/auth and Supabase infrastructure implement the same asynchronous application-owned ports. Their physical schemas may differ; map at the boundary and select the bundle only in composition. See [authentication migration](authentication-migration.md). Keep authorization within identity initially; extract a separate authorization module only if the policy surface warrants it. A professor may exist without an Esmeraldinha identity. Before hosting a second independent management customer, replace the single conta assumption with explicit organization memberships and grants.
 
 ## Module anatomy
 
