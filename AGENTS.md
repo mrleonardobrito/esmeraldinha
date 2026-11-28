@@ -1,49 +1,43 @@
-# Esmeraldinha
+# Esmeraldinha — development instructions
 
-Automatiza o cadastro de cadernetas dos professores no portal do professor de limoeiro de anadia sob a perspectiva do auxiliar de ensino.
+## Product and sources
 
-O glossário do domínio vive em `CONTEXT.md`.
+Esmeraldinha is an operational and pedagogical assistance application for managing cadernetas in the portal do professor of Limoeiro de Anadia. It serves two actors: the auxiliar de ensino, who manages professores and works on their behalf, and the professor, who can purchase direct access and manage their own cadernetas.
 
-# Regras de negócio
+Read [CONTEXT.md](CONTEXT.md) for the ubiquitous language, business rules and portal labels. The business source is [Esmeraldinha — Funcionamento do Negócio e Regras Operacionais (v2)](https://docs.google.com/document/d/1Uh3mdCZv9Hao_g8_5AJusjtZJLtlKK-d). The portal is the only legally authoritative record. Architecture proposals do not silently override product requirements.
 
-1. Um professor pode solicitar o preenchimento de várias cadernetas
-2. Uma caderneta é composta por:
-   1. Conteúdo de cada aula
-   2. Frequência de cada estudante
-   3. Ficha de desempenho de cada estudante
-   4. Ficha descritiva de cada estudante
-   5. Boletim de notas de cada estudante
-3. A caderneta covers one turma where the professor is regente, or one to four automatically grouped turmas de redução for that professor, including cadernetas already registered separately. The portal's grupo diário identifies this relationship, as defined in `CONTEXT.md`
-4. Uma caderneta só é considerada finalizada quando essas informações estão preenchidas para todas as aulas de todas as 4 etapas do ano letivo
-5. A data de inicialização e finalização de cada uma das 4 etapas do ano letivo depende do calendário acadêmico
-6. O usuário final do sistema é o auxiliar de ensino, que recebe as solicitações dos professores
-7. Cada professor vai enviar o conteúdo de cada caderneta em formato de texto, imagem(manuscrita/digitada) e/ou pdf
-8. Não existe uma ordem correta de envio de conteúdo, o sistema deve saber qual parte da caderneta preencher apenas interpretando o conteúdo enviado
-9. O portal não oferece acesso delegado, então o professor entrega as próprias credenciais ao auxiliar de ensino e o sistema precisa guardá-las com segurança. O `localStorage` usado hoje é apenas andaime de teste, não a solução final
+Before changing architecture, read [architecture](docs/architecture/README.md), [migration guide](docs/architecture/migration.md) and, for identity/access work, [authentication migration](docs/architecture/authentication-migration.md). Distinguish existing behavior from proposed migration behavior.
 
-# Instruções
+## Non-negotiable business rules
 
-1. Desenvolva começando da maneira mais simples de desenvolver aquela funcionalidade e utilize conceitos de arquitetura limpa, DDD, SOLID só quando necessário para o crescimento da aplicação. A única exceção é a linguagem ubíqua, que mantemos desde o início: os termos do domínio definidos em `CONTEXT.md` permanecem em português em prosa, em identificadores de código e em nomes de arquivo; todo o resto — prosa, títulos, comentários e identificadores que não sejam do domínio — é escrito em inglês.
+- The auxiliar de ensino manages only professores and cadernetas under their management. A professor with direct access manages only their own cadernetas; a paid plano is an entitlement, not a papel de acesso. No public self-enrollment into the core.
+- The current business requirement is CPF and portal senha for professor entry. In the local installation, the senha temporária of the conta do auxiliar de ensino must be replaced before any other application screen opens. The sessão do auxiliar and sessão do portal expire after inactivity and are distinct. A remote invitation/email flow is an architecture proposal, not an approved requirement change.
+- Discover turmas, estudantes and aulas from the portal during professor cadastro. Select the correct período letivo before every portal operation. Preserve the full turma name for integration and use the nome curto da turma only for display.
+- A caderneta covers one regente turma or one to four turmas de redução for the same professor. Automatically group existing and new turmas de redução, preserving existing groups where possible and filling vacancies in stable cadastro order. Never merge the estudantes or aulas of different turmas. The grupo diário is a professor–turma relationship, not a global professor attribute.
+- Completion requires all mandatory information in conteúdo, frequência, ficha de desempenho, ficha descritiva and boletim across every relevant aula/estudante and all four etapas. The mês is a display filter, not an independent completion unit.
+- Read the áreas de conhecimento and habilidades from the portal. Conceitos are ordered NR < RD < R and cannot regress between etapas. Estudantes not mentioned with difficulties receive R in selected áreas, subject to the non-regression invariant.
+- Identify notas by matrícula, disciplina and avaliação within the correct turma and etapa. Never write nota parcial or nota calculada pelas avaliações. Apply the documented classificação bands and distribute in 0.5 increments; remember exceptions across etapas and disciplinas. Portal values prevail over local assumptions.
+- Both actors can use chat de conteúdos and chat de notas within their authorized scope. Accept supported text, image and PDF inputs where specified. AI produces proposals, never direct portal writes. The operator reviews and saves in the portal. Verify conteúdo in a fresh sessão do portal; remove only verified rascunhos and preserve pending ones.
 
-## Agent skills
+## Engineering approach
 
-### Issue tracker
+Current implementation target: four users, one management installation. Prefer the simplest implementation that preserves security, business invariants and the ability to change infrastructure. Apply Clean Architecture, DDD and SOLID selectively; no mandatory abstraction for every operation.
 
-Issues and specs live as markdown files under `.scratch/<feature>/` in this repo. See `docs/agents/issue-tracker.md`.
+- Keep React, Electron, Hono, TypeScript and existing infrastructure unless a concrete requirement justifies replacing them. Use a modular monolith, plain functions or small services, and direct calls. Do not create empty modules, event buses, queues, generic units of work or distributed systems for hypothetical scale.
+- Organize new or migrated backend slices under server/modules. A module owns its domain rules and exposes a public index.ts. Do not import another module's internal stores. Domain and application remain independent of Hono, Electron, SQLite, Supabase and Playwright.
+- The core owns internal identity, authentication workflows, papel de acesso, access status and authorization data. Local/SQLite and Supabase are separate infrastructure adapters implementing the same application-owned async ports. Select the adapter bundle in composition only; no imports between adapters, silent fallback or automatic dual writes.
+- Follow the small-installation authentication guide: two initial identity ports, one remote core-owned user table, shared memory sessions and manual reconciliation when necessary. These are target decisions, not implemented facts. Add organizations before onboarding a second independent management customer.
+- Keep domain terms in Portuguese in prose, identifiers and filenames; all other prose and technical names are English. New Supabase physical schema, persisted enum values and adapter DTOs are English; map them to the existing core vocabulary.
+- Protect credentials, tokens, CPF and estudante data. Never copy portal senha into Supabase Auth, expose privileged keys in Electron, or authorize via user-editable metadata. Enforce server-side resource ownership, active access and session revocation; scope nested references and lists. Professor responses must not expose auxiliary financial values or other professores' credentials. A remote login alone does not give secure access to the auxiliary's local SQLite.
 
-### Triage labels
+## Incremental migration and validation
 
-The five canonical roles, used verbatim as `Status:` values. See `docs/agents/triage-labels.md`.
+For each change, identify the business rule, characterize existing behavior with tests, extract only necessary ports/policies, wire the new slice through existing routes, and remove legacy compatibility code only after all callers migrate. Preserve endpoint paths, DTOs, IDs, stored data and portal behavior unless an intentional product change is approved.
 
-### Domain docs
+Run pnpm typecheck, pnpm lint and pnpm test before merge; use targeted Vitest and relevant Playwright/Electron smoke checks when appropriate. Test both infrastructure adapters against the same contracts, including denied access, suspended sessions and cross-professor requests. Keep architecture tests enforcing module boundaries. Document unverified behavior, regressions and migration/rollback requirements; never claim a test was run if it was not.
 
-Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+## Agent workflow
 
-
-## Architecture and incremental migration
-
-Read [architecture](docs/architecture/README.md) and [migration guide](docs/architecture/migration.md) before moving backend functionality. New or migrated slices belong in `server/modules/`; consume their public `index.ts` only. Preserve HTTP contracts and persisted IDs during structural changes. Do not add empty layers, replace providers, or change business rules as a side effect of a refactor. Keep the domain independent of Hono, Electron, SQLite and Playwright. Run the existing tests and architecture checks before merging.
-
-For identity and access changes, follow [authentication migration](docs/architecture/authentication-migration.md). The core owns authentication workflows, internal identity and authorization data. SQLite/local and Supabase are independent infrastructure bundles implementing the same async application ports, selected only in composition. Keep new Supabase schema and adapter DTOs in English and preserve the Portuguese core vocabulary. No provider imports in core, no imports between adapters, no silent fallback or portal password copying. Run shared adapter contract tests.
-
-Current scale: four users, one management installation. Follow the small-installation MVP in the authentication guide as the default, not the full future context map. Prefer simple functions, two shared identity ports, one core-owned user table remotely, in-memory sessions and existing code. Defer extra abstractions and services until needed; never defer ownership checks, credential protection or revocation.
+- Issues and specs: .scratch/<feature>/; use docs/agents/issue-tracker.md and docs/agents/triage-labels.md when present.
+- Domain documentation: single CONTEXT.md plus docs/adr/. Use docs/agents/domain.md when present.
+- Record material business decisions in CONTEXT.md or the requirements source, and architectural decisions in docs/adr/ or the relevant architecture guide. Do not turn an implementation suggestion into a business invariant without approval.

@@ -1,325 +1,256 @@
 # Context: Esmeraldinha
 
-Esmeraldinha fills in cadernetas on the portal do professor of Limoeiro de Anadia on behalf of professores, driven by the auxiliar de ensino.
+Esmeraldinha is an operational and pedagogical assistance application for the cadernetas of Limoeiro de Anadia. The portal do professor is the official system and the only place where a caderneta has legal validity. The application organizes, automates and assists the work of both the auxiliar de ensino and the professor, with security, traceability and human review.
 
-Domain terms are Portuguese and are never translated — in prose, in code identifiers, or in filenames. Everything around them is English. Where the portal shows a different label for a term, the label is recorded so an agent reading the screen can map the two.
+Business source: [Esmeraldinha — Funcionamento do Negócio e Regras Operacionais (v2)](https://docs.google.com/document/d/1Uh3mdCZv9Hao_g8_5AJusjtZJLtlKK-d), sections 1–5. This context describes product requirements, not proof that every feature is already implemented.
 
-## Language
+Domain terms remain Portuguese in prose, code identifiers and filenames; surrounding technical prose is English. Portal labels are recorded for integration. English names in a new infrastructure schema are mapped at the boundary, not adopted as core vocabulary.
 
-### Pessoas
+## Pessoas, acesso e segurança
 
 **auxiliar de ensino**:
-The person who fills in cadernetas on behalf of professores and manages their access to Esmeraldinha.
-_Avoid_: assistant, operador, usuário, admin
-
-**papel de acesso**:
-The identity that determines what a signed-in person can reach. An **auxiliar de ensino** can manage professores and every caderneta; a **professor** can only view and fill in their own cadernetas. The role is an authorization boundary, not a freemium entitlement.
-_Avoid_: role, permission
-
-**conta do auxiliar de ensino**:
-The single account the auxiliar de ensino signs into Esmeraldinha with. Carries a login, a senha, and the perfil (nome, e-mail, foto). It exists because the app holds the credenciais do professor: only whoever knows the senha gets to them.
-_Avoid_: conta de usuário, account, perfil
-
-**senha temporária**:
-The senha the conta do auxiliar de ensino is born with, read from the environment and identical in every install. It only survives the primeiro acesso: nothing else in the app opens until it is replaced by a senha definitiva, kept as a hash.
-_Avoid_: senha padrão, temporary password
-
-**primeiro acesso**:
-The first entry into Esmeraldinha, where the senha temporária is exchanged for the senha definitiva. The only screen a conta with a senha temporária can reach.
-_Avoid_: onboarding, first login
-
-**sessão do auxiliar**:
-The proof that whoever is at the keyboard has signed into the conta do auxiliar de ensino, expiring after an idle period. Not to be confused with a sessão do portal, which is a browser opened with the credenciais of one professor.
-_Avoid_: login, sessão de usuário
+The person responsible for centralized management at the escola. Registers professores, manages their credenciais and fills cadernetas on their behalf within the auxiliary's management scope. Can grant or suspend direct application access for a professor under that scope.
+_Avoid_: assistant, operador, admin
 
 **professor**:
-The teacher a caderneta belongs to. They can enter Esmeraldinha with the same CPF and senha used in the portal, and can only access their own cadernetas.
+The owner of a caderneta. May have an auxiliar de ensino fill it on their behalf or purchase direct access to Esmeraldinha and independently view, fill and manage only their own cadernetas. The specified direct login uses the same CPF and senha as the portal.
 _Avoid_: teacher, docente
 
-**credenciais do professor**:
-The login (a CPF), senha and escola a professor hands over so the auxiliar de ensino can act as them on the portal. Esmeraldinha stores these by necessity: the portal has no delegated access.
-_Avoid_: credentials, account
+**papel de acesso**:
+The authorization category of an authenticated person: auxiliar de ensino or professor. Defines which actions and resources the person can reach. A professor's resources are scoped to that professor; an auxiliary's resources are scoped to their management. A papel de acesso is not a paid entitlement.
+_Avoid_: role, permission (in core domain vocabulary)
 
-### Portal
+**plano**:
+The paid modality through which a professor contracts direct access to Esmeraldinha. Does not change the papel de acesso or broaden resource ownership. Pricing, billing, renewals, expiration and plan tiers are not specified in the v2 requirements.
+
+**acesso direto do professor**:
+The ability of a professor to enter Esmeraldinha and manage their own cadernetas, rather than relying only on the auxiliar de ensino. The current migration direction allows the auxiliary to grant, suspend and restore access. A cadastro alone does not imply access. The commercial entitlement and the operational grant are distinct concepts; their exact commercial lifecycle is not specified.
+_Avoid_: treating cadastro, plano and papel de acesso as equivalent
+
+**conta do auxiliar de ensino**:
+The account used by the auxiliar de ensino to enter Esmeraldinha, with login, senha, nome, e-mail and foto. The present installation has a single management account; that deployment assumption is not a general business rule.
+_Avoid_: perfil (when referring to the entire conta)
+
+**senha temporária**:
+The initial local conta senha, defined in the environment. Must be replaced by a senha definitiva before the rest of the application becomes accessible. Store the definitive password as a password hash, not plaintext.
+_Avoid_: senha padrão (after primeiro acesso)
+
+**primeiro acesso**:
+The mandatory troca of the senha temporária for a senha definitiva. While the temporary senha is active, no other application screen opens.
+_Avoid_: treating this as optional onboarding
+
+**sessão do auxiliar**:
+Proof that the auxiliar de ensino has authenticated in Esmeraldinha. Expires after inactivity. Distinct from the sessão do portal.
+_Avoid_: login, sessão do portal
+
+**sessão da aplicação**:
+The authenticated Esmeraldinha session of an auxiliar de ensino or professor. Its access must follow the current papel de acesso and access status. This is distinct from an external provider token and from a sessão do portal. Live revocation is a security requirement of the migration.
+
+**credenciais do professor**:
+Nome, login (CPF), senha and escola used to authenticate in the portal. The auxiliar de ensino uses them to act on behalf of the professor, because the portal does not offer delegated access (existing domain constraint). Keep these sensitive data separate from application identity and protect them at rest; never treat them as a general-purpose application credential store.
+_Avoid_: equating portal credentials with provider credentials
+
+## Portal e integração
 
 **portal**:
-The portal do professor of Limoeiro de Anadia. The external system Esmeraldinha writes into, and the only place a caderneta legally exists.
-_Avoid_: site, sistema externo
+The portal do professor of Limoeiro de Anadia. Official and legally authoritative system for cadernetas. When portal data conflicts with local proposals or cached values, the portal prevails.
+_Avoid_: treating a local snapshot as a legally valid caderneta
 
 **escola**:
-The school a professor logs into the portal under. Part of the credenciais do professor, alongside login and senha.
-_Avoid_: school, unidade
+The school used in the professor's portal login. Part of the credenciais do professor.
+_Avoid_: organization or workspace (not equivalent)
 
 **sessão do portal**:
-An authenticated session on the portal, opened with the credenciais do professor and expiring after an idle period.
-_Avoid_: session, login
+An authenticated portal session opened with the credenciais of a professor. Expires after inactivity. Selects the appropriate período letivo before reading or writing; distinct from the sessão da aplicação.
 
-### Estrutura
+**período letivo**:
+The portal partition selected in _Configurações de ambiente_, e.g. `2026` for regular turmas or `2026 EJA` for Educação de Jovens e Adultos. Each has its own etapas and turmas. A professor can work in multiple períodos letivos; preserve the período letivo where each turma was discovered.
+_Avoid_: calendário acadêmico, ano letivo, ambiente (as interchangeable terms)
+
+## Estrutura das cadernetas
 
 **caderneta**:
-The record a professor must keep across the school year. It covers one turma
-where the professor is regente, or one to four turmas de redução for that
-professor. Turmas de redução are grouped automatically, including existing
-cadernetas; grouping is not an optional cadastro setting. Composed of the five
-partes below, and finished only once the
-required information is filled in for every aula and estudante of every
-included turma across all four etapas.
+The record a professor keeps over the school year, composed of conteúdo, frequência, ficha de desempenho, ficha descritiva and boletim. Covers one turma where that professor is regente or one to four turmas de redução for the same professor. Completion requires all mandatory information for the aulas and estudantes of every included turma throughout the four etapas, according to each parte's granularity.
 _Avoid_: diário, registro, notebook
 
 **turma**:
-A class group. Discovered on the portal during the cadastro do professor, never
-typed: the portal is what knows which turmas a professor works in. Owns its
-estudantes and aulas, which remain associated with that turma when several
-turmas de redução share a caderneta. Whether the professor is regente or the
-turma is a turma de redução is specific to that professor's relationship with
-the turma, as identified by the grupo diário.
+Discovered automatically from the portal during professor cadastro, never entered manually. Has its own estudantes, aulas and período letivo. These associations remain distinct even when several turmas share a caderneta.
 _Avoid_: class, grupo
 
 **regente**:
-The professor's relationship with a turma when the portal's grupo diário
-identifies them as responsible for it as regente. A caderneta for this
-relationship covers one turma. This designation applies to the relationship
-between professor and turma, not to the professor across all their turmas.
-_Avoid_: titular, papel de acesso
+A professor's relationship with a turma identified by the portal's grupo diário, e.g. `REGENTE MANHÃ`. Generates an exclusive caderneta for that turma. Not a global attribute of the professor or a papel de acesso.
 
 **turma de redução**:
-A turma whose grupo diário identifies redução for that professor. One to four
-turmas de redução for the same professor compose a single caderneta
-automatically. Existing groups keep their membership when possible; additional
-turmas fill available places in stable cadastro order, with at most four per
-caderneta. A turma where the professor is regente keeps its separate caderneta.
-The designation belongs to the relationship between professor and turma;
-it is not an intrinsic property of the turma.
-_Avoid_: turma reduzida, turma de regência
-
-**nome curto da turma**:
-What a turma is called on screen, derived from the name the portal writes. The
-portal spells a turma as `<série> - <turma> - <turno>`, repeating the série and
-appending the turno — `PRÉ-ESCOLA II - PRÉ-ESCOLA II - C - INTEGRAL`. Only the
-middle identifies it (`PRÉ-ESCOLA II - C`), so that is what is shown; the full
-name stays the stored one, since it is what the portal and the caderneta key on.
-_Avoid_: nome amigável, display name
-
-**turno**:
-The shift a turma runs in — `MATUTINO`, `VESPERTINO` or `INTEGRAL`. The portal
-has no field for it: it writes the turno at the end of the turma's name, so it
-is read from there rather than asked for.
-_Avoid_: shift, período
-
-**etapa**:
-One of the four periods the school year is divided into. Its start and end dates come from the calendário acadêmico.
-_Avoid_: term, período, bimestre
-
-**calendário acadêmico**:
-The external academic calendar that dictates each etapa's start and end dates.
-_Avoid_: calendar, cronograma
-
-**período letivo**:
-The portal's own partition of a school's year, chosen on its _Configurações de
-ambiente_ dialog before anything else — `2026` for the regular turmas, `2026
-EJA` for the EJA ones. Each período letivo has its own etapas and turmas, and
-the portal session lives in one at a time, so every turma is remembered with
-the período letivo it was found in and the session moves there before reading
-or writing it. A professor may have turmas in more than one.
-_Avoid_: calendário letivo, ano letivo, ambiente
-
-**mês**:
-A month within an etapa. An etapa spans two or three of them. Purely a way of narrowing what you are looking at — it carries no completeness of its own.
-_Avoid_: month, período
+A turma whose grupo diário starts with `REDUÇÃO` for a specific professor. One to four such turmas belonging to the same professor are automatically grouped into a caderneta, including existing cadernetas during updates. Preserve existing groups where possible and fill available slots in stable cadastro order, maximum four. Never merge the underlying aulas or estudantes.
+_Avoid_: turma reduzida
 
 **grupo diário**:
-The portal field labeled _Grupo diário_, whose value identifies whether the
-professor is regente of the selected turma or that turma is a turma de redução
-for them. A value beginning with the word `REDUÇÃO` identifies redução:
-`REDUÇÃO MANHÃ`, `REDUÇÃO TARDE` and `REDUÇÃO NOITE` are examples, and the
-portal also uses a professor's name, as in `REDUÇÃO VITORIA`. `REGENTE MANHÃ`
-is an observed value for regente. An unread or ambiguous field remains unknown.
-_Avoid_: redução, turno
+Portal field identifying the professor–turma relationship. Examples: `REGENTE MANHÃ`, `REDUÇÃO MANHÃ`, `REDUÇÃO TARDE`, `REDUÇÃO NOITE`, `REDUÇÃO VITORIA`. A value beginning with REDUÇÃO identifies a turma de redução. An unread or ambiguous value must not be assumed to identify a relationship (existing integration safeguard).
+_Avoid_: turno, redução (as the name of the field)
 
 **redução**:
-The designation in the grupo diário that marks a turma de redução for the
-professor. The portal writes it as `REDUÇÃO MANHÃ`, `REDUÇÃO TARDE`,
-`REDUÇÃO NOITE` or a named value such as `REDUÇÃO VITORIA`. The suffix is read
-from that field independently of the turno
-written in the turma's name.
-_Avoid_: grupo diário, turno
+The designation extracted from grupo diário for that professor. Its suffix may be a turno or a name; it is independent of the turno extracted from the turma name.
+
+**nome curto da turma**:
+Display-only central identifier extracted from the full portal name, e.g. `PRÉ-ESCOLA II - C` from `PRÉ-ESCOLA II - PRÉ-ESCOLA II - C - INTEGRAL`. Keep the full name as the integration key.
+_Avoid_: replacing the stored portal name
+
+**turno**:
+`MATUTINO`, `VESPERTINO` or `INTEGRAL`, extracted from the end of the turma name.
+
+**etapa**:
+One of four divisions of the school year, with start/end dates defined by the calendário acadêmico.
+_Avoid_: bimestre, período letivo
+
+**calendário acadêmico**:
+The academic calendar that determines the start and end of each etapa.
+
+**mês**:
+A subdivision used to filter the display within an etapa. Has no independent completeness criterion.
 
 **aula**:
-One dated lesson in a turma. The unit of completeness: a caderneta advances one aula at a time.
-_Avoid_: lesson, class, dia
+A dated lesson in a turma, the basic unit of progress of a caderneta.
+_Avoid_: dia (several aulas can share one date)
 
 **estudante**:
 A student enrolled in a turma, named as such by the portal.
-_Avoid_: aluno, student, criança
+_Avoid_: aluno, student
 
 **matrícula**:
-An estudante's enrolment in a turma, carrying a situação (e.g. `ATIVO`) and a data da matrícula. The boletim is keyed by matrícula, not by person.
-_Avoid_: enrolment, registration
+An estudante's enrollment in a turma, carrying an identifier, situação (e.g. ATIVO) and data da matrícula. Boletim matching uses matrícula, never the estudante's name alone.
 
-### Partes da caderneta
+## As cinco partes da caderneta
+
+| Parte | Portal screen | Scope |
+| --- | --- | --- |
+| conteúdo | Lançamento de Conteúdo | Each aula, respecting its ordem da aula |
+| frequência | Lançamento de Presença | Each estudante in each dated aula of the turma |
+| ficha de desempenho | Ficha Desempenho | Each estudante, área de conhecimento, habilidade and etapa |
+| ficha descritiva | Ficha Descritiva / Monitoramento | Individual descriptive follow-up for each estudante over the etapa |
+| boletim | Resultado de Avaliação | Each estudante's notas by etapa, disciplina and avaliação |
 
 **conteúdo**:
-What was taught in each aula. Filled in on the portal's _Lançamento de Conteúdo_ screen.
-_Avoid_: content, plano de aula
-
-**frequência**:
-Attendance of each estudante at each aula. Filled in on the portal's _Lançamento de Presença_ screen.
-_Avoid_: presença, attendance, chamada
-
-**ficha de desempenho**:
-The performance sheet for each estudante. The portal's _Ficha Desempenho_ screen.
-_Avoid_: performance sheet, avaliação
-
-**ficha descritiva**:
-The descriptive sheet for each estudante. The portal's _Ficha Descritiva/Monitoramento_ screen.
-_Avoid_: descriptive sheet, relatório, parecer
-
-**boletim**:
-The grade grid holding every estudante's notas for an etapa. The portal's _Resultado de Avaliação_ screen. Filling it in requires the etapa's avaliações to already exist.
-_Avoid_: notas, report card, resultado
-
-### Campos
+What was taught in an aula. Contains código CR, desenvolvimento, ferramentas, recuperação and interação; respects the ordem da aula.
 
 **ordem da aula**:
-An aula's position within its dia.
-_Avoid_: order, posição
+The aula's position within a dia.
 
 **código CR**:
-The curriculum reference recorded against an aula's conteúdo.
-_Avoid_: codigo, referência curricular, BNCC
+Curriculum reference recorded for an aula.
 
 **desenvolvimento**:
-The narrative of how an aula was taught. The portal labels this field _Desenvolvimento / Metodologia_.
-_Avoid_: metodologia, description, conteúdo
+Narrative of what was taught and how. Portal label: _Desenvolvimento / Metodologia_.
+_Avoid_: metodologia (as the canonical domain name)
 
 **ferramentas**:
-The resources used in an aula. The portal labels this field _Ferramentas Utilizadas_.
-_Avoid_: recursos, materiais, tools
+Resources used in an aula. Portal label: _Ferramentas Utilizadas_.
 
 **recuperação**:
-Whether an aula was a make-up lesson.
-_Avoid_: makeup, reforço
+The recuperação marking for an aula.
 
 **interação**:
-Whether an aula involved interaction, recorded per aula alongside recuperação.
-_Avoid_: interaction, participação
+The interação marking for an aula.
 
-**avaliação**:
-An assessment an etapa's notas are given against, with a nome, tipo (e.g. `OBSERVAÇÃO`, `TRABALHO EM GRUPO`, `AVALIAÇÃO/PROVA`), data and valor. Created on the portal's _Cadastro de Avaliação_ screen before the boletim can be filled in.
-_Avoid_: assessment, prova, atividade
+**frequência**:
+The presença record of each estudante matriculado in each aula. Canonical domain term is frequência; the portal screen says Presença.
 
-**disciplina**:
-A subject a turma is taught. Each turma in a caderneta may have several
-disciplinas, each with its own boletim for that turma. The portal only offers
-it once the etapa has an avaliação, so no disciplina means no avaliação has
-been registered yet.
-_Avoid_: subject, matéria, componente
+**ficha de desempenho**:
+The evaluation of each estudante across the áreas de conhecimento and their habilidades, organized by etapa.
 
-**nota**:
-What one estudante scored on one avaliação — one cell of the boletim, where a
-student's row meets an avaliação's column. Within its turma, keyed by
-matrícula, disciplina and avaliação, never by name: the name is what a
-professor writes, the matrícula is what the portal stores.
-_Avoid_: grade, score, pontuação
+**ficha descritiva**:
+The individual descriptive acompanhamento of an estudante throughout an etapa.
 
-**nota personalizada**:
-A grade the professor sets on an estudante's row directly, outside any
-avaliação. Editable, unlike the ones the portal computes.
-_Avoid_: custom grade, nota manual
+**boletim**:
+The grid of notas for a turma, etapa and disciplina. Requires the corresponding avaliações to exist on the portal before lançamento.
 
-**nota parcial**:
-A grade the portal computes for an estudante's row and shows read-only,
-alongside the **nota calculada pelas avaliações**. Esmeraldinha reads both and
-writes neither.
-_Avoid_: partial grade, prévia
-
-**nota final da etapa**:
-The grade an estudante closes an etapa with, written on their row of the
-boletim. Editable, unlike the nota parcial and the nota calculada.
-_Avoid_: final grade, média
-
-### Ficha de desempenho
+## Ficha de desempenho
 
 **área de conhecimento**:
-A group of habilidades in the ficha de desempenho: one per componente
-curricular (Língua Portuguesa, Matemática…) and, in some séries,
-_Sócio-afetivos_; in Educação Infantil, the campos de experiência. Which áreas
-a ficha has depends on the série, so they are read from the portal, never
-assumed. The auxiliar de ensino chooses which áreas to fill, for every
-estudante of the turma at once.
-_Avoid_: disciplina, componente, matéria
+Group of habilidades determined by the série: curricular components, Sócio-afetivos or campos de experiência in Educação Infantil, as applicable. Read from the portal, never assume a fixed list. Both the auxiliar de ensino and the professor can select áreas for batch filling for all estudantes of the authorized turma.
+_Avoid_: disciplina (the concepts are not interchangeable)
 
 **habilidade**:
-One item an estudante is assessed on in the ficha de desempenho, numbered
-within its área (`1°`, `2°`…). The portal labels the column _Descritores_.
-_Avoid_: descritor, skill, competência
+An evaluation item within an área de conhecimento; portal label _Descritores_.
 
 **conceito**:
-How an estudante did in one habilidade in one etapa: `R` (realiza), `RD`
-(realiza com dificuldades) or `NR` (não realiza), ordered `NR < RD < R`. A
-conceito never decreases from one etapa to the next, without exception.
-_Avoid_: nota, resposta, avaliação
+The result for a habilidade of an estudante in an etapa: NR (não realiza), RD (realiza com dificuldades) or R (realiza). Ordered NR < RD < R. A conceito must never decrease from one etapa to the next.
+_Avoid_: nota, classificação
 
 **observação**:
-What the professor says about an estudante's desempenho, sent as text, image
-or PDF. An estudante the professor does not mention did well: `R` in every
-habilidade of the chosen áreas.
-_Avoid_: parecer, comentário
+Information on an estudante's desempenho, submitted by the professor to the auxiliar de ensino or directly in Esmeraldinha, as text, image or PDF. An estudante not mentioned with difficulties receives R in every habilidade of the selected áreas. The non-regression rule always applies.
 
-### Classificação de notas
+## Boletim, avaliações e classificação
+
+**avaliação**:
+An item against which notas are recorded, with nome, tipo, data and valor. Must already be registered for the etapa in _Cadastro de Avaliação_ before filling the boletim. Existing portal examples of tipo: OBSERVAÇÃO, TRABALHO EM GRUPO, AVALIAÇÃO/PROVA.
+
+**disciplina**:
+Subject of a turma with its own boletim for an etapa.
+_Avoid_: área de conhecimento (when referring to the boletim)
+
+**nota**:
+An estudante's value for an avaliação. Keyed within the turma and etapa by matrícula, disciplina and avaliação, never by name alone.
+
+**nota personalizada**:
+An editable value on an estudante's boletim row, outside an individual avaliação.
+
+**nota parcial**:
+Read-only value calculated by the portal. Esmeraldinha reads but never writes it.
+
+**nota calculada pelas avaliações**:
+Read-only value calculated by the portal from avaliações. Esmeraldinha reads but never writes it.
+
+**nota final da etapa**:
+Editable value closing the estudante's etapa.
 
 **classificação**:
-How an estudante did in their turma: _Acima da média_ (nota final da etapa of
-8 to 10), _Na média_ (6 to less than 8) or _Abaixo da média_ (less than 6),
-scaled when an etapa's avaliações do not add up to 10. Choosing one generates
-the top of its band (10, 7 or 5), split across the avaliações in steps of
-0,5; editing the nota final or an avaliação moves the classificação to the
-band the sum falls in. Remembered per estudante of the turma, across every
-etapa and disciplina, when it differs from the classificação padrão; an
-estudante who matches the padrão keeps following it. The portal's notas win
-when they disagree.
-_Avoid_: conceito, nível, faixa
+The estudante's classification band. On the 10-point scale:
+
+| Classificação | Nota final | Generated target |
+| --- | --- | --- |
+| Acima da média | 8 to 10 | 10 |
+| Na média | 6 to less than 8 | 7 |
+| Abaixo da média | Less than 6 | 5 |
+
+Scale proportionally when the sum of avaliação values differs from 10. Distribute the generated target across avaliações in increments of 0.5. Remember exceptions to classificação padrão across later etapas and disciplinas for the estudante of that turma. Portal values prevail when they disagree.
+_Avoid_: conceito, nível
 
 **classificação padrão**:
-The classificação an estudante of a turma gets while they have neither notas
-on the portal nor a classificação of their own. Starts at _Acima da média_,
-so an empty boletim opens with 10 for everyone.
-_Avoid_: default, classificação geral
+Default classification for estudantes without portal notas or a remembered exception. Initially Acima da média, so an empty boletim starts at 10 on the standard scale.
 
-**chat de notas**:
-The conversation the auxiliar de ensino has with the agent from _Lançar
-Notas_ about one etapa and disciplina ("a turma foi acima da média, menos
-X"). The agent only decides notas finais; the split into avaliações and the
-classificação follow the same rules as the grid. Nothing reaches the portal
-from it.
-_Avoid_: assistente de notas, IA
+Existing behavior refinement retained from the previous context: editing the nota final or an avaliação recomputes the classification band; estudantes matching the padrão keep following it. Confirm this against implementation tests before changing behavior; v2 does not detail the recalculation mechanics.
 
-### Chat de conteúdos
+## Assistentes conversacionais e revisão humana
+
+Both chats are available to the auxiliar de ensino acting within management scope and to the professor acting on their own cadernetas. They assist with proposals; neither writes to the portal directly.
 
 **chat de conteúdos**:
-The conversation the auxiliar de ensino has with the agent, from the _Lançar
-Conteúdo_ screen, to write the conteúdo of the aulas still empty in one mês or
-in a whole etapa. The agent reads the conversation, the anexos and the aulas
-de referência; the portal is never touched from it.
-_Avoid_: assistente, gerador, IA
+Conversation opened from _Lançar Conteúdo_ to draft conteúdo for aulas still empty within the escopo da conversa. Reads conversation, anexos, aulas already present in the portal and selected aulas de referência. Generates a rascunho de conteúdo per aula.
+_Avoid_: autonomous portal writing
 
 **escopo da conversa**:
-What a chat de conteúdos is about: one mês of an etapa, or the etapa inteira.
-Only the aulas in the escopo get rascunhos.
-_Avoid_: filtro, período
-
-**rascunho de conteúdo**:
-The conteúdo of one aula as the agent wrote it — código CR, desenvolvimento
-and ferramentas — before the auxiliar de ensino reviews it. Lives only on the
-screen: the preenchimento assistido prepares all aulas the auxiliar keeps
-marked, with a separate portal tab for each mês. The auxiliar reviews and
-saves there, then asks Esmeraldinha to verify the saved conteúdo in a fresh
-sessão do portal. Only verified aulas lose their rascunhos; pending ones stay.
-_Avoid_: sugestão, geração, draft
+One specific mês or an entire etapa. Generate rascunhos only for empty aulas within that scope.
 
 **aula de referência**:
-An aula that already has conteúdo, from another mês or etapa, that the auxiliar
-de ensino picks as a base for the agent — the professor's way of writing and
-the thread of what was taught. The aulas of the escopo already in the portal
-are a base by themselves, without being picked.
-_Avoid_: exemplo, template, modelo
+An aula with existing conteúdo selected by the auxiliar de ensino or professor as a model for writing style and didactic sequence. Existing aulas within the scope also provide context.
+
+**rascunho de conteúdo**:
+Proposed código CR, desenvolvimento and ferramentas for one aula, retained on screen for review. Not confirmed portal data.
+
+**preenchimento assistido**:
+Preparation of selected rascunhos in separate portal tabs for each mês. The authorized operator reviews and saves them in the portal. Preparation alone is not a confirmed write.
+
+**verificação**:
+After human review and saving, read the portal using a fresh sessão do portal to confirm the saved conteúdo. Remove only rascunhos for verified aulas; keep pending rascunhos on screen.
+
+**chat de notas**:
+Conversation opened from _Lançar Notas_ for one etapa and disciplina. The auxiliar de ensino or professor provides natural-language instructions, e.g. “a turma foi acima da média, menos o estudante X”. The agent proposes only notas finais da etapa. Apply the same classificação and deterministic distribution rules as the boletim grid. Nothing is sent directly to the portal before the operator checks it.
+
+**anexos**:
+Supporting inputs supplied by the professor or auxiliar de ensino in the applicable workflow, including text, images and PDF where supported. Keep them scoped to the authorized caderneta; do not infer that every file format is supported by every screen.
+
+## Requirements versus architecture decisions
+
+The current business document specifies portal CPF/senha login and local mandatory primeiro acesso. The small-installation [authentication migration guide](docs/architecture/authentication-migration.md) proposes independent application credentials through verified email enrollment in remote mode; this is not yet a business requirement and does not supersede the specified login. The core owns authorization and internal identity irrespective of the provider. Implementation and deployment details belong to architecture documentation.
+
+The current product has four users and one management installation. Do not read future organizations, subscriptions infrastructure or multi-tenant deployment as already implemented requirements. The paid plano is a business concept; its exact payment and entitlement lifecycle still needs specification. No additional pedagogical rules or provider-specific workflows should be inferred from this glossary.
