@@ -18,7 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useConta } from "@/components/conta-provider";
-import { entrarSchema, novaSenhaSchema, trocarSenha, MIN_SENHA } from "@/lib/conta";
+import { entrarSchema, novaSenhaSchema, trocarSenha, completarPrimeiroAcesso, MIN_SENHA } from "@/lib/conta";
 
 function mensagem(error: unknown, padrao: string): string {
   return error instanceof Error ? error.message : padrao;
@@ -117,6 +117,13 @@ function Moldura({
 /** A entrada na Esmeraldinha: sem sessão, é a única tela que existe. */
 export function TelaDeEntrada() {
   const { entrar } = useConta();
+  const [invitation, setInvitation] = React.useState(() => new URLSearchParams(window.location.hash.slice(1)).get("primeiro-acesso") ?? "");
+  const [showInvitation, setShowInvitation] = React.useState(() => new URLSearchParams(window.location.hash.slice(1)).has("primeiro-acesso"));
+  React.useEffect(() => {
+    if (new URLSearchParams(window.location.hash.slice(1)).has("primeiro-acesso")) {
+      window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+    }
+  }, []);
   const [login, setLogin] = React.useState("");
   const [senha, setSenha] = React.useState("");
   const [erro, setErro] = React.useState<string | null>(null);
@@ -142,14 +149,16 @@ export function TelaDeEntrada() {
     }
   }
 
+  if (showInvitation) return <AtivarConta invitation={invitation} onChange={setInvitation} onBack={() => { setInvitation(""); setShowInvitation(false); }} />;
+
   return (
     <Moldura
       titulo="Entrar na Esmeraldinha"
-      descricao="Entre com o login e a senha do auxiliar de ensino ou com seu CPF e senha do portal."
+      descricao="Entre com o login do auxiliar de ensino ou o e-mail e a senha da sua conta."
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <div className="flex flex-col gap-2">
-          <Label htmlFor="login">Login ou CPF</Label>
+          <Label htmlFor="login">Login ou e-mail</Label>
           <Input
             id="login"
             value={login}
@@ -172,6 +181,7 @@ export function TelaDeEntrada() {
           )}
           Entrar
         </Button>
+        <Button type="button" variant="ghost" onClick={() => setShowInvitation(true)}>Tenho um link de primeiro acesso</Button>
       </form>
     </Moldura>
   );
@@ -259,4 +269,48 @@ export function PrimeiroAcesso() {
       </form>
     </Moldura>
   );
+}
+
+/** Link redemption is a POST after explicit password choice, never on opening the URL. */
+function AtivarConta({ invitation, onChange, onBack }: { invitation: string; onChange: (value: string) => void; onBack: () => void }) {
+  const [senha, setSenha] = React.useState("");
+  const [confirmacao, setConfirmacao] = React.useState("");
+  const [erro, setErro] = React.useState<string | null>(null);
+  const [enviando, setEnviando] = React.useState(false);
+  const [concluido, setConcluido] = React.useState(false);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    let token = invitation.trim();
+    try {
+      const link = new URL(token);
+      token = new URLSearchParams(link.hash.slice(1)).get("primeiro-acesso") ?? "";
+    } catch { /* The raw token is accepted when pasted instead of the URL. */ }
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) { setErro("Link inválido."); return; }
+    if (senha.length < MIN_SENHA || senha.length > 128 || senha !== confirmacao) {
+      setErro("As senhas devem conferir e ter entre 8 e 128 caracteres."); return;
+    }
+    setEnviando(true); setErro(null);
+    try {
+      await completarPrimeiroAcesso(token, senha);
+      onChange(""); setSenha(""); setConfirmacao(""); setConcluido(true);
+    } catch (error) { setErro(mensagem(error, "Não foi possível ativar a conta.")); }
+    finally { setEnviando(false); }
+  }
+
+  return <Moldura titulo="Primeiro acesso" descricao="Defina a senha da sua conta Esmeraldinha. A senha do portal permanece separada.">
+    {concluido ? (
+      <div className="space-y-4"><p className="text-sm">Conta ativada. Entre com seu e-mail e a nova senha.</p><Button className="w-full" onClick={onBack}>Ir para o login</Button></div>
+    ) : (
+      <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
+        <Label htmlFor="activation-link">Link de primeiro acesso</Label>
+        <Input id="activation-link" type="password" autoComplete="off" value={invitation} onChange={(event) => onChange(event.target.value)} />
+        <CampoDeSenha id="activation-password" label="Nova senha" autoComplete="new-password" value={senha} onChange={setSenha} />
+        <CampoDeSenha id="activation-confirmation" label="Repita a senha" autoComplete="new-password" value={confirmacao} onChange={setConfirmacao} />
+        {erro && <Erro>{erro}</Erro>}
+        <Button type="submit" disabled={enviando}>{enviando ? "Ativando…" : "Ativar conta"}</Button>
+        <Button type="button" variant="ghost" disabled={enviando} onClick={onBack}>Voltar</Button>
+      </form>
+    )}
+  </Moldura>;
 }

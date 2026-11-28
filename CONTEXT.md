@@ -32,15 +32,18 @@ The account used by the auxiliar de ensino to enter Esmeraldinha, with login, se
 _Avoid_: perfil (when referring to the entire conta)
 
 **conta do professor**:
-The Esmeraldinha account of a professor with acesso direto do professor. Separate from the credenciais do professor: it exists only after the auxiliar de ensino provides it to a cadastrado professor, with the professor's e-mail and a senha temporária sent to that e-mail. Never reuses the portal senha.
+The Esmeraldinha account of a professor with acesso direto do professor. Separate from the credenciais do professor: it exists only after the auxiliar de ensino provides it to a cadastrado professor, with the professor's e-mail and a link de primeiro acesso. The professor defines their own senha definitiva. Never reuses the portal senha.
 _Avoid_: treating the conta do professor as the portal login
 
 **senha temporária**:
-The initial senha of a conta. For the conta do auxiliar de ensino in the local installation it comes from the environment; for a conta do professor it is generated when the auxiliar de ensino provides the conta and is sent to the professor's e-mail. Must be replaced by a senha definitiva before the rest of the application becomes accessible. Store the definitive password as a password hash, not plaintext.
+The initial senha of the local conta do auxiliar de ensino, defined in the environment. Must be replaced by a senha definitiva before the rest of the application becomes accessible. A conta do professor instead uses a link de primeiro acesso; no senha is sent by e-mail. Store definitive local passwords as hashes, not plaintext.
+
+**link de primeiro acesso**:
+An expiring, single-use secret issued by the auxiliar de ensino for a specific conta do professor. Opening the link does not activate access; defining the senha definitiva consumes it. Revocation, expiry or reissue invalidates the previous link. Only the intended professor should receive it.
 _Avoid_: senha padrão (after primeiro acesso)
 
 **primeiro acesso**:
-The mandatory troca of the senha temporária for a senha definitiva, for both papéis de acesso. While the temporary senha is active, no other application screen opens. For a professor, completing it grants access restricted to their own cadernetas, turmas and estudantes.
+For the local auxiliar de ensino, the mandatory troca of the senha temporária for a senha definitiva. For a professor, defining a senha definitiva with the link de primeiro acesso. No protected screen opens until the required step completes; the professor then signs in with e-mail and the new senha.
 _Avoid_: treating this as optional onboarding
 
 **sessão do auxiliar**:
@@ -255,6 +258,6 @@ Supporting inputs supplied by the professor or auxiliar de ensino in the applica
 
 ## Requirements versus architecture decisions
 
-Approved product decision (2026-11-28): application identity is separate from the credenciais do professor. The auxiliar de ensino provides a conta do professor with a senha temporária sent by e-mail; the professor completes the primeiro acesso and then sees only their own cadernetas, turmas and estudantes. The portal senha is never used as, or copied into, an application credential. The [authentication migration guide](docs/architecture/authentication-migration.md) describes how to implement it. The core owns authorization and internal identity irrespective of the provider. Implementation and deployment details belong to architecture documentation.
+Approved product decision (2026-11-28): application identity is separate from the credenciais do professor. The auxiliar de ensino provides a conta do professor through an expiring single-use link de primeiro acesso rather than sending a senha. The professor defines their own senha definitiva and then sees only their own cadernetas, turmas and estudantes. The portal senha is never used as, or copied into, an application credential. The [authentication migration guide](docs/architecture/authentication-migration.md) describes how to implement it. The core owns authorization and internal identity irrespective of the provider. Implementation and deployment details belong to architecture documentation.
 
 The current product has four users and one management installation. Do not read future organizations, subscriptions infrastructure or multi-tenant deployment as already implemented requirements. The paid plano is a business concept; its exact payment and entitlement lifecycle still needs specification. No additional pedagogical rules or provider-specific workflows should be inferred from this glossary.

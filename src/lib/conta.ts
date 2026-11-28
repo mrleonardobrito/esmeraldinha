@@ -96,3 +96,12 @@ export async function trocarSenha(input: NovaSenhaInput): Promise<Conta> {
   });
   return (await response.json()) as Conta;
 }
+
+/** Redeem the first-access link without opening a session. */
+export async function completarPrimeiroAcesso(token: string, senha: string): Promise<void> {
+  await requestApi("/api/conta/primeiro-acesso", {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ token, senha }),
+  });
+}

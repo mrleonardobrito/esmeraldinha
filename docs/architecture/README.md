@@ -119,7 +119,7 @@ A shared PostgreSQL database is acceptable, with module ownership and transactio
 - Existing caderneta access helper and financial response filter consume the centralized predicates.
 - Vitest unit coverage for the service and the local adapters, and a static boundary check for migrated modules.
 
-Not yet implemented: the conta do professor (senha temporária by e-mail and primeiro acesso for professores), the Supabase bundle and binding portal sessions to the actor.
+Local conta do professor now supports a single-use first-access link, independent email/password login, and atomic local activation. The auxiliary copies the link for private delivery. Not yet implemented: hosted e-mail delivery, the Supabase bundle, scoped cross-device data access and binding portal sessions to the actor.
 
 This is not a completed authorization redesign, provider migration, database migration, tenant implementation or security audit. Legacy generic route guards and response filtering remain as compatibility layers.
 

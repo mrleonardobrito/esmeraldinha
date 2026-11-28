@@ -123,3 +123,13 @@ export function readImageAsDataUrl(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+/** Generate a single-use first-access link. The caller must deliver it privately. */
+export async function createProfessorInvitation(id: string, email: string): Promise<{ token: string; expiresAt: string }> {
+  const response = await requestApi(`/api/professores/${id}/convite`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  return await response.json() as { token: string; expiresAt: string };
+}

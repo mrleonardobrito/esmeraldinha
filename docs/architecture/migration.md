@@ -48,9 +48,9 @@ Prioritize identity, access revocation, portal-session ownership and regression 
 
 The [authentication migration guide](authentication-migration.md) defines independent SQLite/local and Supabase adapters of identical core-owned async contracts. Migrate and test the local adapter first, then implement the remote bundle. Never silently fall back, dual-write or share concrete infrastructure across bundles. Identity/provider integration can move earlier if its required security gates and contract tests are complete. Single-installation remote hosting requires professor-level isolation; a second independent management customer requires organization isolation before onboarding. No new dependency, framework or queue is required for phases 0–2.
 
-## Known debt intentionally retained in phase 0
+## Known debt and progress after phase 0
 
-- `exigirSessao` currently checks professor existence but not `acessoLiberado`. A security-fix PR must reject existing tokens after suspension, including re-enable behavior.
+- 0001-auth rechecks active professor status and closes sessions on API suspension. Local first-access links are implemented; verify expiry, replay, revocation, and legacy CPF migration with tests. The remote provider and e-mail delivery remain pending.
 - Generic caderneta middleware inspects URL/body/query; migrate to explicit per-action checks with trusted ownership resolution. Keep current guards until replacements cover all routes.
 - Portal browser sessions are associated with professorId; bind them to actor/auth session and revalidate on resume. Do not assume logout already closes them.
 - Financial response filtering is a compatibility guard, not a final authorization design. Use explicit DTO projections and write permissions.

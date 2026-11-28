@@ -14,6 +14,9 @@ import {
 import { toast } from "sonner";
 
 import { ProfessorDetails } from "@/components/professor-details";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ProfessorForm } from "@/components/professor-form";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -47,6 +50,7 @@ import {
   maskCpf,
   updateProfessor,
   setProfessorAcesso,
+  createProfessorInvitation,
   type Professor,
   type ProfessorInput,
   type ProfessorUpdateInput,
@@ -59,6 +63,10 @@ type ListState =
   | { status: "ready" };
 
 export function Professores() {
+  const [invited, setInvited] = React.useState<Professor | null>(null);
+  const [invitationEmail, setInvitationEmail] = React.useState("");
+  const [invitationLink, setInvitationLink] = React.useState("");
+  const [invitationBusy, setInvitationBusy] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [professores, setProfessores] = React.useState<Professor[]>([]);
   const [listState, setListState] = React.useState<ListState>({
@@ -181,9 +189,69 @@ export function Professores() {
     }
   }
 
+  function openInvitation(professor: Professor) {
+    setInvited(professor);
+    setInvitationEmail("");
+    setInvitationLink("");
+  }
+
+  async function issueInvitation(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!invited || invitationBusy) return;
+    setInvitationBusy(true);
+    try {
+      const result = await createProfessorInvitation(invited.id, invitationEmail.trim());
+      const link = new URL(window.location.href);
+      link.pathname = "/";
+      link.search = "";
+      link.hash = `primeiro-acesso=${result.token}`;
+      setInvitationLink(link.toString());
+      setProfessores((current) => current.map((item) => item.id === invited.id ? { ...item, acessoLiberado: false } : item));
+      toast.success("Link gerado. Envie-o somente ao professor.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível gerar o link.");
+    } finally {
+      setInvitationBusy(false);
+    }
+  }
+
+  const invitationDialog = (
+    <Dialog open={invited !== null} onOpenChange={(open) => {
+      if (!open && !invitationBusy) { setInvited(null); setInvitationLink(""); }
+    }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Link de primeiro acesso</DialogTitle>
+          <DialogDescription>
+            {invited?.nome}: o link vale por 24 horas e só pode ser usado uma vez. Gerar outro link cancela o anterior e suspende a conta até a definição da nova senha.
+          </DialogDescription>
+        </DialogHeader>
+        {invitationLink ? (
+          <div className="space-y-3">
+            <Label htmlFor="invitation-link">Link privado</Label>
+            <Input id="invitation-link" readOnly value={invitationLink} onFocus={(event) => event.target.select()} />
+            <p className="text-sm text-muted-foreground">Envie por um canal privado. Nesta versão local, o professor precisa abrir o link ou colá-lo na tela de entrada da mesma instalação. O envio não é automático.</p>
+            <DialogFooter>
+              <Button onClick={async () => {
+                try { await navigator.clipboard.writeText(invitationLink); toast.success("Link copiado."); }
+                catch { toast.error("Selecione e copie o link manualmente."); }
+              }}>Copiar link</Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <form className="space-y-4" onSubmit={(event) => void issueInvitation(event)}>
+            <Label htmlFor="invitation-email">E-mail do professor</Label>
+            <Input id="invitation-email" type="email" required maxLength={254} value={invitationEmail} onChange={(event) => setInvitationEmail(event.target.value)} />
+            <DialogFooter><Button type="submit" disabled={invitationBusy}>{invitationBusy ? "Gerando…" : "Gerar link"}</Button></DialogFooter>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+
   async function handleAcesso(professor: Professor) {
     try {
-      const updated = await setProfessorAcesso(professor.id, !professor.acessoLiberado);
+      const updated = await setProfessorAcesso(professor.id, false);
       setProfessores((current) =>
         current.map((item) => (item.id === updated.id ? updated : item)),
       );
@@ -203,7 +271,8 @@ export function Professores() {
 
   const selected = professores.find((professor) => professor.id === selectedId);
   if (selected) return <>
-    <ProfessorDetails professor={selected} onBack={() => setSelectedId(null)} onEdit={() => openEditForm(selected)} onAccess={() => void handleAcesso(selected)} />
+    <ProfessorDetails professor={selected} onBack={() => setSelectedId(null)} onEdit={() => openEditForm(selected)} onAccess={() => openInvitation(selected)} />
+    {invitationDialog}
     <ProfessorForm open={isFormOpen} onOpenChange={setIsFormOpen} professor={editedProfessor} onSubmit={handleSubmit} isSubmitting={isSubmitting} />
   </>;
 
@@ -318,11 +387,11 @@ export function Professores() {
                             <IconPencil />
                             Editar
                           </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => openInvitation(professor)}>
+                            <IconLockOpen /> Gerar link de acesso
+                          </DropdownMenuItem>
                           <DropdownMenuItem onSelect={() => void handleAcesso(professor)}>
-                            {professor.acessoLiberado ? <IconLock /> : <IconLockOpen />}
-                            {professor.acessoLiberado
-                              ? "Revogar acesso ao sistema"
-                              : "Criar acesso ao sistema"}
+                            <IconLock /> Revogar acesso ou convite
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             disabled={relendo === professor.id}
@@ -358,6 +427,7 @@ export function Professores() {
         onSubmit={handleSubmit}
         isSubmitting={isSubmitting}
       />
+    {invitationDialog}
     </div>
   );
 }

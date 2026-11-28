@@ -1,6 +1,6 @@
 # Authentication migration — small-installation MVP
 
-Status: proposed, documentation only. Current scale: four users and one management installation. This is the default implementation guide, not a hypothetical SaaS target. Based on develop through architecture-foundation;
+Status: local link-based enrollment implemented; remote Supabase integration remains proposed. Current scale: four users and one management installation. This is the default implementation guide, not a hypothetical SaaS target. Based on develop through architecture-foundation;
 
 ## 1. Decision
 
@@ -54,7 +54,8 @@ Illustrative target signatures, not implemented in this document:
 ```typescript
 interface IdentityProvider {
   authenticate(input: LoginInput): Promise<VerifiedIdentity>;
-  provision(input: EnrollmentInput): Promise<ProvisionedIdentity>;
+  issueEnrollment(professorId: string, email: string): Promise<EnrollmentResult>;
+  completeEnrollment(token: string, senha: string): Promise<boolean>;
 }
 
 interface IdentityRepository {
@@ -65,7 +66,7 @@ interface IdentityRepository {
 }
 ```
 
-LoginInput, EnrollmentInput, VerifiedIdentity, ProvisionedIdentity and InternalUser are application-owned types. A verified identity is not an access grant. A provisioned identity is not necessarily verified. A provider subject is opaque and scoped to the configured provider/issuer. Use one provider per runtime; no need for a separate identity_links table. If an onboarding or recovery capability differs, make the difference explicit in the contract/UX; never claim verification that did not occur. Add recovery/logout provider methods only when those flows are wired. The provider adapter owns provider token handling, validation and cleanup; never expose refresh tokens to core entities or renderer.
+LoginInput, EnrollmentResult, VerifiedIdentity and InternalUser are application-owned types. A verified identity is not an access grant. A pending enrollment does not establish an authenticated identity. A provider subject is opaque and scoped to the configured provider/issuer. Use one provider per runtime; no need for a separate identity_links table. If an onboarding or recovery capability differs, make the difference explicit in the contract/UX; never claim verification that did not occur. Add recovery/logout provider methods only when those flows are wired. The provider adapter owns provider token handling, validation and cleanup; never expose refresh tokens to core entities or renderer.
 
 Implement both ports using the local stores first, then implement the Supabase versions. Use Promise even for SQLite; do not emulate SQLite SQL in Supabase. Return the same domain types and error semantics. A single save is atomic, with a revision check and unique constraints. No generic transaction abstraction is needed for a one-row access transition. Add a real transaction-specific method when a use case needs atomic changes across rows.
 
@@ -104,9 +105,11 @@ SQLite may retain conta/professores and add only the fields needed for the share
 
 ## 5. Simple onboarding and login
 
-The auxiliar chooses a registered professor, grants access and supplies the professor's e-mail. Hosted Hono checks the active auxiliary identity and the target professor, reserves a pending internal user, and calls the server-only provider adapter to create the identity with a generated senha temporária, which is sent to that e-mail. The professor signs in with e-mail and senha temporária and must complete the primeiro acesso (define a senha definitiva) before any other screen. Store the returned subject only against that reserved record; a matching email alone never establishes ownership. The professor accepts, authenticates and the core activates the pending user only if the binding is correct and the revision has not changed. A failed or uncertain invitation remains denied; with four users, reconcile manually rather than building a distributed provisioning system.
+The auxiliar chooses a registered professor and enters their e-mail. The authorized identity service issues a cryptographically random 32-byte single-use proof; the local adapter stores only its SHA-256 digest and a 24-hour expiry in professor_accounts. Issuing a link replaces the earlier proof and suspends access until completion. The professor opens or pastes the link, explicitly chooses a senha definitiva, and submits it to POST /api/conta/primeiro-acesso. The local adapter atomically consumes the proof, stores a scrypt password hash and activates the linked professor. Opening a GET or previewing a link never activates the account. The professor then signs in with e-mail and their own senha. Revocation invalidates pending links; expiry and reissue cannot revive them.
 
-Approved product decision: application identity is separate from the credenciais do professor. The professor enters Esmeraldinha with e-mail and an application senha, never with the portal senha; CPF and portal senha remain for the portal only. Do not copy portal senha into Supabase or trust an Electron assertion. The existing local CPF login stays only until the new flow replaces it.
+The local UI returns the link once to the authorized auxiliary for private manual delivery, and uses the URL fragment so the proof is not sent in a GET request. It is not a verified-email delivery service, and links work only against the same authoritative database. Hosted e-mail and cross-device access require the remote deployment. In the future Supabase adapter use a provider-supported invitation/password setup flow with approved redirect origins and verified identity binding; never send an initial password or duplicate provider credentials. Require active internal admission only after successful setup; reconcile failed invitations manually.
+
+Approved product decision: application identity is separate from the credenciais do professor. The professor enters Esmeraldinha with e-mail and an application senha, never with the portal senha; CPF and portal senha remain for the portal only. Do not copy portal senha into Supabase or trust an Electron assertion. Legacy CPF login remains only for previously unmigrated local records to preserve existing users; after a first-access link is issued for a professor it is permanently disabled for that professor. New grants require link completion. Remove the legacy path once all existing users migrate.
 
 On login, the provider proves identity; the core loads the matching internal user and requires active status; the application creates an opaque session. On suspension, the core saves suspended status with an incremented revision first, then invalidates sessions and closes/cancels related portal automation. Restore by an authorized action, increment revision and require a fresh authentication. Stale invitation acceptance cannot reactivate a suspended row. Do not require an event bus or durable provisioning journal for this.
 
@@ -148,4 +151,4 @@ Keep existing HTTP endpoints where possible. Use local provider tests and the sa
 | Durable provisioning journal or workers | Enrollment failures or throughput make manual reconciliation impractical |
 | Event bus/outbox, elaborate DDD, monorepo split | Real cross-module delivery, reliability or packaging requirements |
 
-This guide is documentation only. No schema, dependencies, deployed Supabase project or runtime code are changed. Verify current Supabase SDK/CLI docs before implementation: https://supabase.com/docs/guides/auth and https://supabase.com/docs/guides/database/postgres/row-level-security.
+Local SQLite enrollment and screens are implemented on 0001-auth; no Supabase schema, dependency or hosted project was changed. The remote English iam.users schema remains a proposal. Verify current Supabase SDK/CLI docs before implementation: https://supabase.com/docs/guides/auth and https://supabase.com/docs/guides/database/postgres/row-level-security.
