@@ -17,6 +17,7 @@ export type {
   AccessStatus,
   ApplicationSessions,
   IdentityProvider,
+  EnrollmentResult,
   IdentityRepository,
   InternalUser,
   LoginInput,

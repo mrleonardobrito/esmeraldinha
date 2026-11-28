@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
+import type { ContaEnv } from './conta/autenticacao';
 
 import { professorSchema, professorUpdateSchema } from '../shared/professor';
 import type { IdentityService } from './modules/identity';
@@ -16,7 +18,7 @@ import {
 
 
 export function createProfessoresRoutes(identity: IdentityService) {
-  const professores = new Hono();
+  const professores = new Hono<ContaEnv>();
 
   professores.get('/', (context) => {
     const list = listProfessores(getDb());
@@ -76,6 +78,17 @@ export function createProfessoresRoutes(identity: IdentityService) {
     }
   });
 
+  professores.post('/:id/convite', async (context) => {
+    const parsed = z.object({ email: z.email().max(254) }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Informe um e-mail válido.' }, 400);
+    const result = await identity.issueEnrollment(context.get('user'), context.req.param('id'), parsed.data.email);
+    if (result.status === 'access_denied') return context.json({ error: 'Acesso negado.' }, 403);
+    if (result.status === 'not_found') return context.json({ error: 'Professor não encontrado.' }, 404);
+    if (result.status !== 'issued') return context.json({ error: 'E-mail já utilizado.' }, 409);
+    context.header('Cache-Control', 'no-store');
+    return context.json({ token: result.token, expiresAt: result.expiresAt }, 201);
+  });
+
   professores.put('/:id/acesso', async (context) => {
     const body = await context.req.json().catch(() => null) as { liberado?: unknown } | null;
     if (typeof body?.liberado !== 'boolean') {
@@ -83,6 +96,9 @@ export function createProfessoresRoutes(identity: IdentityService) {
     }
 
     try {
+      if (body.liberado && !getDb().prepare('SELECT 1 FROM professor_accounts WHERE professor_id = ? AND password_hash IS NOT NULL').get(context.req.param('id'))) {
+        return context.json({ error: 'Gere um link de primeiro acesso para o professor.' }, 409);
+      }
       const professor = setProfessorAcesso(getDb(), context.req.param('id'), body.liberado);
       if (!body.liberado) await identity.closeProfessorSessions(professor.id);
       return context.json(professor);

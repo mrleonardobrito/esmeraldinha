@@ -34,6 +34,16 @@ export const SCHEMA = `
     created_at TEXT NOT NULL
   );
 
+  -- Independent application login and one outstanding first-access link.
+  CREATE TABLE IF NOT EXISTS professor_accounts (
+    professor_id TEXT PRIMARY KEY REFERENCES professores(id) ON DELETE CASCADE,
+    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT,
+    invitation_hash TEXT UNIQUE,
+    invitation_expires_at INTEGER,
+    CHECK ((invitation_hash IS NULL) = (invitation_expires_at IS NULL))
+  );
+
   -- Uma turma do professor, descoberta no portal durante o cadastro dele. É
   -- dona dos estudantes: eles são da turma, não da caderneta que a acompanha.
   CREATE TABLE IF NOT EXISTS turmas (

@@ -16,13 +16,22 @@ export type InternalUser = {
   readonly id: string;
   readonly status: AccessStatus;
   readonly mustChangePassword: boolean;
+  readonly email?: string;
 } & (
   | { readonly papel: 'auxiliar de ensino'; readonly contaId: string }
   | { readonly papel: 'professor'; readonly professorId: string }
 );
 
+export type EnrollmentResult =
+  | { status: 'issued'; token: string; expiresAt: string }
+  | { status: 'conflict' | 'not_found' };
+
 export interface IdentityProvider {
   authenticate(input: LoginInput): Promise<VerifiedIdentity | null>;
+  /** Reserve a pending account, invalidate the previous link and deny access until completion. */
+  issueEnrollment(professorId: string, email: string): Promise<EnrollmentResult>;
+  /** Verify and consume a proof atomically with setting the application password and activating access. */
+  completeEnrollment(token: string, senha: string): Promise<boolean>;
 }
 
 export interface IdentityRepository {

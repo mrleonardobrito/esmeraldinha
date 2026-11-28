@@ -212,10 +212,18 @@ export function setProfessorAcesso(
   id: string,
   liberado: boolean,
 ): Professor {
-  const result = db
-    .prepare('UPDATE professores SET acesso_liberado = ? WHERE id = ?')
-    .run(liberado ? 1 : 0, id);
-  if (result.changes === 0) throw new ProfessorNotFoundError(id);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const result = db.prepare('UPDATE professores SET acesso_liberado = ? WHERE id = ?').run(liberado ? 1 : 0, id);
+    if (result.changes === 0) throw new ProfessorNotFoundError(id);
+    if (!liberado) {
+      db.prepare('UPDATE professor_accounts SET invitation_hash = NULL, invitation_expires_at = NULL WHERE professor_id = ?').run(id);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
   return getProfessor(db, id)!;
 }
 

@@ -54,3 +54,8 @@ export const contaSchema = z.object({
 export type ContaInput = z.infer<typeof contaSchema>;
 
 export type ContaField = keyof ContaInput;
+
+export const primeiroAcessoProfessorSchema = z.object({
+  token: z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'Link inválido.'),
+  senha: z.string().min(MIN_SENHA, `A senha precisa ter pelo menos ${MIN_SENHA} caracteres.`).max(128),
+});

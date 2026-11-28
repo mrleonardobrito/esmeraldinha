@@ -7,12 +7,14 @@ import {
   isAuxiliarDeEnsino,
   type IdentidadeDaSessao,
   type IdentityService,
+  type InternalUser,
 } from '../modules/identity';
 
 /** O que a autenticação deixa no contexto para as rotas protegidas. */
 export interface ContaEnv {
   Variables: {
     identidade: IdentidadeDaSessao;
+    user: InternalUser;
     conta?: Conta;
     professor?: Professor;
     /** O token desta sessão, para sair e para poupá-la ao trocar a senha. */
@@ -51,6 +53,7 @@ export function createExigirSessao(identity: IdentityService): MiddlewareHandler
     }
 
     context.set('identidade', identidade);
+    context.set('user', resolved.user);
     context.set('token', token);
 
     await next();
@@ -66,8 +69,7 @@ export const exigirSenhaDefinitiva: MiddlewareHandler<ContaEnv> = async (
   context,
   next,
 ) => {
-  const conta = context.get('conta');
-  if (conta?.precisaTrocarSenha) {
+  if (context.get('user').mustChangePassword) {
     return context.json({ error: PRIMEIRO_ACESSO }, 403);
   }
 

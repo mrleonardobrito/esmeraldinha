@@ -32,12 +32,15 @@ export function createLocalIdentityRepository(db: () => DatabaseSync): IdentityR
   function professor(professorId: string): InternalUser | null {
     const found = getProfessor(db(), professorId);
     if (!found) return null;
+    const account = db().prepare('SELECT email, password_hash FROM professor_accounts WHERE professor_id = ?')
+      .get(professorId) as { email: string; password_hash: string | null } | undefined;
     return {
       id: found.id,
       papel: 'professor',
       professorId: found.id,
-      status: found.acessoLiberado ? 'active' : 'suspended',
-      mustChangePassword: false,
+      status: found.acessoLiberado && (!account || account.password_hash !== null) ? 'active' : 'suspended',
+      mustChangePassword: Boolean(account && !account.password_hash),
+      ...(account ? { email: account.email } : {}),
     };
   }
 

@@ -193,8 +193,16 @@ describe('conta do auxiliar de ensino', () => {
       senha: 'senha-do-portal',
       escola: 'Escola Municipal',
     });
-    setProfessorAcesso(getDb(), professor.id, true);
-    const { token } = (await (await app.fetch(entrar('senha-do-portal', professor.login))).json()) as {
+    const invite = await auxiliar.fetch(new Request(`http://localhost/api/professores/${professor.id}/convite`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'maria@example.test' }),
+    }));
+    expect(invite.status).toBe(201);
+    const { token: proof } = await invite.json() as { token: string };
+    const complete = await app.fetch(new Request('http://localhost/api/conta/primeiro-acesso', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: proof, senha: 'nova-senha-123' }),
+    }));
+    expect(complete.status).toBe(204);
+    const { token } = (await (await app.fetch(entrar('nova-senha-123', 'maria@example.test'))).json()) as {
       token: string;
     };
     const conta = () => app.fetch(comToken(new Request('http://localhost/api/conta'), token));
@@ -212,7 +220,7 @@ describe('conta do auxiliar de ensino', () => {
         }),
       );
     expect((await acesso(true)).status).toBe(200);
-    const { token: novo } = (await (await app.fetch(entrar('senha-do-portal', professor.login))).json()) as {
+    const { token: novo } = (await (await app.fetch(entrar('nova-senha-123', 'maria@example.test'))).json()) as {
       token: string;
     };
 

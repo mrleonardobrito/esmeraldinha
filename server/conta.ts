@@ -1,8 +1,8 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 
-import { contaSchema, entrarSchema, novaSenhaSchema } from '../shared/conta';
+import { contaSchema, entrarSchema, novaSenhaSchema, primeiroAcessoProfessorSchema } from '../shared/conta';
 import { pronounsSchema, type Pronouns } from '../shared/pronouns';
-import { exigirAuxiliarDeEnsino, type ContaEnv } from './conta/autenticacao';
+import { exigirAuxiliarDeEnsino, exigirSenhaDefinitiva, type ContaEnv } from './conta/autenticacao';
 import { textoConfere } from './conta/senhas';
 import {
   atualizarConta,
@@ -11,20 +11,21 @@ import {
   lerConta,
 } from './conta/store';
 import { env } from './env';
-import type { IdentidadeDaSessao, IdentityService } from './modules/identity';
+import type { IdentidadeDaSessao, IdentityService, InternalUser } from './modules/identity';
 import { getDb } from './professores/db';
 import { getProfessor } from './professores/store';
 
 const CREDENCIAIS_INVALIDAS = 'Login ou senha incorretos.';
 
-function contaDaIdentidade(identidade: IdentidadeDaSessao) {
+function contaDaIdentidade(identidade: IdentidadeDaSessao, user: InternalUser) {
   if (identidade.papel === 'auxiliar de ensino') {
     return { ...lerConta(getDb())!, papel: identidade.papel };
   }
   return {
     ...getProfessor(getDb(), identidade.professorId)!,
-    email: '',
-    precisaTrocarSenha: false,
+    email: user.email ?? '',
+    ...(user.email ? { login: user.email } : {}),
+    precisaTrocarSenha: user.mustChangePassword,
     papel: identidade.papel,
     professorId: identidade.professorId,
     pronouns: readPronouns(identidade.professorId),
@@ -45,7 +46,7 @@ export function createContaRoutes(
 ) {
   const conta = new Hono<ContaEnv>();
 
-  conta.put('/pronouns', exigirSessao, async (context) => {
+  conta.put('/pronouns', exigirSessao, exigirSenhaDefinitiva, async (context) => {
     const identidade = context.get('identidade');
     if (identidade.papel !== 'professor') return context.json({ error: 'Access denied.' }, 403);
     const parsed = pronounsSchema.safeParse(await context.req.json().catch(() => null));
@@ -82,12 +83,23 @@ export function createContaRoutes(
       );
     }
 
-    return context.json({ token: result.token, conta: contaDaIdentidade(result.identidade) });
+    return context.json({ token: result.token, conta: contaDaIdentidade(result.identidade, result.user) });
+  });
+
+  /** First access consumes a link only on POST after the professor chooses a password. */
+  conta.post('/primeiro-acesso', async (context) => {
+    context.header('Cache-Control', 'no-store');
+    const parsed = primeiroAcessoProfessorSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' }, 400);
+    if (!(await identity.completeEnrollment(parsed.data.token, parsed.data.senha))) {
+      return context.json({ error: 'Link inválido, expirado ou já utilizado.' }, 422);
+    }
+    return context.body(null, 204);
   });
 
   /** A conta de quem está na sessão. É como o app sabe se ainda está logado. */
   conta.get('/', exigirSessao, (context) =>
-    context.json(contaDaIdentidade(context.get('identidade'))),
+    context.json(contaDaIdentidade(context.get('identidade'), context.get('user'))),
   );
 
   /** Sair: a sessão desta janela é encerrada e o token não vale mais. */
@@ -97,7 +109,7 @@ export function createContaRoutes(
   });
 
   /** Nome, e-mail e foto do perfil. O login não se edita. */
-  conta.put('/', exigirSessao, exigirAuxiliarDeEnsino, async (context) => {
+  conta.put('/', exigirSessao, exigirSenhaDefinitiva, exigirAuxiliarDeEnsino, async (context) => {
     const body = await context.req.json().catch(() => null);
     const parsed = contaSchema.safeParse(body);
 

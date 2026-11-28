@@ -1,6 +1,7 @@
 import type { IdentidadeDaSessao } from '../domain/identidade';
 import type {
   ApplicationSessions,
+  EnrollmentResult,
   IdentityProvider,
   IdentityRepository,
   InternalUser,
@@ -36,6 +37,22 @@ function sameIdentidade(a: IdentidadeDaSessao, b: IdentidadeDaSessao): boolean {
 
 export function createIdentityService({ provider, repository, sessions }: IdentityDependencies) {
   return {
+    async issueEnrollment(actor: InternalUser, professorId: string, email: string): Promise<EnrollmentResult | { status: 'access_denied' }> {
+      const current = await repository.findById(actor.id);
+      if (!current || current.papel !== 'auxiliar de ensino' || current.status !== 'active' || current.mustChangePassword) {
+        return { status: 'access_denied' };
+      }
+      const target = await repository.findByProfessor(professorId);
+      if (!target) return { status: 'not_found' };
+      const result = await provider.issueEnrollment(professorId, email);
+      if (result.status === 'issued') sessions.closeForUser(target.id);
+      return result;
+    },
+
+    async completeEnrollment(token: string, senha: string): Promise<boolean> {
+      return provider.completeEnrollment(token, senha);
+    },
+
     async signIn(input: LoginInput): Promise<SignInResult> {
       const verified = await provider.authenticate(input);
       if (!verified) return { status: 'invalid_credentials' };

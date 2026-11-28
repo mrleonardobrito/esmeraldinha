@@ -61,6 +61,8 @@ function setup() {
   const sessions = memorySessions();
   const identity = createIdentityService({
     provider: {
+      async issueEnrollment() { return { status: 'conflict' }; },
+      async completeEnrollment() { return false; },
       async authenticate({ login, senha }) {
         const entry = passwords.get(login);
         return entry?.senha === senha ? { subject: entry.subject } : null;
