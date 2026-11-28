@@ -13,7 +13,7 @@ The person responsible for centralized management at the escola. Registers profe
 _Avoid_: assistant, operador, admin
 
 **professor**:
-The owner of a caderneta. May have an auxiliar de ensino fill it on their behalf or purchase direct access to Esmeraldinha and independently view, fill and manage only their own cadernetas. The specified direct login uses the same CPF and senha as the portal.
+The owner of a caderneta. May have an auxiliar de ensino fill it on their behalf or purchase direct access to Esmeraldinha and independently view, fill and manage only their own cadernetas, turmas and estudantes. The professor's credenciais do professor (CPF and portal senha) keep working for the portal; entering Esmeraldinha uses a separate conta do professor.
 _Avoid_: teacher, docente
 
 **papel de acesso**:
@@ -31,12 +31,16 @@ _Avoid_: treating cadastro, plano and papel de acesso as equivalent
 The account used by the auxiliar de ensino to enter Esmeraldinha, with login, senha, nome, e-mail and foto. The present installation has a single management account; that deployment assumption is not a general business rule.
 _Avoid_: perfil (when referring to the entire conta)
 
+**conta do professor**:
+The Esmeraldinha account of a professor with acesso direto do professor. Separate from the credenciais do professor: it exists only after the auxiliar de ensino provides it to a cadastrado professor, with the professor's e-mail and a senha temporária sent to that e-mail. Never reuses the portal senha.
+_Avoid_: treating the conta do professor as the portal login
+
 **senha temporária**:
-The initial local conta senha, defined in the environment. Must be replaced by a senha definitiva before the rest of the application becomes accessible. Store the definitive password as a password hash, not plaintext.
+The initial senha of a conta. For the conta do auxiliar de ensino in the local installation it comes from the environment; for a conta do professor it is generated when the auxiliar de ensino provides the conta and is sent to the professor's e-mail. Must be replaced by a senha definitiva before the rest of the application becomes accessible. Store the definitive password as a password hash, not plaintext.
 _Avoid_: senha padrão (after primeiro acesso)
 
 **primeiro acesso**:
-The mandatory troca of the senha temporária for a senha definitiva. While the temporary senha is active, no other application screen opens.
+The mandatory troca of the senha temporária for a senha definitiva, for both papéis de acesso. While the temporary senha is active, no other application screen opens. For a professor, completing it grants access restricted to their own cadernetas, turmas and estudantes.
 _Avoid_: treating this as optional onboarding
 
 **sessão do auxiliar**:
@@ -251,6 +255,6 @@ Supporting inputs supplied by the professor or auxiliar de ensino in the applica
 
 ## Requirements versus architecture decisions
 
-The current business document specifies portal CPF/senha login and local mandatory primeiro acesso. The small-installation [authentication migration guide](docs/architecture/authentication-migration.md) proposes independent application credentials through verified email enrollment in remote mode; this is not yet a business requirement and does not supersede the specified login. The core owns authorization and internal identity irrespective of the provider. Implementation and deployment details belong to architecture documentation.
+Approved product decision (2026-11-28): application identity is separate from the credenciais do professor. The auxiliar de ensino provides a conta do professor with a senha temporária sent by e-mail; the professor completes the primeiro acesso and then sees only their own cadernetas, turmas and estudantes. The portal senha is never used as, or copied into, an application credential. The [authentication migration guide](docs/architecture/authentication-migration.md) describes how to implement it. The core owns authorization and internal identity irrespective of the provider. Implementation and deployment details belong to architecture documentation.
 
 The current product has four users and one management installation. Do not read future organizations, subscriptions infrastructure or multi-tenant deployment as already implemented requirements. The paid plano is a business concept; its exact payment and entitlement lifecycle still needs specification. No additional pedagogical rules or provider-specific workflows should be inferred from this glossary.

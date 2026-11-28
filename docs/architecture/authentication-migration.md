@@ -1,6 +1,6 @@
 # Authentication migration — small-installation MVP
 
-Status: proposed, documentation only. Current scale: four users and one management installation. This is the default implementation guide, not a hypothetical SaaS target. Based on develop through architecture-foundation; feat/supabase-migration is excluded.
+Status: proposed, documentation only. Current scale: four users and one management installation. This is the default implementation guide, not a hypothetical SaaS target. Based on develop through architecture-foundation;
 
 ## 1. Decision
 
@@ -104,9 +104,9 @@ SQLite may retain conta/professores and add only the fields needed for the share
 
 ## 5. Simple onboarding and login
 
-The auxiliar chooses a registered professor, grants access and supplies the verified-contact destination required by the chosen enrollment flow. Hosted Hono checks the active auxiliary identity and the target professor, reserves a pending internal user, and calls the server-only provider adapter to send an invitation. Supabase Auth manages the invitation and verification. Store the returned subject only against that reserved record; a matching email alone never establishes ownership. The professor accepts, authenticates and the core activates the pending user only if the binding is correct and the revision has not changed. A failed or uncertain invitation remains denied; with four users, reconcile manually rather than building a distributed provisioning system.
+The auxiliar chooses a registered professor, grants access and supplies the professor's e-mail. Hosted Hono checks the active auxiliary identity and the target professor, reserves a pending internal user, and calls the server-only provider adapter to create the identity with a generated senha temporária, which is sent to that e-mail. The professor signs in with e-mail and senha temporária and must complete the primeiro acesso (define a senha definitiva) before any other screen. Store the returned subject only against that reserved record; a matching email alone never establishes ownership. The professor accepts, authenticates and the core activates the pending user only if the binding is correct and the revision has not changed. A failed or uncertain invitation remains denied; with four users, reconcile manually rather than building a distributed provisioning system.
 
-For remote mode, prefer a verified email invitation and independent application password or OTP. The current CONTEXT.md specifies CPF plus portal senha; changing to email is a proposed UX change and needs product approval. If the current UX is mandatory, design trusted portal identity validation and a supported exchange before remote launch. Do not copy portal senha into Supabase or trust an Electron assertion. The existing local login can stay during the refactor, but is not live portal validation.
+Approved product decision: application identity is separate from the credenciais do professor. The professor enters Esmeraldinha with e-mail and an application senha, never with the portal senha; CPF and portal senha remain for the portal only. Do not copy portal senha into Supabase or trust an Electron assertion. The existing local CPF login stays only until the new flow replaces it.
 
 On login, the provider proves identity; the core loads the matching internal user and requires active status; the application creates an opaque session. On suspension, the core saves suspended status with an incremented revision first, then invalidates sessions and closes/cancels related portal automation. Restore by an authorized action, increment revision and require a fresh authentication. Stale invitation acceptance cannot reactivate a suspended row. Do not require an event bus or durable provisioning journal for this.
 
