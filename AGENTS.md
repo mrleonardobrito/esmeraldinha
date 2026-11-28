@@ -38,3 +38,8 @@ The five canonical roles, used verbatim as `Status:` values. See `docs/agents/tr
 ### Domain docs
 
 Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+
+## Architecture and incremental migration
+
+Read [architecture](docs/architecture/README.md) and [migration guide](docs/architecture/migration.md) before moving backend functionality. New or migrated slices belong in `server/modules/`; consume their public `index.ts` only. Preserve HTTP contracts and persisted IDs during structural changes. Do not add empty layers, replace providers, or change business rules as a side effect of a refactor. Keep the domain independent of Hono, Electron, SQLite and Playwright. Run the existing tests and architecture checks before merging.

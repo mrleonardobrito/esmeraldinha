@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto';
 
 import { env } from '../env';
+import type { IdentidadeDaSessao } from '../modules/identity';
+
+// Compatibility export for existing callers.
+export type { IdentidadeDaSessao } from '../modules/identity';
 
 /**
  * A sessão do auxiliar de ensino — não confundir com a sessão do portal, que
@@ -11,10 +15,6 @@ import { env } from '../env';
  * app fecha ao sair, e uma sessão que não sobrevive a isso é exatamente o
  * que se quer de um app que guarda as credenciais dos professores.
  */
-export type IdentidadeDaSessao =
-  | { readonly papel: 'auxiliar de ensino'; readonly contaId: string }
-  | { readonly papel: 'professor'; readonly professorId: string };
-
 interface SessaoDaEsmeraldinha {
   readonly identidade: IdentidadeDaSessao;
   expiraEm: number;

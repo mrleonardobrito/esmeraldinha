@@ -1,3 +1,4 @@
+import { canAccessProfessor } from './modules/identity';
 import { Hono } from 'hono';
 import { restringirValores } from './conta/valores';
 import { z } from 'zod';
@@ -157,8 +158,7 @@ cadernetas.onError((error, context) => {
 });
 
 function acessoAoProfessor(context: { get: (key: 'identidade') => ContaEnv['Variables']['identidade'] }, professorId: string) {
-  const identidade = context.get('identidade');
-  return identidade.papel === 'auxiliar de ensino' || identidade.professorId === professorId;
+  return canAccessProfessor(context.get('identidade'), professorId);
 }
 
 /**

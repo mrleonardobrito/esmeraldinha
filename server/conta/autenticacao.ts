@@ -3,7 +3,8 @@ import type { MiddlewareHandler } from 'hono';
 import { getDb } from '../professores/db';
 import { lerConta, type Conta } from './store';
 import { getProfessor, type Professor } from '../professores/store';
-import { usarSessao, type IdentidadeDaSessao } from './sessoes';
+import { usarSessao } from './sessoes';
+import { isAuxiliarDeEnsino, resolveSession, type IdentidadeDaSessao } from '../modules/identity';
 
 /** O que a autenticação deixa no contexto para as rotas protegidas. */
 export interface ContaEnv {
@@ -31,21 +32,18 @@ function lerToken(header: string | undefined): string | null {
  */
 export const exigirSessao: MiddlewareHandler<ContaEnv> = async (context, next) => {
   const token = lerToken(context.req.header('Authorization'));
-  const identidade = token ? usarSessao(token) : null;
+  const resolved = token ? resolveSession(token, {
+    readSession: usarSessao,
+    readConta: () => lerConta(getDb()),
+    readProfessor: (id) => getProfessor(getDb(), id),
+  }) : null;
 
-  if (!token || !identidade) return context.json({ error: SEM_SESSAO }, 401);
+  if (!token || !resolved) return context.json({ error: SEM_SESSAO }, 401);
 
-  if (identidade.papel === 'auxiliar de ensino') {
-    const conta = lerConta(getDb());
-    if (!conta || conta.id !== identidade.contaId) return context.json({ error: SEM_SESSAO }, 401);
-    context.set('conta', conta);
-  } else {
-    const professor = getProfessor(getDb(), identidade.professorId);
-    if (!professor) return context.json({ error: SEM_SESSAO }, 401);
-    context.set('professor', professor);
-  }
+  if ('conta' in resolved) context.set('conta', resolved.conta);
+  else context.set('professor', resolved.professor);
 
-  context.set('identidade', identidade);
+  context.set('identidade', resolved.identidade);
   context.set('token', token);
 
   await next();
@@ -70,7 +68,7 @@ export const exigirSenhaDefinitiva: MiddlewareHandler<ContaEnv> = async (
 
 /** Operações de gestão pertencem exclusivamente ao auxiliar de ensino. */
 export const exigirAuxiliarDeEnsino: MiddlewareHandler<ContaEnv> = async (context, next) => {
-  if (context.get('identidade').papel !== 'auxiliar de ensino') {
+  if (!isAuxiliarDeEnsino(context.get('identidade'))) {
     return context.json({ error: 'Esta ação é exclusiva do auxiliar de ensino.' }, 403);
   }
   await next();
