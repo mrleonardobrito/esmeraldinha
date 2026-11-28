@@ -42,7 +42,7 @@ Keep compatibility exports until all callers are migrated. Avoid a folder-only r
 | 9 | deployment and observability | Cloud authorization and validated client results; job durability/outbox only where needed; audit and operational metrics |
 | 10 | workspace evolution | Separate apps/packages only when executable boundaries justify it; retire shims and tighten CI rules |
 
-Identity/provider integration can move earlier if its required security gates and contract tests are complete. Shared data hosting must not precede organization isolation. No new dependency, framework or queue is required for phases 0–2.
+The [authentication migration guide](authentication-migration.md) defines independent SQLite/local and Supabase adapters of identical core-owned async contracts. Migrate and test the local adapter first, then implement the remote bundle. Never silently fall back, dual-write or share concrete infrastructure across bundles. Identity/provider integration can move earlier if its required security gates and contract tests are complete. Shared data hosting must not precede organization isolation. No new dependency, framework or queue is required for phases 0–2.
 
 ## Known debt intentionally retained in phase 0
 

@@ -43,7 +43,7 @@ These are candidate ownership boundaries, not a mandate to create separate packa
 | operations | durable job lifecycle, sync, cancellation, retry and verification | existing synchronization and assisted filling routes |
 | organizations / subscriptions / audit | future access scope, entitlements and traceability | not assumed to exist today |
 
-Keep authorization within identity initially; extract a separate authorization module only if the policy surface warrants it. A professor may exist without an Esmeraldinha identity. Before shared hosting, replace the single conta assumption with explicit organization memberships and grants.
+Core identity, authentication workflows and authorization records remain provider-independent. Local SQLite/auth and Supabase infrastructure implement the same asynchronous application-owned ports. Their physical schemas may differ; map at the boundary and select the bundle only in composition. See [authentication migration](authentication-migration.md). Keep authorization within identity initially; extract a separate authorization module only if the policy surface warrants it. A professor may exist without an Esmeraldinha identity. Before shared hosting, replace the single conta assumption with explicit organization memberships and grants.
 
 ## Module anatomy
 
@@ -101,4 +101,4 @@ A shared PostgreSQL database is acceptable, with module ownership and transactio
 
 This is not a completed authorization redesign, provider migration, database migration, tenant implementation or security audit. Legacy generic route guards and response filtering remain as compatibility layers.
 
-See [migration guide](migration.md) and [ADR 0001](../adr/0001-modular-monolith.md).
+See [migration guide](migration.md), [authentication migration](authentication-migration.md) and [ADR 0001](../adr/0001-modular-monolith.md).
