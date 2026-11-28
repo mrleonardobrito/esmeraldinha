@@ -68,6 +68,14 @@ export function encerrarSessao(token: string): void {
  * Encerra todas as sessões da conta. Trocar a senha passa por aqui: uma
  * senha nova não deve deixar sessões antigas abertas por aí.
  */
+export function encerrarSessoesDoProfessor(professorId: string): void {
+  for (const [token, sessao] of sessoes) {
+    if (sessao.identidade.papel === 'professor' && sessao.identidade.professorId === professorId) {
+      sessoes.delete(token);
+    }
+  }
+}
+
 export function encerrarSessoesDaConta(contaId: string, exceto?: string): void {
   for (const [token, sessao] of sessoes) {
     if (

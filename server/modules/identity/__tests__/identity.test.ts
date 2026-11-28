@@ -24,7 +24,7 @@ describe('resolveSession', () => {
     return {
       readSession: vi.fn((_token: string) => identity),
       readConta: vi.fn((): { id: string } | null => ({ id: 'conta-a' })),
-      readProfessor: vi.fn((id: string): { id: string } | null => ({ id })),
+      readProfessor: vi.fn((id: string): { id: string; acessoLiberado: boolean } | null => ({ id, acessoLiberado: true })),
     };
   }
 
@@ -46,10 +46,16 @@ describe('resolveSession', () => {
 
   it('loads the professor from the authenticated identity and rejects a missing professor', () => {
     const ports = readers(professor);
-    expect(resolveSession('token', ports)).toEqual({ identidade: professor, professor: { id: 'professor-a' } });
+    expect(resolveSession('token', ports)).toEqual({ identidade: professor, professor: { id: 'professor-a', acessoLiberado: true } });
     expect(ports.readProfessor).toHaveBeenCalledWith('professor-a');
     expect(ports.readConta).not.toHaveBeenCalled();
     ports.readProfessor.mockReturnValue(null);
+    expect(resolveSession('token', ports)).toBeNull();
+  });
+
+  it('rejects an existing session once the professor access is suspended', () => {
+    const ports = readers(professor);
+    ports.readProfessor.mockReturnValue({ id: 'professor-a', acessoLiberado: false });
     expect(resolveSession('token', ports)).toBeNull();
   });
 });

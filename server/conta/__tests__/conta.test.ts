@@ -179,6 +179,48 @@ describe('conta do auxiliar de ensino', () => {
     }
   });
 
+  it('denies an existing professor session after the access is suspended, even if restored', async () => {
+    process.env.ESMERALDINHA_ENCRYPTION_KEY = 'chave-de-teste-para-professor';
+    const app = await freshApp();
+    const auxiliar = await autenticar(app);
+    const { createEncryptionPort } = await import('../../encryption');
+    const { createProfessor, setProfessorAcesso } = await import('../../professores/store');
+    const { getDb } = await import('../../professores/db');
+
+    const professor = await createProfessor(getDb(), createEncryptionPort(), {
+      nome: 'Maria Professora',
+      login: '52998224725',
+      senha: 'senha-do-portal',
+      escola: 'Escola Municipal',
+    });
+    setProfessorAcesso(getDb(), professor.id, true);
+    const { token } = (await (await app.fetch(entrar('senha-do-portal', professor.login))).json()) as {
+      token: string;
+    };
+    const conta = () => app.fetch(comToken(new Request('http://localhost/api/conta'), token));
+    expect((await conta()).status).toBe(200);
+
+    setProfessorAcesso(getDb(), professor.id, false);
+    expect((await conta()).status).toBe(401);
+
+    const acesso = (liberado: boolean) =>
+      auxiliar.fetch(
+        new Request(`http://localhost/api/professores/${professor.id}/acesso`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ liberado }),
+        }),
+      );
+    expect((await acesso(true)).status).toBe(200);
+    const { token: novo } = (await (await app.fetch(entrar('senha-do-portal', professor.login))).json()) as {
+      token: string;
+    };
+
+    expect((await acesso(false)).status).toBe(200);
+    expect((await acesso(true)).status).toBe(200);
+    expect((await app.fetch(comToken(new Request('http://localhost/api/conta'), novo))).status).toBe(401);
+  });
+
   it('depois da troca, só a senha definitiva entra', async () => {
     const app = await freshApp();
     await autenticar(app);

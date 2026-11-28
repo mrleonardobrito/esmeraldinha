@@ -10,6 +10,10 @@ export function canAccessProfessor(identity: IdentidadeDaSessao, professorId: st
   return identity.papel === 'auxiliar de ensino' || identity.professorId === professorId;
 }
 
+export function hasDirectAccess(professor: { acessoLiberado: boolean }): boolean {
+  return professor.acessoLiberado;
+}
+
 export function canReadFinancialValues(identity: IdentidadeDaSessao): boolean {
   return isAuxiliarDeEnsino(identity);
 }

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 
 import { professorSchema, professorUpdateSchema } from '../shared/professor';
+import { encerrarSessoesDoProfessor } from './conta/sessoes';
 import { createEncryptionPort } from './encryption';
 import { getDb } from './professores/db';
 import {
@@ -80,9 +81,9 @@ professores.put('/:id/acesso', async (context) => {
   }
 
   try {
-    return context.json(
-      setProfessorAcesso(getDb(), context.req.param('id'), body.liberado),
-    );
+    const professor = setProfessorAcesso(getDb(), context.req.param('id'), body.liberado);
+    if (!body.liberado) encerrarSessoesDoProfessor(professor.id);
+    return context.json(professor);
   } catch (error) {
     if (error instanceof ProfessorNotFoundError) {
       return context.json({ error: error.message }, 404);
@@ -96,6 +97,7 @@ professores.delete('/:id', (context) => {
 
   try {
     deleteProfessor(getDb(), id);
+    encerrarSessoesDoProfessor(id);
     return context.body(null, 204);
   } catch (error) {
     if (error instanceof ProfessorNotFoundError) {

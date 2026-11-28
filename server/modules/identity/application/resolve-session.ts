@@ -1,7 +1,8 @@
+import { hasDirectAccess } from '../domain/access-policy';
 import type { IdentidadeDaSessao } from '../domain/identidade';
 
 /** Read ports for the current synchronous desktop implementation. */
-export interface SessionReaders<Conta extends { id: string }, Professor> {
+export interface SessionReaders<Conta extends { id: string }, Professor extends { acessoLiberado: boolean }> {
   readSession(token: string): IdentidadeDaSessao | null;
   readConta(): Conta | null;
   readProfessor(id: string): Professor | null;
@@ -12,7 +13,7 @@ export type ResolvedSession<Conta, Professor> =
   | { identidade: Extract<IdentidadeDaSessao, { papel: 'professor' }>; professor: Professor };
 
 /** Resolves the existing session without depending on Hono or SQLite. */
-export function resolveSession<Conta extends { id: string }, Professor>(
+export function resolveSession<Conta extends { id: string }, Professor extends { acessoLiberado: boolean }>(
   token: string,
   readers: SessionReaders<Conta, Professor>,
 ): ResolvedSession<Conta, Professor> | null {
@@ -25,5 +26,5 @@ export function resolveSession<Conta extends { id: string }, Professor>(
   }
 
   const professor = readers.readProfessor(identidade.professorId);
-  return professor ? { identidade, professor } : null;
+  return professor && hasDirectAccess(professor) ? { identidade, professor } : null;
 }
