@@ -30,7 +30,7 @@ export const env = {
   openrouter: {
     apiKey: process.env.OPENROUTER_API_KEY?.trim() ?? '',
     /** Precisa aceitar imagem e PDF: é isso que o professor manda. */
-    model: process.env.OPENROUTER_MODEL?.trim() || 'google/gemini-2.5-flash',
+    model: process.env.OPENROUTER_MODEL?.trim() || 'google/gemini-2.5-flash-lite',
     baseUrl:
       process.env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1',
   },
